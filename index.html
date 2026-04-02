@@ -281,7 +281,7 @@ canvas{width:100%!important;border-radius:4px}
 
 <header class="hdr"><div class="hdr-in">
 <div class="logo"><div class="logo-g"><div class="logo-g-i">⚡</div></div><div><div class="logo-t">NEXUS</div><div class="logo-sub">PROFESSIONAL</div></div></div>
-<div class="hdr-r"><div class="hdr-live">LIVE</div><button class="lang-btn" id="langB" onclick="togLang()">EN</button><div class="ic-b notif" data-c="0" id="notifB" onclick="sp('me')">🔔</div><div class="ic-b" id="thB" onclick="togTh()">🌙</div></div>
+<div class="hdr-r"><div class="hdr-live">LIVE</div><button class="lang-btn" id="langB" onclick="togLang()">EN</button><div class="ic-b notif" data-c="0" id="notifB">🔔</div><div class="ic-b" id="thB" onclick="togTh()">🌙</div></div>
 </div></header>
 
 <div class="srch" style="position:relative"><div class="srch-b"><span style="color:var(--t3)">🔍</span><input id="sInp" oninput="onSrch(this.value)"></div><div class="srch-r" id="sRes"></div></div>
@@ -289,82 +289,55 @@ canvas{width:100%!important;border-radius:4px}
 <div class="pls-bar">
 <div class="pls-i">🏥 <span id="pMH" style="font-weight:700;color:var(--neon)">--</span>/100</div>
 <div class="pls-i">😰 <span id="pFG" style="font-weight:700;color:var(--warn)">--</span></div>
-<div class="pls-i">🔥 <span id="pBrk" style="font-weight:700;color:var(--dn)">0</span> <span data-t="brk_label">انفجار</span></div>
+<div class="pls-i">🔥 <span id="pBrk" style="font-weight:700;color:var(--dn)">0</span></div>
 <div class="pls-i">⭐ <span id="pUl" style="font-weight:700;color:var(--ultra)">0</span></div>
 <div class="pls-i">FR <span id="pFR" style="font-weight:700;color:var(--warn)">--</span></div>
 </div>
 
 <div class="tkr"><div class="tkr-s" id="tkrEl">⏳</div></div>
 
-<div class="app">
-<nav class="sidebar"><div class="side-b act" data-p="dash"><span class="s-ic">🏠</span><span data-t="nav_home">الرئيسية</span></div><div class="side-b" data-p="scan"><span class="s-ic">📡</span><span data-t="nav_scan">السكانر</span></div><div class="side-b" data-p="intel"><span class="s-ic">🐋</span><span data-t="nav_intel">ذكاء</span></div><div class="side-b" data-p="market"><span class="s-ic">📊</span><span data-t="nav_market">السوق</span></div><div class="side-b" data-p="me"><span class="s-ic">👤</span><span data-t="nav_me">حسابي</span></div></nav>
+<div class="app"><main class="main">
 
-<main class="main">
-
-<!-- 🏠 HOME -->
+<!-- 🏠 HOME: Clean = Health + Stats + Warnings + ULTRA + L/S + Accuracy -->
 <div class="pg act" id="pg-dash">
-
-<!-- MARKET HEALTH -->
-<div class="mh" id="mhCard">
-<div class="mst-lbl" data-t="market_health">🏥 صحة السوق</div>
-<div class="mh-score" id="mhScore" style="color:var(--warn)">--</div>
-<div class="mh-label" id="mhLabel">...</div>
-<div class="mh-bar"><div class="mh-pt" id="mhPt" style="left:50%"></div></div>
-<div class="mh-factors" id="mhFactors"></div>
-</div>
-
-<!-- SMART WARNINGS -->
+<div class="mh" id="mhCard"><div class="mst-lbl" data-t="market_health">🏥 صحة السوق</div><div class="mh-score" id="mhScore" style="color:var(--warn)">--</div><div class="mh-label" id="mhLabel">...</div><div class="mh-bar"><div class="mh-pt" id="mhPt" style="left:50%"></div></div><div class="mh-factors" id="mhFactors"></div></div>
+<div class="mst"><div class="mst-i"><div class="mst-val" id="fgV" style="color:var(--warn)">--</div><div class="mst-lbl">😰 FEAR</div><div class="mst-sub" id="fgL">...</div></div><div class="mst-i"><div class="mst-val" id="btcD" style="color:var(--neon)">--</div><div class="mst-lbl">₿ BTC DOM</div><div class="mst-sub">Dominance</div></div><div class="mst-i"><div class="mst-val" id="brkC" style="color:var(--dn)">0</div><div class="mst-lbl">🔥 BREAKOUTS</div><div class="mst-sub">Active</div></div><div class="mst-i"><div class="mst-val" id="ulC" style="color:var(--ultra)">0</div><div class="mst-lbl">⭐ ULTRA</div><div class="mst-sub" data-t="confirmed">مؤكدة</div></div></div>
 <div id="warnBox"></div>
-
-<!-- STATS -->
-<div class="mst">
-<div class="mst-i"><div class="mst-val" id="fgV" style="color:var(--warn)">--</div><div class="mst-lbl">😰 FEAR</div><div class="mst-sub" id="fgL">...</div></div>
-<div class="mst-i"><div class="mst-val" id="btcD" style="color:var(--neon)">--</div><div class="mst-lbl">₿ BTC DOM</div><div class="mst-sub">Dominance</div></div>
-<div class="mst-i"><div class="mst-val" id="brkC" style="color:var(--dn)">0</div><div class="mst-lbl">🔥 BREAKOUTS</div><div class="mst-sub">Active</div></div>
-<div class="mst-i"><div class="mst-val" id="ulC" style="color:var(--ultra)">0</div><div class="mst-lbl">⭐ ULTRA</div><div class="mst-sub" data-t="confirmed">مؤكدة</div></div>
-</div>
-
-<!-- ULTRA -->
-<div class="sec"><span class="sec-t">⭐ ULTRA SIGNALS — CONFIRMED</span></div>
+<div class="sec"><span class="sec-t">⭐ ULTRA SIGNALS</span></div>
 <div id="ultraL"><div class="muted" data-t="scanning">جاري المسح...</div></div>
-
-<!-- TOP MOVERS -->
-<div class="sec"><span class="sec-t" data-t="sec_movers">🔥 الأكثر تحركاً</span></div>
-<div id="topMov"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>
+<div class="sec"><span class="sec-t">⚖️ Long / Short</span></div>
+<div id="dashLS"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>
+<div class="sec"><span class="sec-t" data-t="sec_accuracy">📈 نسبة النجاح</span></div>
+<div id="accCard"></div>
 </div>
 
-<!-- 📡 SCANNER -->
+<!-- 📡 SCANNER: All | ULTRA | Breakout | FR (no whale) -->
 <div class="pg" id="pg-scan">
-<div class="sec"><span class="sec-t">📡 MULTI-CONFIRMATION SCANNER</span></div>
-<div class="muted" data-t="scan_desc">8 فحوصات تأكيدية لكل عملة — فقط النتائج 70+ تظهر</div>
-<div class="flt-row" id="fltM"><button class="flt-b act" data-m="all" onclick="sf(this)">⭐ <span data-t="all">الكل</span></button><button class="flt-b" data-m="ultra" onclick="sf(this)">⭐ ULTRA</button><button class="flt-b" data-m="brk" onclick="sf(this)">💥 <span data-t="breakout">على وشك الانفجار</span></button><button class="flt-b" data-m="whale" onclick="sf(this)">🐋 <span data-t="whales">تجميع الحيتان</span></button><button class="flt-b" data-m="fr" onclick="sf(this)">📊 FR</button></div>
+<div class="sec"><span class="sec-t">📡 EARLY DETECTION SCANNER</span></div>
+<div class="muted" data-t="scan_desc">صيد مبكر — 6 فحوصات — 500+ عملة — Binance + Bybit + Coinbase</div>
+<div class="flt-row" id="fltM"><button class="flt-b act" data-m="all" onclick="sf(this)">⭐ <span data-t="all">الكل</span></button><button class="flt-b" data-m="ultra" onclick="sf(this)">⭐ ULTRA</button><button class="flt-b" data-m="brk" onclick="sf(this)">💥 <span data-t="breakout">على وشك الانفجار</span></button><button class="flt-b" data-m="fr" onclick="sf(this)">📊 FR</button></div>
 <div class="muted" id="scanI">📊 جاري المسح...</div>
 <div id="scanR"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>
 <button class="rfr" onclick="runScan()">🔄 <span data-t="full_scan">مسح شامل</span></button>
 </div>
 
-<!-- 🐋 INTELLIGENCE -->
-<div class="pg" id="pg-intel">
-<div class="tabs"><button class="tab act" onclick="iTab(0,this)">🐋 <span data-t="whales">تجميع الحيتان</span></button><button class="tab" onclick="iTab(1,this)">📊 FR Trend</button><button class="tab" onclick="iTab(2,this)">📈 OI Change</button><button class="tab" onclick="iTab(3,this)">⚖️ L/S</button><button class="tab" onclick="iTab(4,this)">🔗 Correlation</button><button class="tab" onclick="iTab(5,this)">📈 <span data-t="success">النجاح</span></button></div>
-<div id="i0"><div class="sts"><div class="st"><div class="st-l" data-t="total">إجمالي</div><div class="st-v" id="whT" style="color:var(--neon)">--</div></div><div class="st"><div class="st-l" data-t="buying">شراء</div><div class="st-v" id="whB" style="color:var(--up)">--</div></div><div class="st"><div class="st-l" data-t="selling">بيع</div><div class="st-v" id="whS" style="color:var(--dn)">--</div></div></div><div id="whAL"></div></div>
-<div id="i1" style="display:none"><div id="frList"></div></div>
-<div id="i2" style="display:none"><div id="oiList"></div></div>
-<div id="i3" style="display:none"><div id="lsList"></div></div>
-<div id="i4" style="display:none"><div id="corGrid"></div></div>
-<div id="i5" style="display:none"><div id="sucCard"></div></div>
-<button class="rfr" onclick="loadIntel()">🔄 <span data-t="refresh">تحديث</span></button>
+<!-- 🐋 WHALE BUYING (was: intel/ذكاء) -->
+<div class="pg" id="pg-whale">
+<div class="sec"><span class="sec-t" data-t="whales">🐋 شراء حيتان</span></div>
+<div class="sts"><div class="st"><div class="st-l" data-t="total">إجمالي</div><div class="st-v" id="whT" style="color:var(--neon)">--</div></div><div class="st"><div class="st-l" data-t="buying">شراء</div><div class="st-v" id="whB" style="color:var(--up)">--</div></div><div class="st"><div class="st-l" data-t="selling">بيع</div><div class="st-v" id="whS" style="color:var(--dn)">--</div></div></div>
+<div id="whAL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>
+<div class="sec"><span class="sec-t" data-t="sec_accuracy">📈 نسبة النجاح</span></div>
+<div id="whAccCard"></div>
+<button class="rfr" onclick="loadWhales()">🔄 <span data-t="refresh">تحديث</span></button>
 </div>
 
-<!-- 📊 MARKET -->
-<div class="pg" id="pg-market">
-<div class="tabs"><button class="tab act" onclick="mTab(0,this)">🗺️ <span data-t="heatmap">خريطة</span></button><button class="tab" onclick="mTab(1,this)">💧 <span data-t="liquidity">سيولة</span></button><button class="tab" onclick="mTab(2,this)">💬 <span data-t="signals">إشارات</span></button><button class="tab" onclick="mTab(3,this)">📰 <span data-t="news">أخبار</span></button><button class="tab" onclick="mTab(4,this)">🔓 Unlocks</button><button class="tab" onclick="mTab(5,this)">📱 Social</button></div>
-<div id="m0"><div class="hm" id="hmG"></div></div>
-<div id="m1" style="display:none"><div id="liqL"></div><div class="sec"><span class="sec-t">📗 ORDER BOOK</span></div><div id="obS"></div></div>
-<div id="m2" style="display:none"><div id="sigL"></div></div>
-<div id="m3" style="display:none"><div id="newsL"></div></div>
-<div id="m4" style="display:none"><div id="unlockL"></div></div>
-<div id="m5" style="display:none"><div id="socialL"></div></div>
-<button class="rfr" onclick="loadMkt()">🔄 <span data-t="refresh">تحديث</span></button>
+<!-- 📊 INDICATORS (was: market/السوق) -->
+<div class="pg" id="pg-ind">
+<div class="tabs"><button class="tab act" onclick="indTab(0,this)">📊 FR Trend</button><button class="tab" onclick="indTab(1,this)">📈 OI Change</button><button class="tab" onclick="indTab(2,this)">🔗 Correlation</button></div>
+<div id="ind0"><div id="frList"></div></div>
+<div id="ind1" style="display:none"><div id="oiList"></div></div>
+<div id="ind2" style="display:none"><div id="corGrid"></div></div>
+<button class="rfr" onclick="loadInd()">🔄 <span data-t="refresh">تحديث</span></button>
 </div>
 
 <!-- 👤 PROFILE -->
@@ -373,28 +346,31 @@ canvas{width:100%!important;border-radius:4px}
 <div id="p0"><div class="cd"><div class="port-tot"><div class="port-val" id="pVal">$0</div><div class="port-ch" id="pCh" style="color:var(--t3)" data-t="add_coins">أضف عملات</div></div></div><div id="pList"></div><button class="add-btn" onclick="openMo('addMo')">➕ <span data-t="add_coin">إضافة عملة</span></button></div>
 <div id="p1" style="display:none"><div class="cd"><div class="cd-t" style="margin-bottom:10px">⚖️ <span data-t="risk_calc">حاسبة المخاطر</span></div><div class="rc-label">💰 <span data-t="capital">رأس المال</span> ($)</div><input class="rc-inp" id="rcCap" type="number" placeholder="10000" oninput="calcRisk()"><div class="rc-label">📊 <span data-t="risk_pct">المخاطرة</span> (%)</div><input class="rc-inp" id="rcRisk" type="number" placeholder="2" value="2" oninput="calcRisk()"><div class="rc-label">💵 <span data-t="entry_price">سعر الدخول</span></div><input class="rc-inp" id="rcEntry" type="number" placeholder="67000" oninput="calcRisk()"><div class="rc-label">🛑 Stop Loss</div><input class="rc-inp" id="rcSL" type="number" placeholder="65000" oninput="calcRisk()"><div class="rc-label">🎯 Take Profit</div><input class="rc-inp" id="rcTP" type="number" placeholder="72000" oninput="calcRisk()"><div class="rc-result" id="rcRes"><div style="text-align:center;color:var(--t3);padding:12px;font-size:11px" data-t="enter_data">ادخل البيانات</div></div></div></div>
 <div id="p2" style="display:none">
-<div class="al-i"><div class="al-l"><div style="font-size:18px">⭐</div><div><div style="font-weight:600;font-size:11px">ULTRA (Confirmed)</div><div style="font-size:8px;color:var(--t3)" data-t="instant">فوري</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
-<div class="al-i"><div class="al-l"><div style="font-size:18px">🐋</div><div><div style="font-weight:600;font-size:11px" data-t="whales">تجميع الحيتان</div><div style="font-size:8px;color:var(--t3)">$500K+</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
-<div class="al-i"><div class="al-l"><div style="font-size:18px">💥</div><div><div style="font-weight:600;font-size:11px" data-t="breakout">على وشك الانفجار</div><div style="font-size:8px;color:var(--t3)">Score 70+</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
-<div class="al-i"><div class="al-l"><div style="font-size:18px">⚠️</div><div><div style="font-weight:600;font-size:11px" data-t="smart_warn">تحذيرات ذكية</div><div style="font-size:8px;color:var(--t3)">FR + OI + L/S</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
-<div class="al-i"><div class="al-l"><div style="font-size:18px">💬</div><div><div style="font-weight:600;font-size:11px" data-t="signals">إشارات</div><div style="font-size:8px;color:var(--t3)" data-t="strong_signal">شراء/بيع قوي</div></div></div><div class="tgl" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
-<div class="al-i"><div class="al-l"><div style="font-size:18px">🔓</div><div><div style="font-weight:600;font-size:11px">Token Unlock</div><div style="font-size:8px;color:var(--t3)" data-t="before_unlock">قبل الفك</div></div></div><div class="tgl" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
+<div class="al-i"><div class="al-l"><div style="font-size:18px">⭐</div><div><div style="font-weight:600;font-size:11px">ULTRA</div><div style="font-size:8px;color:var(--t3)">🔔 صوت + إشعار</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
+<div class="al-i"><div class="al-l"><div style="font-size:18px">🐋</div><div><div style="font-weight:600;font-size:11px" data-t="whales">شراء حيتان</div><div style="font-size:8px;color:var(--t3)">🔔 صوت + إشعار</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
+<div class="al-i"><div class="al-l"><div style="font-size:18px">💥</div><div><div style="font-weight:600;font-size:11px" data-t="breakout">على وشك الانفجار</div><div style="font-size:8px;color:var(--t3)">Score 60+</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
+<div class="al-i"><div class="al-l"><div style="font-size:18px">⚠️</div><div><div style="font-weight:600;font-size:11px" data-t="smart_warn">تحذيرات ذكية</div><div style="font-size:8px;color:var(--t3)">FR + OI</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
 </div>
 </div>
 
 </main></div>
 
+<!-- 5 BOTTOM TABS -->
 <div class="bnv">
 <button class="bb act" data-p="dash"><span class="bi">🏠</span><span data-t="nav_home">الرئيسية</span></button>
 <button class="bb" data-p="scan"><span class="bi">📡</span><span data-t="nav_scan">السكانر</span></button>
-<button class="bb" data-p="intel"><span class="bi">🐋</span><span data-t="nav_intel">ذكاء</span></button>
-<button class="bb" data-p="market"><span class="bi">📊</span><span data-t="nav_market">السوق</span></button>
+<button class="bb" data-p="whale"><span class="bi">🐋</span><span data-t="nav_whale">حيتان</span></button>
+<button class="bb" data-p="ind"><span class="bi">📊</span><span data-t="nav_ind">مؤشرات</span></button>
 <button class="bb" data-p="me"><span class="bi">👤</span><span data-t="nav_me">حسابي</span></button>
 </div>
 
+<!-- MODALS -->
 <div class="mo" id="addMo"><div class="mo-c"><div class="mo-bar"></div><h3>➕ <span data-t="add_coin">إضافة عملة</span></h3><input class="mo-inp" id="aSym" placeholder="BTC"><input class="mo-inp" id="aAmt" type="number"><input class="mo-inp" id="aPr" type="number"><button class="mo-btn" onclick="addPort()">✅ <span data-t="add">إضافة</span></button><button class="rfr" onclick="closeMo('addMo')" style="margin-top:4px" data-t="cancel">إلغاء</button></div></div>
+<div class="mo" id="coinMo"><div class="mo-c"><div class="mo-bar"></div><h3 id="cmT">BTC</h3><div class="cm-price" id="cmP">$0</div><div class="cm-ch" id="cmC">0%</div><div class="chart-w"><div class="chart-ctl"><button class="chart-ind act" data-i="vol" onclick="tgI('vol',this)">VOL</button><button class="chart-ind" data-i="sma" onclick="tgI('sma',this)">EMA</button><button class="chart-ind" data-i="rsi" onclick="tgI('rsi',this)">RSI</button><button class="chart-ind" data-i="sr" onclick="tgI('sr',this)">S/R</button><div style="flex:1"></div><button class="chart-tf act" data-t2="1h" onclick="cTF('1h',this)">1H</button><button class="chart-tf" data-t2="4h" onclick="cTF('4h',this)">4H</button><button class="chart-tf" data-t2="1d" onclick="cTF('1d',this)">1D</button></div><canvas id="chCv" height="250"></canvas></div><div class="sts" id="cmSts"></div><div id="cmExtra"></div><button class="rfr" onclick="closeMo('coinMo')">🔙 <span data-t="back">رجوع</span></button></div></div>
 
-<div class="mo" id="coinMo"><div class="mo-c"><div class="mo-bar"></div><h3 id="cmT">BTC</h3><div class="cm-price" id="cmP">$0</div><div class="cm-ch" id="cmC">0%</div><div class="chart-w"><div class="chart-ctl"><button class="chart-ind act" data-i="vol" onclick="tgI('vol',this)">VOL</button><button class="chart-ind" data-i="sma" onclick="tgI('sma',this)">EMA</button><button class="chart-ind" data-i="bb" onclick="tgI('bb',this)">BB</button><button class="chart-ind" data-i="rsi" onclick="tgI('rsi',this)">RSI</button><button class="chart-ind" data-i="sr" onclick="tgI('sr',this)">S/R</button><button class="chart-ind" data-i="macd" onclick="tgI('macd',this)">MACD</button><div style="flex:1"></div><button class="chart-tf act" data-t2="1h" onclick="cTF('1h',this)">1H</button><button class="chart-tf" data-t2="4h" onclick="cTF('4h',this)">4H</button><button class="chart-tf" data-t2="1d" onclick="cTF('1d',this)">1D</button></div><canvas id="chCv" height="250"></canvas></div><div class="sts" id="cmSts"></div><div id="cmExtra"></div><button class="rfr" onclick="closeMo('coinMo')">🔙 <span data-t="back">رجوع</span></button></div></div>
+<!-- NOTIFICATION SOUND -->
+<audio id="sndUltra" preload="auto" src="data:audio/wav;base64,UklGRl4FAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YToFAACAgICAgICAgICA/3+AgP9/gID/f/9//3//f/9//3//f/9//3//f/9//3//f/9//3//f/9/gICAgICAgICAgICAgA=="></audio>
+<audio id="sndWhale" preload="auto" src="data:audio/wav;base64,UklGRl4FAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YToFAACAgICAgICA/3+AgP9/gID/f/9//3//f/9//3//f/9/gICAgICAgICAgICAgICAgICAgICAgICAgICAgA=="></audio>
 
 <script src="app.js"></script>
 </body>

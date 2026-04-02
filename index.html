@@ -321,22 +321,23 @@ canvas{width:100%!important;border-radius:4px}
 <button class="rfr" onclick="runScan()">🔄 <span data-t="full_scan">مسح شامل</span></button>
 </div>
 
-<!-- 🐋 WHALE BUYING (was: intel/ذكاء) -->
+<!-- 🐋 WHALE BUYING + LIQUIDITY + GEMS -->
 <div class="pg" id="pg-whale">
-<div class="sec"><span class="sec-t" data-t="whales">🐋 شراء حيتان</span></div>
-<div class="sts"><div class="st"><div class="st-l" data-t="total">إجمالي</div><div class="st-v" id="whT" style="color:var(--neon)">--</div></div><div class="st"><div class="st-l" data-t="buying">شراء</div><div class="st-v" id="whB" style="color:var(--up)">--</div></div><div class="st"><div class="st-l" data-t="selling">بيع</div><div class="st-v" id="whS" style="color:var(--dn)">--</div></div></div>
-<div id="whAL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>
-<div class="sec"><span class="sec-t" data-t="sec_accuracy">📈 نسبة النجاح</span></div>
-<div id="whAccCard"></div>
+<div class="tabs"><button class="tab act" onclick="whTab(0,this)">🐋 <span data-t="whales">شراء حيتان</span></button><button class="tab" onclick="whTab(1,this)">💧 <span data-t="liquidity">سيولة</span></button><button class="tab" onclick="whTab(2,this)">💎 <span data-t="gems">جواهر</span></button></div>
+<div id="wh0"><div class="sts"><div class="st"><div class="st-l" data-t="total">إجمالي</div><div class="st-v" id="whT" style="color:var(--neon)">--</div></div><div class="st"><div class="st-l" data-t="buying">شراء</div><div class="st-v" id="whB" style="color:var(--up)">--</div></div><div class="st"><div class="st-l" data-t="selling">بيع</div><div class="st-v" id="whS" style="color:var(--dn)">--</div></div></div><div id="whAL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div><div class="sec"><span class="sec-t" data-t="sec_accuracy">📈 نسبة النجاح</span></div><div id="whAccCard"></div></div>
+<div id="wh1" style="display:none"><div id="liqL"></div><div class="sec"><span class="sec-t">📗 ORDER BOOK</span></div><div id="obS"></div></div>
+<div id="wh2" style="display:none"><div class="muted" data-t="gem_desc">💎 عملات صغيرة بحركة غير عادية — فرص أرباح كبيرة</div><div id="gemL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div></div>
 <button class="rfr" onclick="loadWhales()">🔄 <span data-t="refresh">تحديث</span></button>
 </div>
 
-<!-- 📊 INDICATORS (was: market/السوق) -->
+<!-- 📊 INDICATORS + HEATMAP + WATCHLIST -->
 <div class="pg" id="pg-ind">
-<div class="tabs"><button class="tab act" onclick="indTab(0,this)">📊 FR Trend</button><button class="tab" onclick="indTab(1,this)">📈 OI Change</button><button class="tab" onclick="indTab(2,this)">🔗 Correlation</button></div>
+<div class="tabs"><button class="tab act" onclick="indTab(0,this)">📊 FR Trend</button><button class="tab" onclick="indTab(1,this)">📈 OI</button><button class="tab" onclick="indTab(2,this)">🔗 Correlation</button><button class="tab" onclick="indTab(3,this)">🗺️ <span data-t="heatmap">خريطة</span></button><button class="tab" onclick="indTab(4,this)">👁 Watchlist</button></div>
 <div id="ind0"><div id="frList"></div></div>
 <div id="ind1" style="display:none"><div id="oiList"></div></div>
 <div id="ind2" style="display:none"><div id="corGrid"></div></div>
+<div id="ind3" style="display:none"><div class="hm" id="hmG"></div></div>
+<div id="ind4" style="display:none"><div class="muted" data-t="wl_desc">👁 أضف عملات لمراقبتها 24/7</div><div id="wlList"></div><div style="display:flex;gap:4px;margin-top:8px"><input class="mo-inp" id="wlInp" placeholder="BTC" style="flex:1;margin:0"><button class="rfr" onclick="addWL()" style="margin:0;width:auto;padding:9px 16px">➕</button></div></div>
 <button class="rfr" onclick="loadInd()">🔄 <span data-t="refresh">تحديث</span></button>
 </div>
 
@@ -368,9 +369,20 @@ canvas{width:100%!important;border-radius:4px}
 <div class="mo" id="addMo"><div class="mo-c"><div class="mo-bar"></div><h3>➕ <span data-t="add_coin">إضافة عملة</span></h3><input class="mo-inp" id="aSym" placeholder="BTC"><input class="mo-inp" id="aAmt" type="number"><input class="mo-inp" id="aPr" type="number"><button class="mo-btn" onclick="addPort()">✅ <span data-t="add">إضافة</span></button><button class="rfr" onclick="closeMo('addMo')" style="margin-top:4px" data-t="cancel">إلغاء</button></div></div>
 <div class="mo" id="coinMo"><div class="mo-c"><div class="mo-bar"></div><h3 id="cmT">BTC</h3><div class="cm-price" id="cmP">$0</div><div class="cm-ch" id="cmC">0%</div><div class="chart-w"><div class="chart-ctl"><button class="chart-ind act" data-i="vol" onclick="tgI('vol',this)">VOL</button><button class="chart-ind" data-i="sma" onclick="tgI('sma',this)">EMA</button><button class="chart-ind" data-i="rsi" onclick="tgI('rsi',this)">RSI</button><button class="chart-ind" data-i="sr" onclick="tgI('sr',this)">S/R</button><div style="flex:1"></div><button class="chart-tf act" data-t2="1h" onclick="cTF('1h',this)">1H</button><button class="chart-tf" data-t2="4h" onclick="cTF('4h',this)">4H</button><button class="chart-tf" data-t2="1d" onclick="cTF('1d',this)">1D</button></div><canvas id="chCv" height="280"></canvas></div><div class="sts" id="cmSts"></div><div id="cmExtra"></div><button class="rfr" onclick="closeMo('coinMo')">🔙 <span data-t="back">رجوع</span></button></div></div>
 
-<!-- NOTIFICATION SOUND -->
-<audio id="sndUltra" preload="auto" src="data:audio/wav;base64,UklGRl4FAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YToFAACAgICAgICAgICA/3+AgP9/gID/f/9//3//f/9//3//f/9//3//f/9//3//f/9//3//f/9/gICAgICAgICAgICAgA=="></audio>
-<audio id="sndWhale" preload="auto" src="data:audio/wav;base64,UklGRl4FAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YToFAACAgICAgICA/3+AgP9/gID/f/9//3//f/9//3//f/9/gICAgICAgICAgICAgICAgICAgICAgICAgICAgA=="></audio>
+<!-- NOTIFICATION SOUND (louder) -->
+<audio id="sndAlert" preload="auto"><source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVYGAACBAIA/f4CAgIB/f39/gICAgH9/f4CAgIB/f4CAgIB/f3+AgICBgH5+f4GBgYB+fn+BgYGAfn5/gYGBgH19foKCgoF8fH6CgoKBfHx+goODgnx7foODg4J7e36EhISCenp/hISEg3p5f4WFhIN5eYCFhYWDeHiAhoaGhHd3gIeHh4R2doCHh4iEdXWBiIiIhHR0gYmJiYRzc4GJiomFcnKCioqKhXFxgouLi4VwcIKLjIyGb2+CjIyMhm5ugoyNjYZtbYONjY2HbGyDjo6Oh2trg4+Pj4dqaoOPj5CHaWmEkJCQiGhoAA==" type="audio/wav"></audio>
+
+<!-- ON-SCREEN NOTIFICATION POPUP -->
+<div id="notifPopup" style="position:fixed;top:-80px;left:50%;transform:translateX(-50%);z-index:500;width:92%;max-width:400px;transition:top .4s cubic-bezier(.175,.885,.32,1.275)">
+<div style="background:linear-gradient(135deg,rgba(16,24,42,.95),rgba(10,16,28,.98));border:1px solid rgba(0,255,136,.2);border-radius:14px;padding:12px 14px;backdrop-filter:blur(20px);box-shadow:0 10px 40px rgba(0,0,0,.5),0 0 20px rgba(0,255,136,.1)">
+<div style="display:flex;align-items:center;gap:10px">
+<div id="npIcon" style="font-size:24px;flex-shrink:0">⭐</div>
+<div style="flex:1;min-width:0">
+<div id="npTitle" style="font-weight:800;font-size:13px;font-family:var(--fd);color:var(--t0)"></div>
+<div id="npBody" style="font-size:10px;color:var(--t2);font-family:var(--fm);margin-top:2px"></div>
+</div>
+<div id="npTime" style="font-size:8px;color:var(--neon);font-family:var(--fm);flex-shrink:0">🆕</div>
+</div></div></div>
 
 <script src="app.js"></script>
 </body>

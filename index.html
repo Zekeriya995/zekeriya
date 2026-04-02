@@ -301,6 +301,22 @@ canvas{width:100%!important;border-radius:4px}
 <!-- 🏠 HOME: Clean = Health + Stats + Warnings + ULTRA + L/S + Accuracy -->
 <div class="pg act" id="pg-dash">
 <div class="mh" id="mhCard"><div class="mst-lbl" data-t="market_health">🏥 صحة السوق</div><div class="mh-score" id="mhScore" style="color:var(--warn)">--</div><div class="mh-label" id="mhLabel">...</div><div class="mh-bar"><div class="mh-pt" id="mhPt" style="left:50%"></div></div><div class="mh-factors" id="mhFactors"></div></div>
+
+<!-- 💰 STABLECOIN FLOW INDICATOR -->
+<div class="cd" style="padding:14px;margin-bottom:12px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+<div class="cd-t">💰 <span data-t="stable_flow">تدفق العملات المستقرة</span></div>
+<div id="sfSignal" style="font-size:9px;font-family:var(--fm);font-weight:700;padding:3px 8px;border-radius:6px">...</div>
+</div>
+<div style="display:flex;gap:6px;margin-bottom:8px">
+<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)">USDT Vol</div><div id="sfUSDT" style="font-family:var(--fm);font-size:14px;font-weight:800;color:var(--t0)">--</div><div id="sfUSDTch" style="font-size:9px;font-family:var(--fm);font-weight:700">--</div></div>
+<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)">USDC Vol</div><div id="sfUSDC" style="font-family:var(--fm);font-size:14px;font-weight:800;color:var(--t0)">--</div><div id="sfUSDCch" style="font-size:9px;font-family:var(--fm);font-weight:700">--</div></div>
+<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)" data-t="sf_index">مؤشر التدفق</div><div id="sfIndex" style="font-family:var(--fd);font-size:20px;font-weight:800">--</div><div id="sfIndexLbl" style="font-size:8px;font-family:var(--fm)">...</div></div>
+</div>
+<div style="height:8px;border-radius:4px;background:linear-gradient(90deg,var(--up),var(--up),var(--warn),var(--dn),var(--dn));position:relative;margin-bottom:6px"><div id="sfPt" style="position:absolute;top:-4px;width:16px;height:16px;background:var(--t0);border-radius:50%;border:2px solid var(--bg);transform:translateX(-50%);box-shadow:0 0 8px rgba(255,255,255,.3);transition:left .8s;left:50%"></div></div>
+<div style="display:flex;justify-content:space-between;font-size:7px;font-family:var(--fm);color:var(--t3)"><span>🟢 <span data-t="sf_buy">شراء كريبتو</span></span><span data-t="sf_neutral">متوازن</span><span>🔴 <span data-t="sf_sell">بيع كريبتو</span></span></div>
+<div id="sfAdvice" style="margin-top:8px;padding:8px;background:var(--bg2);border-radius:8px;font-size:10px;text-align:center;font-weight:600">...</div>
+</div>
 <div class="mst"><div class="mst-i"><div class="mst-val" id="fgV" style="color:var(--warn)">--</div><div class="mst-lbl">😰 FEAR</div><div class="mst-sub" id="fgL">...</div></div><div class="mst-i"><div class="mst-val" id="btcD" style="color:var(--neon)">--</div><div class="mst-lbl">₿ BTC DOM</div><div class="mst-sub">Dominance</div></div><div class="mst-i"><div class="mst-val" id="brkC" style="color:var(--dn)">0</div><div class="mst-lbl">🔥 BREAKOUTS</div><div class="mst-sub">Active</div></div><div class="mst-i"><div class="mst-val" id="ulC" style="color:var(--ultra)">0</div><div class="mst-lbl">⭐ ULTRA</div><div class="mst-sub" data-t="confirmed">مؤكدة</div></div></div>
 <div id="warnBox"></div>
 <div class="sec"><span class="sec-t">⭐ ULTRA SIGNALS</span></div>

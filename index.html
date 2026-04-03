@@ -272,6 +272,32 @@ canvas{width:100%!important;border-radius:4px}
 .src-row{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
 .src-badge{padding:2px 5px;border-radius:3px;font-size:7px;font-family:var(--fm);font-weight:700;background:var(--bd);color:var(--blue)}
 
+/* ACTIVE USERS */
+.hdr-users{display:flex;align-items:center;gap:4px;padding:4px 8px;background:var(--bd);border:1px solid rgba(91,156,255,.12);border-radius:20px;font-size:9px;font-family:var(--fm);font-weight:700;color:var(--blue)}
+.au-dot{width:6px;height:6px;background:var(--up);border-radius:50%;box-shadow:0 0 6px var(--up);animation:pls 2s infinite}
+
+/* SIDEBAR */
+.sidebar-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:400;opacity:0;pointer-events:none;transition:opacity .3s;backdrop-filter:blur(4px)}
+.sidebar-overlay.open{opacity:1;pointer-events:all}
+.sidebar-menu{position:fixed;top:0;right:-300px;width:280px;height:100%;background:linear-gradient(180deg,rgba(10,16,28,.98),rgba(6,11,20,.99));border-left:1px solid var(--bdr-a);z-index:500;padding:16px;overflow-y:auto;transition:right .3s cubic-bezier(.4,0,.2,1);box-shadow:-10px 0 40px rgba(0,0,0,.5)}
+[data-lang="en"] .sidebar-menu{right:auto;left:-300px;border-left:none;border-right:1px solid var(--bdr-a);box-shadow:10px 0 40px rgba(0,0,0,.5)}
+.sidebar-menu.open{right:0}
+[data-lang="en"] .sidebar-menu.open{left:0}
+[data-theme="light"] .sidebar-menu{background:linear-gradient(180deg,rgba(247,249,252,.98),rgba(240,244,248,.99))}
+.side-section{margin-bottom:16px;padding-bottom:12px;border-bottom:1px solid var(--bdr)}
+.side-label{font-size:11px;font-weight:700;color:var(--t2);margin-bottom:8px}
+.side-profile{display:flex;align-items:center;gap:10px}
+.side-avatar{width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,var(--neon),var(--purple));display:grid;place-items:center;font-size:22px;color:#fff;flex-shrink:0}
+.side-inp{width:100%;background:var(--bg2);border:1px solid var(--bdr);border-radius:6px;padding:6px 8px;color:var(--t0);font-family:var(--fb);font-size:12px;outline:none;margin-bottom:4px}.side-inp:focus{border-color:var(--neon)}
+.side-row{display:flex;align-items:center;justify-content:space-between;padding:8px 0;font-size:12px;font-weight:600}
+.side-toggle-lang{display:flex;background:var(--bg2);border:1px solid var(--bdr);border-radius:8px;overflow:hidden;cursor:pointer}
+.sl-opt{padding:5px 12px;font-size:10px;font-family:var(--fm);font-weight:700;color:var(--t3);transition:.2s}
+.sl-opt.act{background:var(--nd);color:var(--neon)}
+.tone-opts{display:grid;grid-template-columns:1fr 1fr;gap:4px}
+.tone-opt{display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px;background:var(--bg2);border:1px solid var(--bdr);border-radius:8px;cursor:pointer;font-size:9px;font-weight:600;color:var(--t3);transition:.2s}
+.tone-opt.act{background:var(--nd);border-color:var(--bdr-a);color:var(--neon)}
+.tone-opt span:first-child{font-size:18px}
+
 @media(max-width:520px){.grid-2{grid-template-columns:1fr}.mst{grid-template-columns:repeat(2,1fr)}.mh-factors{grid-template-columns:repeat(2,1fr)}.u-conf{grid-template-columns:repeat(4,1fr)}}
 @media(min-width:768px){.mst{grid-template-columns:repeat(4,1fr)}.hm{grid-template-columns:repeat(6,1fr)}.main{padding:10px 24px 92px}}
 @media(min-width:1024px){.sidebar{display:flex;flex-direction:column;gap:2px;padding-top:16px}.bnv{display:none}.main{padding:10px 24px 24px}.hm{grid-template-columns:repeat(8,1fr)}}
@@ -281,7 +307,7 @@ canvas{width:100%!important;border-radius:4px}
 
 <header class="hdr"><div class="hdr-in">
 <div class="logo"><div class="logo-g"><div class="logo-g-i">⚡</div></div><div><div class="logo-t">NEXUS</div><div class="logo-sub">PROFESSIONAL</div></div></div>
-<div class="hdr-r"><div class="hdr-live">LIVE</div><button class="lang-btn" id="langB" onclick="togLang()">EN</button><div class="ic-b notif" data-c="0" id="notifB">🔔</div><div class="ic-b" id="thB" onclick="togTh()">🌙</div></div>
+<div class="hdr-r"><div class="hdr-live">LIVE</div><div class="hdr-users" id="activeUsers"><span class="au-dot"></span><span id="auCount">--</span> <span data-t="online">متصل</span></div><div class="ic-b notif" data-c="0" id="notifB">🔔</div><div class="ic-b" id="menuBtn" onclick="toggleMenu()">☰</div></div>
 </div></header>
 
 <div class="srch" style="position:relative"><div class="srch-b"><span style="color:var(--t3)">🔍</span><input id="sInp" oninput="onSrch(this.value)"></div><div class="srch-r" id="sRes"></div></div>
@@ -342,7 +368,7 @@ canvas{width:100%!important;border-radius:4px}
 <div class="tabs"><button class="tab act" onclick="whTab(0,this)">🐋 <span data-t="whales">شراء حيتان</span></button><button class="tab" onclick="whTab(1,this)">💧 <span data-t="liquidity">سيولة</span></button><button class="tab" onclick="whTab(2,this)">💎 <span data-t="gems">جواهر</span></button></div>
 <div id="wh0"><div class="sts"><div class="st"><div class="st-l" data-t="total">إجمالي</div><div class="st-v" id="whT" style="color:var(--neon)">--</div></div><div class="st"><div class="st-l" data-t="buying">شراء</div><div class="st-v" id="whB" style="color:var(--up)">--</div></div><div class="st"><div class="st-l" data-t="selling">بيع</div><div class="st-v" id="whS" style="color:var(--dn)">--</div></div></div><div id="whAL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div><div class="sec"><span class="sec-t" data-t="sec_accuracy">📈 نسبة النجاح</span></div><div id="whAccCard"></div></div>
 <div id="wh1" style="display:none"><div id="liqL"></div><div class="sec"><span class="sec-t">📗 ORDER BOOK</span></div><div id="obS"></div></div>
-<div id="wh2" style="display:none"><div class="muted" data-t="gem_desc">💎 عملات صغيرة بحركة غير عادية — فرص أرباح كبيرة</div><div id="gemL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div></div>
+<div id="wh2" style="display:none"><div class="muted">💎 صيد مبكر — عملات صغيرة بحجم غير عادي قبل الانفجار</div><div style="display:flex;gap:4px;margin-bottom:6px;font-size:8px;font-family:var(--fm)"><span style="color:var(--up)">🟢 مبكر = ادخل</span><span style="color:var(--warn)">🟡 فيه فرصة = حذر</span><span style="color:var(--dn)">🔴 متأخر = راقب</span></div><div id="gemL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div></div>
 <button class="rfr" onclick="loadWhales()">🔄 <span data-t="refresh">تحديث</span></button>
 </div>
 
@@ -405,6 +431,57 @@ canvas{width:100%!important;border-radius:4px}
 </div>
 <div id="npTime" style="font-size:8px;color:var(--neon);font-family:var(--fm);flex-shrink:0">🆕</div>
 </div></div></div>
+
+<!-- SIDEBAR MENU -->
+<div class="sidebar-overlay" id="sideOverlay" onclick="toggleMenu()"></div>
+<div class="sidebar-menu" id="sideMenu">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+<span style="font-family:var(--fd);font-weight:800;font-size:16px;color:var(--t0)">⚙️ <span data-t="settings">الإعدادات</span></span>
+<div class="ic-b" onclick="toggleMenu()" style="font-size:16px">✕</div>
+</div>
+
+<!-- PROFILE -->
+<div class="side-section">
+<div class="side-label" data-t="profile">👤 الملف الشخصي</div>
+<div class="side-profile">
+<div class="side-avatar" id="sideAvatar">👤</div>
+<div style="flex:1">
+<input class="side-inp" id="userName" placeholder="الاسم" oninput="saveProfile()">
+<input class="side-inp" id="userNick" placeholder="@الكنية" oninput="saveProfile()" style="font-size:10px;color:var(--neon)">
+</div>
+</div>
+</div>
+
+<!-- GENERAL -->
+<div class="side-section">
+<div class="side-label" data-t="general">⚙️ عام</div>
+<div class="side-row"><span>🌐 <span data-t="language">اللغة</span></span><div class="side-toggle-lang" onclick="togLang();updateMenuLang()"><span id="sLangAr" class="sl-opt act">عربي</span><span id="sLangEn" class="sl-opt">EN</span></div></div>
+<div class="side-row"><span>🌙 <span data-t="theme">الثيم</span></span><div class="side-toggle-lang" onclick="togTh();updateMenuTheme()"><span id="sThDark" class="sl-opt act">🌙</span><span id="sThLight" class="sl-opt">☀️</span></div></div>
+</div>
+
+<!-- NOTIFICATIONS -->
+<div class="side-section">
+<div class="side-label">🔔 <span data-t="alerts">الإشعارات</span></div>
+<div class="side-row"><span>🔊 <span data-t="sound">الصوت</span></span><div class="tgl on" id="tglSound" onclick="this.classList.toggle('on');saveSoundPref()"><div class="tgl-k"></div></div></div>
+<div class="side-label" style="font-size:9px;margin-top:8px" data-t="tone">🔔 نغمة الإشعار</div>
+<div class="tone-opts" id="toneOpts">
+<div class="tone-opt act" data-tone="bell" onclick="selTone(this)"><span>🔔</span><span data-t="t_bell">جرس</span></div>
+<div class="tone-opt" data-tone="horn" onclick="selTone(this)"><span>📯</span><span data-t="t_horn">بوق</span></div>
+<div class="tone-opt" data-tone="pulse" onclick="selTone(this)"><span>🎵</span><span data-t="t_pulse">نبض</span></div>
+<div class="tone-opt" data-tone="silent" onclick="selTone(this)"><span>🔇</span><span data-t="t_silent">صامت</span></div>
+</div>
+</div>
+
+<!-- ABOUT -->
+<div class="side-section">
+<div class="side-label">📊 <span data-t="about">عن المنصة</span></div>
+<div style="text-align:center;padding:8px">
+<div style="font-family:var(--fd);font-weight:800;font-size:18px;color:var(--neon)">⚡ NEXUS PRO</div>
+<div style="font-size:9px;color:var(--t3);font-family:var(--fm);margin-top:2px">V10 — 3 Exchanges · 500+ Coins</div>
+</div>
+<button class="rfr" onclick="if(confirm(lang==='ar'?'مسح كل البيانات؟':'Clear all data?')){localStorage.clear();location.reload()}" style="margin-top:4px;background:var(--dd);color:var(--dn);border-color:rgba(255,56,96,.15)">🗑️ <span data-t="clear_data">مسح البيانات</span></button>
+</div>
+</div>
 
 <script src="app.js"></script>
 </body>

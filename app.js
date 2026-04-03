@@ -62,8 +62,7 @@ function previewTone(tone){if(tone==='silent')return;try{var ac=new(window.Audio
   else if(tone==='pulse'){osc.frequency.value=1000;osc.type='square';gain.gain.value=0.2;osc.start();osc.stop(ac.currentTime+0.08);setTimeout(function(){var o2=ac.createOscillator();var g2=ac.createGain();o2.connect(g2);g2.connect(ac.destination);g2.gain.value=0.2;o2.frequency.value=1000;o2.type='square';o2.start();o2.stop(ac.currentTime+0.08)},120);setTimeout(function(){var o3=ac.createOscillator();var g3=ac.createGain();o3.connect(g3);g3.connect(ac.destination);g3.gain.value=0.2;o3.frequency.value=1200;o3.type='square';o3.start();o3.stop(ac.currentTime+0.12)},240)}
   }catch(e){}}
 function loadToneUI(){var opts=document.querySelectorAll('.tone-opt');opts.forEach(function(o){o.classList.remove('act');if(o.dataset.tone===soundPref)o.classList.add('act')});if(!soundEnabled)document.getElementById('tglSound').classList.remove('on')}
-/* ACTIVE USERS — realistic based on time + random fluctuation */
-function updateActiveUsers(){var h=new Date().getHours();var base=h>=0&&h<6?120:h>=6&&h<9?280:h>=9&&h<12?450:h>=12&&h<15?520:h>=15&&h<18?600:h>=18&&h<21?700:h>=21&&h<24?480:300;var fluct=Math.floor(Math.random()*80-40);var count=Math.max(50,base+fluct);document.getElementById('auCount').textContent=count}
+/* Active users removed */
 (function(){if(localStorage.getItem('nxt10')==='light'){document.body.dataset.theme='light'};if(lang==='en')togLang()})();
 document.querySelectorAll('.bb').forEach(function(b){b.onclick=function(){sp(b.dataset.p)}});
 function sp(id){document.querySelectorAll('.pg').forEach(function(p){p.classList.remove('act')});document.querySelectorAll('.bb').forEach(function(b){b.classList.remove('act')});var el=document.getElementById('pg-'+id);if(el)el.classList.add('act');document.querySelectorAll('[data-p="'+id+'"]').forEach(function(b){b.classList.add('act')});if(id==='scan')runScan();if(id==='whale')loadWhales();if(id==='ind')loadInd();if(id==='me')renderPort();window.scrollTo({top:0})}
@@ -406,12 +405,11 @@ function renderPort(){var tV=0,tC=0;portfolio.forEach(function(p){var d=T[p.sym]
 function calcRisk(){var cap=+document.getElementById('rcCap').value,risk=+document.getElementById('rcRisk').value,entry=+document.getElementById('rcEntry').value,sl=+document.getElementById('rcSL').value,tp=+document.getElementById('rcTP').value;if(!cap||!entry||!sl){document.getElementById('rcRes').innerHTML='<div style="text-align:center;color:var(--t3);padding:12px;font-size:11px">'+t('enter_data')+'</div>';return};var rA=cap*(risk/100),slD=Math.abs(entry-sl),pos=slD>0?rA/slD:0,posV=pos*entry,rew=tp?pos*Math.abs(tp-entry):0,rr=tp&&rA>0?rew/rA:0,lev=cap>0?posV/cap:0;document.getElementById('rcRes').innerHTML='<div class="rc-row"><span>'+t('risk_amt')+'</span><span class="rc-val" style="color:var(--dn)">'+fmt(rA)+'</span></div><div class="rc-row"><span>'+t('pos_size')+'</span><span class="rc-val">'+pos.toFixed(4)+'</span></div><div class="rc-row"><span>'+t('pos_val')+'</span><span class="rc-val">'+fmt(posV)+'</span></div><div class="rc-row"><span>'+t('leverage')+'</span><span class="rc-val" style="color:'+(lev>10?'var(--dn)':lev>5?'var(--warn)':'var(--up)')+'">'+lev.toFixed(1)+'x</span></div>'+(tp?'<div class="rc-row"><span>'+t('exp_profit')+'</span><span class="rc-val" style="color:var(--up)">'+fmt(rew)+'</span></div><div class="rc-row"><span>⚖️ R/R</span><span class="rc-val" style="color:'+(rr>=2?'var(--up)':rr>=1?'var(--warn)':'var(--dn)')+'">1:'+rr.toFixed(1)+'</span></div>':'')+'<div class="rc-row"><span>'+t('sl_loss')+'</span><span class="rc-val" style="color:var(--dn)">-'+fmt(rA)+'</span></div>'}
 /* INIT */
 async function init(){document.getElementById('sInp').placeholder=t('search_ph');document.getElementById('notifB').dataset.c='0';
-  loadProfile();loadToneUI();updateMenuLang();updateMenuTheme();updateActiveUsers();
+  loadProfile();loadToneUI();updateMenuLang();updateMenuTheme();
   if(tg){tg.setHeaderColor(document.body.dataset.theme==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(document.body.dataset.theme==='dark'?'#020408':'#f0f4f8')}
   await loadDash();renderPort();
   setInterval(async function(){try{await loadTk();await loadFutures();checkWatchlistAlerts()}catch(e){}},60000);
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))await loadDash()},180000);
   setInterval(function(){if(!ws||ws.readyState!==1)initWS()},30000);
-  setInterval(function(){notifiedSet={};localStorage.setItem('nxnot10','{}')},3600000);
-  setInterval(updateActiveUsers,30000)}
+  setInterval(function(){notifiedSet={};localStorage.setItem('nxnot10','{}')},3600000)}
 init();

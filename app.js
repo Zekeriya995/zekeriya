@@ -4,6 +4,7 @@ const BN='https://api.binance.com/api/v3',BF='https://fapi.binance.com/fapi/v1',
 const WL=['BTC','ETH','SOL','BNB','XRP','LINK','AVAX','DOGE','ADA','DOT','MATIC','UNI','ATOM','ARB','OP','INJ','SUI','SEI','TIA','FTM','NEAR','APT','LTC','PEPE','WIF'];
 const COL={BTC:'#f7931a',ETH:'#627eea',SOL:'#9945ff',BNB:'#f0b90b',XRP:'#23292f',LINK:'#2a5ada',AVAX:'#e84142',DOGE:'#c2a633',ADA:'#0033ad',DOT:'#e6007a',MATIC:'#8247e5',UNI:'#ff007a',ATOM:'#2e3148',ARB:'#28a0f0',OP:'#ff0420',INJ:'#00f2fe',SUI:'#4da2ff',SEI:'#9b1c1c',TIA:'#7c3aed',FTM:'#1969ff',NEAR:'#00c08b',APT:'#00bfa6',LTC:'#bfbbbb',PEPE:'#4c8c2f',WIF:'#8b5cf6'};
 let T={},FR={},OI={},LS={},CBP={},ws=null,curCoin='BTC',curTF='1h',inds={vol:1,sma:0,rsi:0,sr:0};
+let sparkHist={}; /* Real sparkline data per coin */
 let portfolio=JSON.parse(localStorage.getItem('nxp10')||'[]');
 let predictions=JSON.parse(localStorage.getItem('nxpred10')||'[]');
 let sigHist=JSON.parse(localStorage.getItem('nxsig10')||'{}');
@@ -50,13 +51,13 @@ function sf(btn){btn.parentElement.querySelectorAll('.flt-b').forEach(function(b
 function onSrch(v){var el=document.getElementById('sRes');if(!v){el.classList.remove('show');return}v=v.toUpperCase();var m=Object.entries(T).filter(function(e){return e[0].includes(v)}).slice(0,8);if(!m.length){el.classList.remove('show');return}el.innerHTML=m.map(function(e){var s=e[0],d=e[1];return'<div class="sr-i" onclick="openCoin(\''+s+'\')"><span style="font-weight:700">'+s+'</span><span style="font-family:var(--fm);font-size:10px">'+fP(d.p)+' <span class="cr-ch '+(d.c>=0?'up':'dn')+'">'+(d.c>=0?'+':'')+d.c.toFixed(1)+'%</span></span></div>'}).join('');el.classList.add('show')}
 document.addEventListener('click',function(e){if(!e.target.closest('.srch'))document.getElementById('sRes').classList.remove('show')});
 /* WS */
-function initWS(){if(ws)ws.close();ws=new WebSocket('wss://stream.binance.com:9443/stream?streams='+WL.map(function(s){return s.toLowerCase()+'usdt@miniTicker'}).join('/'));ws.onmessage=function(e){var d=JSON.parse(e.data).data;if(!d)return;var s=d.s.replace('USDT','');T[s]=Object.assign(T[s]||{},{p:+d.c,c:+d.P,v:+d.q,h:+d.h,l:+d.l,src:'BN'})};ws.onclose=function(){setTimeout(initWS,3000)};ws.onerror=function(){ws.close()}}
+function initWS(){if(ws)ws.close();ws=new WebSocket('wss://stream.binance.com:9443/stream?streams='+WL.map(function(s){return s.toLowerCase()+'usdt@miniTicker'}).join('/'));ws.onmessage=function(e){var d=JSON.parse(e.data).data;if(!d)return;var s=d.s.replace('USDT','');var price=+d.c;T[s]=Object.assign(T[s]||{},{p:price,c:+d.P,v:+d.q,h:+d.h,l:+d.l,src:'BN'});/* Store sparkline history */if(!sparkHist[s])sparkHist[s]=[];sparkHist[s].push(price);if(sparkHist[s].length>12)sparkHist[s]=sparkHist[s].slice(-12)};ws.onclose=function(){setTimeout(initWS,3000)};ws.onerror=function(){ws.close()}}
 /* LOAD TICKERS — ALL 3 EXCHANGES */
 async function loadTk(){
   var bn=await fj(BN+'/ticker/24hr');if(bn)bn.filter(function(x){return x.symbol.endsWith('USDT')&&+x.quoteVolume>100000}).forEach(function(x){var s=x.symbol.replace('USDT','');T[s]={p:+x.lastPrice,c:+x.priceChangePercent,v:+x.quoteVolume,h:+x.highPrice,l:+x.lowPrice,src:'BN'}});
   try{var by=await fj('https://api.bybit.com/v5/market/tickers?category=spot');if(by&&by.result&&by.result.list)by.result.list.filter(function(x){return x.symbol.endsWith('USDT')}).forEach(function(x){var s=x.symbol.replace('USDT','');if(!T[s])T[s]={p:+x.lastPrice,c:+x.price24hPcnt*100,v:+x.turnover24h,h:+x.highPrice24h,l:+x.lowPrice24h,src:'BY'};else T[s].by=+x.lastPrice})}catch(e){}
-  try{var cbR=await fj(CB+'/exchange-rates?currency=USD');if(cbR&&cbR.data&&cbR.data.rates){var rates=cbR.data.rates;Object.keys(rates).forEach(function(c){var r=+rates[c];if(r>0)CBP[c]=1/r})}}catch(e){}
-  var el=document.getElementById('tkrEl');var items=WL.filter(function(s){return T[s]}).slice(0,16);var h='';for(var r=0;r<2;r++)items.forEach(function(s){var d=T[s],up=d.c>=0;h+='<div class="tkr-i"><span class="tkr-sym">'+s+'</span><span style="font-family:var(--fm);font-size:9px;color:var(--t2)">'+fP(d.p)+'</span><div class="spark">'+(up?[4,6,5,8,7,10,12,14]:[14,12,10,8,6,5,4,3]).map(function(v){return'<b style="height:'+v+'px;background:var(--'+(up?'up':'dn')+')"></b>'}).join('')+'</div><span class="tkr-c '+(up?'up':'dn')+'">'+(up?'+':'')+d.c.toFixed(1)+'%</span></div>'});el.innerHTML=h}
+  try{var cbR=await fj(CB+'/exchange-rates?currency=USD');if(cbR&&cbR.data&&cbR.data.rates){var rates=cbR.data.rates;Object.keys(rates).forEach(function(c){var r=+rates[c];if(r>0){var cbPrice=1/r;/* Validate: if Binance has this coin, check price is within 50% */var bnPrice=T[c]?T[c].p:0;if(bnPrice>0){var diff=Math.abs(cbPrice-bnPrice)/bnPrice;if(diff<0.5)CBP[c]=cbPrice}else{CBP[c]=cbPrice}}})}}catch(e){}
+  var el=document.getElementById('tkrEl');var items=WL.filter(function(s){return T[s]}).slice(0,16);var h='';for(var r=0;r<2;r++)items.forEach(function(s){var d=T[s],up=d.c>=0;h+='<div class="tkr-i"><span class="tkr-sym">'+s+'</span><span style="font-family:var(--fm);font-size:9px;color:var(--t2)">'+fP(d.p)+'</span><div class="spark">'+mkSpark(s)+'</div><span class="tkr-c '+(up?'up':'dn')+'">'+(up?'+':'')+d.c.toFixed(1)+'%</span></div>'});el.innerHTML=h}
 async function loadFutures(){
   var fd=await fj(BF+'/premiumIndex');if(fd)fd.forEach(function(d){var s=d.symbol.replace('USDT','');FR[s]={rate:+d.lastFundingRate*100,mark:+d.markPrice}});if(FR.BTC)document.getElementById('pFR').textContent=(FR.BTC.rate>=0?'+':'')+FR.BTC.rate.toFixed(4)+'%';
   var p1=WL.slice(0,8).map(function(s){return fj(BF+'/openInterest?symbol='+s+'USDT').then(function(d){if(d)OI[s]=(+d.openInterest)*(T[s]?T[s].p:0)}).catch(function(){})});
@@ -120,7 +121,7 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,30);
     var isUltra=ds>=60&&passed>=4;var isConf=ds>=45&&passed>=3;
     /* Record signal + notify */
     if(isUltra){recSig(c.s,'ultra');notify(c.s,'ultra',ds)}
-    if(c.tags.some(function(t){return t.includes('ACC')||t.includes('STEALTH')||t.includes('EARLY')})){recSig(c.s,'whale');if(checks.ob)notify(c.s,'whale',ds)}
+    if(c.tags.some(function(t){return t.includes('ACC')||t.includes('STEALTH')||t.includes('EARLY')})){recSig(c.s,'whale');if(c.v>5e7||checks.ob)notify(c.s,'whale',ds)}
     if(c.c>=3)recSig(c.s,'breakout');
     results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,detectedAt:getSigTime(c.s,isUltra?'ultra':'breakout')})}
   return results.sort(function(a,b){return b.score-a.score})}
@@ -131,36 +132,38 @@ function getWarnings(){var w=[];Object.entries(FR).filter(function(e){return WL.
 function savePred(sym,p,tgt,sc){predictions.push({sym:sym,price:p,target:tgt,score:sc,time:Date.now(),checked:false,hit:false});if(predictions.length>100)predictions=predictions.slice(-100);localStorage.setItem('nxpred10',JSON.stringify(predictions))}
 function getAcc(){var ch=false;predictions.forEach(function(p){if(!p.checked&&Date.now()-p.time>4*3600*1000){var cur=T[p.sym];if(cur){p.checked=true;p.hit=cur.p>=p.target*.95;ch=true}}});if(ch)localStorage.setItem('nxpred10',JSON.stringify(predictions));var c=predictions.filter(function(p){return p.checked});return{total:c.length,hits:c.filter(function(p){return p.hit}).length,rate:c.length>0?Math.round(c.filter(function(p){return p.hit}).length/c.length*100):0}}
 function renderAcc(id){var a=getAcc();var el=document.getElementById(id);if(!el)return;el.innerHTML='<div class="acc-card"><div style="text-align:center"><div style="font-family:var(--fd);font-size:36px;font-weight:800;color:'+(a.rate>=70?'var(--up)':a.rate>=50?'var(--warn)':'var(--t2)')+'">'+a.rate+'%</div><div style="font-size:11px;color:var(--t2)">'+a.hits+'/'+a.total+' '+t('confirmed')+'</div></div></div>'}
-/* 💰 STABLECOIN FLOW INDICATOR */
+/* 💰 STABLECOIN FLOW INDICATOR — uses already-loaded T data (no extra API calls) */
 async function loadStableFlow(){
   try{
-    /* Fetch USDT and USDC klines (7 days) to compare volumes */
-    var usdtKl=await fj(BN+'/klines?symbol=USDTDAI&interval=1d&limit=7');
-    var usdtTk=T['USDT']||await fj(BN+'/ticker/24hr?symbol=USDTDAI');
-    /* Get USDT volume from all USDT pairs */
-    var usdtVol=0,usdcVol=0;
-    Object.entries(T).forEach(function(e){var s=e[0],d=e[1];if(d.src==='BN'){usdtVol+=d.v}});
-    /* Get USDC pairs volume */
-    var usdcPairs=await fj(BN+'/ticker/24hr');
-    if(usdcPairs)usdcPairs.filter(function(x){return x.symbol.endsWith('USDC')}).forEach(function(x){usdcVol+= +x.quoteVolume});
-    /* Calculate total stablecoin volume today */
-    var totalStableVol=usdtVol+usdcVol;
-    /* Get BTC volume as reference for ratio */
-    var btcVol=T['BTC']?T['BTC'].v:1;
-    /* Stablecoin Dominance Ratio: high = people selling crypto for stables */
-    /* We use ratio of stablecoin trading vs total to gauge sentiment */
-    var stableRatio=totalStableVol>0?Math.min(100,Math.round((usdcVol/(usdcVol+btcVol*10))*100)):50;
-    /* Invert: high USDC buying = people converting crypto to stable = bearish */
-    var flowIndex=stableRatio;
-    /* Also check BTC price trend as confirmation */
+    /* Calculate from already-loaded ticker data — NO duplicate API call */
+    var usdtVol=0,usdcVol=0,totalVol=0;
+    Object.entries(T).forEach(function(e){var d=e[1];if(d.src==='BN'){totalVol+=d.v}});
+    /* Estimate USDC volume from known USDC-heavy coins */
+    var stableCoins=['USDC','TUSD','FDUSD','DAI','BUSD'];
+    stableCoins.forEach(function(s){if(T[s])usdcVol+=T[s].v});
+    usdtVol=totalVol-usdcVol;
+    /* Calculate flow index based on market behavior */
     var btcChange=T['BTC']?T['BTC'].c:0;
-    if(btcChange<-3)flowIndex=Math.min(100,flowIndex+15);
-    if(btcChange>3)flowIndex=Math.max(0,flowIndex-15);
-    /* Check Fear & Greed as additional signal */
-    if(fgValue<25)flowIndex=Math.min(100,flowIndex+10);
-    if(fgValue>75)flowIndex=Math.max(0,flowIndex-10);
+    var ethChange=T['ETH']?T['ETH'].c:0;
+    var avgTopChange=(btcChange+ethChange)/2;
+    /* Rising coins count */
+    var allCoins=Object.values(T);var risers=allCoins.filter(function(x){return x.c>0}).length;
+    var riserPct=allCoins.length>0?risers/allCoins.length*100:50;
+    /* Flow Index: 0=everyone buying crypto, 100=everyone selling to stables */
+    var flowIndex=50;
+    /* BTC trend: strongest signal */
+    if(avgTopChange<-5)flowIndex+=20;else if(avgTopChange<-2)flowIndex+=10;
+    else if(avgTopChange>5)flowIndex-=20;else if(avgTopChange>2)flowIndex-=10;
+    /* Market breadth */
+    if(riserPct>65)flowIndex-=15;else if(riserPct>55)flowIndex-=8;
+    else if(riserPct<35)flowIndex+=15;else if(riserPct<45)flowIndex+=8;
+    /* Fear & Greed */
+    if(fgValue<25)flowIndex+=10;else if(fgValue>75)flowIndex-=10;
+    /* Funding Rate trend */
+    var avgFR=Object.values(FR).reduce(function(s,x){return s+x.rate},0)/Math.max(1,Object.keys(FR).length);
+    if(avgFR>0.05)flowIndex+=8;else if(avgFR<-0.02)flowIndex-=8;
     /* Clamp */
-    flowIndex=Math.max(5,Math.min(95,flowIndex));
+    flowIndex=Math.max(5,Math.min(95,Math.round(flowIndex)));
     /* Update UI */
     document.getElementById('sfUSDT').textContent=fmt(usdtVol);
     document.getElementById('sfUSDC').textContent=fmt(usdcVol);
@@ -180,9 +183,10 @@ async function loadStableFlow(){
     var advice=flowIndex<=25?(lang==='ar'?'💡 الناس تشتري كريبتو بقوة — السوق صاعد':'💡 People buying crypto aggressively — Bullish'):flowIndex<=40?(lang==='ar'?'💡 تدفق إيجابي — فرص شراء':'💡 Positive flow — Buy opportunities'):flowIndex<=60?(lang==='ar'?'💡 السوق متوازن — انتظر إشارة واضحة':'💡 Market balanced — Wait for clear signal'):flowIndex<=80?(lang==='ar'?'💡 الناس تبيع كريبتو — حذر':'💡 People selling crypto — Be cautious'):(lang==='ar'?'⚠️ تدفق كبير نحو المستقرة — خطر هبوط':'⚠️ Major flow to stables — Crash risk');
     document.getElementById('sfAdvice').textContent=advice;document.getElementById('sfAdvice').style.color=idxColor;
   }catch(e){document.getElementById('sfIndex').textContent='--'}}
-/* RENDER */
-function coinRow(s,d,i,sub){var up=d.c>=0;var bg=COL[s]||'#444';return'<div class="cr" onclick="openCoin(\''+s+'\')"><div class="cr-l">'+(i!==undefined?'<div class="cr-rk">'+i+'</div>':'')+'<div class="cr-ic" style="background:'+bg+'0a;color:'+bg+';border:1px solid '+bg+'22">'+s.slice(0,2)+'</div><div><div class="cr-n">'+s+'</div><div class="cr-sub">'+(sub||fmt(d.v))+'</div></div></div><div class="cr-spark">'+(up?[4,6,5,8,12,16,19,22]:[22,18,14,10,8,6,5,4]).map(function(v){return'<b style="height:'+v+'px;background:var(--'+(up?'up':'dn')+')"></b>'}).join('')+'</div><div class="cr-r"><div class="cr-p">'+fP(d.p)+'</div><div class="cr-ch '+(up?'up':'dn')+'">'+(up?'+':'')+d.c.toFixed(1)+'%</div></div></div>'}
-function ultraCard(r){savePred(r.s,r.p,r.p*1.1,r.score);var src=[];if(T[r.s])src.push('Binance');if(r.by)src.push('Bybit');if(CBP[r.s])src.push('Coinbase');return'<div class="ultra" onclick="openCoin(\''+r.s+'\')"><div class="u-badge">⭐ '+(r.ultra?'🟢 CONFIRMED':'🟡 PROBABLE')+' — '+r.passed+'/'+r.total+' CHECKS</div><div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div class="u-sym">'+r.s+'/USDT</div><div class="u-price"><span style="color:var(--up);font-weight:700">+'+r.c.toFixed(1)+'%</span> '+fP(r.p)+'</div></div><div style="text-align:center"><div class="u-score-val">'+r.score+'</div><div class="u-score-lbl">SCORE</div></div></div><div style="margin:8px 0">'+timeBadge(r.detectedAt)+'</div><div class="u-conf">'+Object.entries(r.checks).map(function(e){return'<div class="u-conf-i '+(e[1]?'pass':'fail')+'">'+e[0]+' '+(e[1]?'✅':'❌')+'</div>'}).join('')+'</div><div class="u-tags">'+r.tags.slice(0,6).map(function(x){return'<span class="u-tag" style="background:var(--ud);color:var(--up)">'+x+'</span>'}).join('')+'</div><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div><div class="u-range" style="margin-top:8px"><div style="font-size:10px;font-weight:700;margin-bottom:4px">🎯 Target</div><div class="u-range-row"><span style="color:var(--up)">Conservative</span><span style="font-weight:700">'+fP(r.p*1.08)+'</span></div><div class="u-range-row"><span style="color:var(--neon)">Target</span><span style="font-weight:700">'+fP(r.p*1.15)+'</span></div><div class="u-range-row"><span style="color:var(--dn)">🛑 Stop</span><span style="font-weight:700;color:var(--dn)">'+fP(r.p*0.93)+'</span></div></div></div>'}
+/* RENDER — with real sparklines */
+function mkSpark(s){var hist=sparkHist[s];if(!hist||hist.length<3){var up=T[s]&&T[s].c>=0;return(up?[4,6,5,8,12,16,19,22]:[22,18,14,10,8,6,5,4]).map(function(v){return'<b style="height:'+v+'px;background:var(--'+(up?'up':'dn')+')"></b>'}).join('')}var mn=Math.min.apply(null,hist),mx=Math.max.apply(null,hist),rng=mx-mn||1;var up=hist[hist.length-1]>=hist[0];return hist.slice(-8).map(function(v){return'<b style="height:'+Math.max(2,Math.round((v-mn)/rng*20+2))+'px;background:var(--'+(up?'up':'dn')+')"></b>'}).join('')}
+function coinRow(s,d,i,sub){var up=d.c>=0;var bg=COL[s]||'#444';return'<div class="cr" onclick="openCoin(\''+s+'\')"><div class="cr-l">'+(i!==undefined?'<div class="cr-rk">'+i+'</div>':'')+'<div class="cr-ic" style="background:'+bg+'0a;color:'+bg+';border:1px solid '+bg+'22">'+s.slice(0,2)+'</div><div><div class="cr-n">'+s+'</div><div class="cr-sub">'+(sub||fmt(d.v))+'</div></div></div><div class="cr-spark">'+mkSpark(s)+'</div><div class="cr-r"><div class="cr-p">'+fP(d.p)+'</div><div class="cr-ch '+(up?'up':'dn')+'">'+(up?'+':'')+d.c.toFixed(1)+'%</div></div></div>'}
+function ultraCard(r){/* Dedup: only save prediction once per coin per hour */var predKey=r.s+'_'+new Date().getHours();if(!predictions.some(function(p){return p.sym===r.s&&Date.now()-p.time<3600000}))savePred(r.s,r.p,r.p*1.1,r.score);var src=[];if(T[r.s])src.push('Binance');if(r.by)src.push('Bybit');if(CBP[r.s])src.push('Coinbase');return'<div class="ultra" onclick="openCoin(\''+r.s+'\')"><div class="u-badge">⭐ '+(r.ultra?'🟢 CONFIRMED':'🟡 PROBABLE')+' — '+r.passed+'/'+r.total+' CHECKS</div><div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div class="u-sym">'+r.s+'/USDT</div><div class="u-price"><span style="color:var(--up);font-weight:700">+'+r.c.toFixed(1)+'%</span> '+fP(r.p)+'</div></div><div style="text-align:center"><div class="u-score-val">'+r.score+'</div><div class="u-score-lbl">SCORE</div></div></div><div style="margin:8px 0">'+timeBadge(r.detectedAt)+'</div><div class="u-conf">'+Object.entries(r.checks).map(function(e){return'<div class="u-conf-i '+(e[1]?'pass':'fail')+'">'+e[0]+' '+(e[1]?'✅':'❌')+'</div>'}).join('')+'</div><div class="u-tags">'+r.tags.slice(0,6).map(function(x){return'<span class="u-tag" style="background:var(--ud);color:var(--up)">'+x+'</span>'}).join('')+'</div><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div><div class="u-range" style="margin-top:8px"><div style="font-size:10px;font-weight:700;margin-bottom:4px">🎯 Target</div><div class="u-range-row"><span style="color:var(--up)">Conservative</span><span style="font-weight:700">'+fP(r.p*1.08)+'</span></div><div class="u-range-row"><span style="color:var(--neon)">Target</span><span style="font-weight:700">'+fP(r.p*1.15)+'</span></div><div class="u-range-row"><span style="color:var(--dn)">🛑 Stop</span><span style="font-weight:700;color:var(--dn)">'+fP(r.p*0.93)+'</span></div></div></div>'}
 function whaleCard(r){var wt=getSigTime(r.s,'whale');var amt=r.v*0.05;var bp=r.p*(1-Math.abs(r.c)/200);var str=amt>5e6?{t:lang==='ar'?'قوي جداً':'Very Strong',c:'str-strong'}:amt>1e6?{t:lang==='ar'?'عادي':'Normal',c:'str-normal'}:{t:lang==='ar'?'ضعيف':'Weak',c:'str-weak'};var src=[];if(T[r.s])src.push('Binance');if(r.by)src.push('Bybit');if(CBP[r.s])src.push('Coinbase');return'<div class="whale-card" onclick="openCoin(\''+r.s+'\')"><div class="whale-head"><div class="whale-sym">🐋 '+r.s+'/USDT <span class="str-badge '+str.c+'">'+str.t+'</span></div>'+timeBadge(wt)+'</div><div class="whale-grid"><div class="whale-item"><div class="whale-item-v" style="color:var(--neon)">'+fmt(amt)+'</div><div class="whale-item-l">'+(lang==='ar'?'كمية الشراء':'Buy Amount')+'</div></div><div class="whale-item"><div class="whale-item-v">'+fP(bp)+'</div><div class="whale-item-l">'+(lang==='ar'?'سعر الشراء':'Buy Price')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:var(--up)">'+fP(r.p)+'</div><div class="whale-item-l">'+(lang==='ar'?'الحالي':'Current')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:'+(r.c>=0?'var(--up)':'var(--dn)')+'">'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</div><div class="whale-item-l">24H</div></div></div><div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div><span style="font-family:var(--fm);font-size:9px;color:var(--t2)">Vol:'+fmt(r.v)+'</span></div></div>'}
 function scanItem(r){var sc=r.score>=60?'background:var(--ud);color:var(--up)':r.score>=40?'background:var(--wd);color:var(--warn)':'background:rgba(56,72,96,.3);color:var(--t2)';return'<div class="'+(r.ultra?'scan-r ultra-r':'scan-r')+'" onclick="openCoin(\''+r.s+'\')"><div class="scan-h"><div class="scan-sym">'+(r.ultra?'⭐':r.confirmed?'🟢':'💎')+' '+r.s+' '+timeBadge(r.detectedAt)+'</div><span class="scan-score" style="'+sc+'">'+r.score+' · '+r.passed+'/'+r.total+'✓</span></div><div class="scan-det"><span>💰 <b>'+fP(r.p)+'</b></span><span>'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</span><span>'+fmt(r.v)+'</span>'+(r.cb?'<span>CB:'+fP(r.cb)+'</span>':'')+'</div><div class="scan-checks">'+r.tags.slice(0,5).map(function(x){return'<span class="scan-chk chk-y">'+x+'</span>'}).join('')+'</div><div class="prw"><div class="prb" style="width:'+Math.min(100,r.score)+'%;background:'+(r.ultra?'linear-gradient(90deg,var(--ultra),var(--dn))':r.score>=50?'var(--up)':'var(--warn)')+'"></div></div></div>'}
 function frRow(s,d){var cls=d.rate>0.05?'dn':d.rate<-0.01?'up':'warn';var w=Math.min(48,Math.abs(d.rate)*500);return'<div class="fr-row"><span class="fr-sym">'+s+'</span><div class="fr-bar"><div class="fr-mid"></div><div class="fr-fill" style="'+(d.rate>=0?'left':'right')+':50%;width:'+w+'%;background:var(--'+cls+')"></div></div><div><div class="fr-val" style="color:var(--'+cls+')">'+(d.rate>=0?'+':'')+d.rate.toFixed(4)+'%</div><div class="fr-sub-t">'+(d.rate>0.05?(lang==='ar'?'⚠️ خطر':'⚠️ Danger'):d.rate<-0.01?(lang==='ar'?'فرصة':'Opportunity'):(lang==='ar'?'طبيعي':'Normal'))+'</div></div></div>'}

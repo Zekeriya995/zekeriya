@@ -375,142 +375,87 @@ function addWL(){var sym=document.getElementById('wlInp').value.toUpperCase().tr
 function rmWL(i){watchlist.splice(i,1);localStorage.setItem('nxwl10',JSON.stringify(watchlist));renderWL()}
 function renderWL(){document.getElementById('wlList').innerHTML=watchlist.length?watchlist.map(function(sym,i){var d=T[sym];if(!d)return'<div class="fr-row"><span class="fr-sym">'+sym+'</span><span style="color:var(--t3);font-size:10px">'+(lang==='ar'?'غير متوفر':'Not found')+'</span><span style="font-size:7px;color:var(--t3);cursor:pointer" onclick="rmWL('+i+')">🗑</span></div>';
     return coinRow(sym,d,undefined)+'<div style="text-align:left;margin:-3px 0 5px"><span style="font-size:7px;color:var(--t3);cursor:pointer;padding:2px 6px" onclick="rmWL('+i+')">🗑 '+(lang==='ar'?'إزالة':'Remove')+'</span></div>'}).join(''):'<div class="empty"><div class="empty-ic">👁</div><div class="empty-tx">'+(lang==='ar'?'أضف عملات للمراقبة':'Add coins to watch')+'</div></div>'}
-/* 📊 MARKET DIRECTION REPORT — Full BTC & ETH Analysis */
+/* 📊 MARKET DIRECTION REPORT — Parallel + Error-Safe */
 var reportCache={html:null,time:0};
-var REPORT_TTL=4*3600000; /* 4 hours */
+var REPORT_TTL=4*3600000;
+function calcEMA(arr,p){if(!arr||arr.length<p)return arr?arr[arr.length-1]:0;var k=2/(p+1),e=arr[0];for(var i=1;i<arr.length;i++)e=arr[i]*k+e*(1-k);return e}
 async function loadReport(){
-  /* Check cache first */
   if(reportCache.html&&Date.now()-reportCache.time<REPORT_TTL){document.getElementById('rptBody').innerHTML=reportCache.html;updateReportHeader();return}
   document.getElementById('rptBody').innerHTML='<div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div><div style="font-size:11px;color:var(--t2);margin-top:10px">'+(lang==='ar'?'جاري تحليل السوق...':'Analyzing market...')+'</div></div>';
   try{
-    /* Fetch data for BTC and ETH in parallel */
-    var coins=['BTC','ETH'];
-    var analyses=[];
+    /* ALL requests in parallel */
+    var results=await Promise.all([
+      fj(BN+'/klines?symbol=BTCUSDT&interval=4h&limit=50'),
+      fj(BN+'/klines?symbol=BTCUSDT&interval=1d&limit=30'),
+      fj(BN+'/klines?symbol=ETHUSDT&interval=4h&limit=50'),
+      fj(BN+'/klines?symbol=ETHUSDT&interval=1d&limit=30')
+    ]);
+    var coins=[
+      {sym:'BTC',icon:'₿',kl4h:results[0],kl1d:results[1],cls:'btc'},
+      {sym:'ETH',icon:'Ξ',kl4h:results[2],kl1d:results[3],cls:'eth'}
+    ];
+    var html='';var overallScore=0;
     for(var ci=0;ci<coins.length;ci++){
-      var sym=coins[ci];
-      var kl4h=await fj(BN+'/klines?symbol='+sym+'USDT&interval=4h&limit=50');
-      var kl1d=await fj(BN+'/klines?symbol='+sym+'USDT&interval=1d&limit=30');
-      var kl1h=await fj(BN+'/klines?symbol='+sym+'USDT&interval=1h&limit=24');
-      if(!kl4h||!kl1d||!kl1h){analyses.push(null);continue}
-      var c4=kl4h.map(function(k){return+k[4]});var h4=kl4h.map(function(k){return+k[2]});var l4=kl4h.map(function(k){return+k[3]});var v4=kl4h.map(function(k){return+k[5]});
-      var c1d=kl1d.map(function(k){return+k[4]});var h1d=kl1d.map(function(k){return+k[2]});var l1d=kl1d.map(function(k){return+k[3]});
+      var coin=coins[ci];
+      if(!coin.kl4h||!coin.kl1d||coin.kl4h.length<20||coin.kl1d.length<7){html+='<div class="rpt-coin '+coin.cls+'"><div class="rpt-head"><div class="rpt-name"><span style="font-size:22px">'+coin.icon+'</span> '+coin.sym+'/USDT</div><div class="rpt-dir" style="background:var(--wd);color:var(--warn)">⏳</div></div><div style="text-align:center;padding:12px;color:var(--t3);font-size:11px">'+(lang==='ar'?'بيانات غير كافية':'Insufficient data')+'</div></div>';continue}
+      var c4=coin.kl4h.map(function(k){return+k[4]});var h4=coin.kl4h.map(function(k){return+k[2]});var l4=coin.kl4h.map(function(k){return+k[3]});var v4=coin.kl4h.map(function(k){return+k[5]});
+      var c1d=coin.kl1d.map(function(k){return+k[4]});var h1d=coin.kl1d.map(function(k){return+k[2]});var l1d=coin.kl1d.map(function(k){return+k[3]});
       var price=c4[c4.length-1];
-      /* RSI */
-      var rsi=calcRSI(c4);
-      /* MACD */
-      var macd=calcMACD(c4);
-      /* EMA 20 & 50 */
-      function ema(arr,p){var k=2/(p+1),e=arr[0];for(var i=1;i<arr.length;i++)e=arr[i]*k+e*(1-k);return e}
-      var ema20=ema(c4.slice(-20),20);var ema50=ema(c4.slice(-50),50);
-      /* Volume trend */
-      var avgVol=v4.slice(-10,-2).reduce(function(a,b){return a+b},0)/8;
-      var recentVol=(v4[v4.length-1]+v4[v4.length-2])/2;
-      var volTrend=avgVol>0?recentVol/avgVol:1;
-      /* Support & Resistance from daily */
-      var dailyHighs=h1d.slice(-14);var dailyLows=l1d.slice(-14);
-      var resistance=Math.max.apply(null,dailyHighs);
-      var support=Math.min.apply(null,dailyLows);
-      /* Recent swing high/low (7 days) */
-      var recentHigh=Math.max.apply(null,h1d.slice(-7));
-      var recentLow=Math.min.apply(null,l1d.slice(-7));
-      /* Fibonacci targets */
-      var fRange=recentHigh-recentLow;
-      var fib618Up=price+fRange*0.618;
-      var fib100Up=price+fRange;
-      var fib618Dn=price-fRange*0.618;
-      var fib100Dn=price-fRange;
-      /* Trend detection */
-      var trend='neutral';var trendScore=0;
-      if(price>ema20)trendScore+=2;else trendScore-=2;
-      if(price>ema50)trendScore+=2;else trendScore-=2;
-      if(ema20>ema50)trendScore+=1;else trendScore-=1;
-      if(macd.h>0)trendScore+=2;else trendScore-=2;
-      if(rsi>55)trendScore+=1;else if(rsi<45)trendScore-=1;
-      if(volTrend>1.3)trendScore+=1;
-      var fr=FR[sym];if(fr){if(fr.rate<0)trendScore+=1;if(fr.rate>0.05)trendScore-=1}
-      var ls=LS[sym];if(ls){if(ls.ratio>1.5)trendScore-=1;if(ls.ratio<0.8)trendScore+=1}
-      if(trendScore>=4)trend='strong_bull';else if(trendScore>=2)trend='bull';else if(trendScore<=-4)trend='strong_bear';else if(trendScore<=-2)trend='bear';
-      /* 4h change */
+      var rsi=calcRSI(c4);var macd=calcMACD(c4);
+      var ema20=calcEMA(c4.slice(-20),20);var ema50=calcEMA(c4,50);
+      var avgVol=v4.slice(-10,-2).reduce(function(a,b){return a+b},0)/Math.max(1,v4.slice(-10,-2).length);
+      var recentVol=(v4[v4.length-1]+(v4[v4.length-2]||0))/2;var volTrend=avgVol>0?recentVol/avgVol:1;
+      var resistance=Math.max.apply(null,h1d.slice(-14));var support=Math.min.apply(null,l1d.slice(-14));
+      var recentHigh=Math.max.apply(null,h1d.slice(-7));var recentLow=Math.min.apply(null,l1d.slice(-7));
+      var fRange=recentHigh-recentLow;if(fRange===0)fRange=price*0.03;
+      var fib618Up=price+fRange*0.618;var fib100Up=price+fRange;var fib618Dn=price-fRange*0.618;var fib100Dn=price-fRange;
+      /* Trend scoring */
+      var ts=0;if(price>ema20)ts+=2;else ts-=2;if(price>ema50)ts+=2;else ts-=2;if(ema20>ema50)ts+=1;else ts-=1;if(macd.h>0)ts+=2;else ts-=2;if(rsi>55)ts+=1;else if(rsi<45)ts-=1;if(volTrend>1.3)ts+=1;
+      var fr=FR[coin.sym];if(fr){if(fr.rate<0)ts+=1;if(fr.rate>0.05)ts-=1}
+      var ls=LS[coin.sym];if(ls){if(ls.ratio>1.5)ts-=1;if(ls.ratio<0.8)ts+=1}
+      overallScore+=ts;
       var ch4h=c4.length>=2?((price-c4[c4.length-2])/c4[c4.length-2]*100):0;
-      /* 24h change */
       var ch24=c4.length>=7?((price-c4[c4.length-7])/c4[c4.length-7]*100):0;
-      /* 7d change */
       var ch7d=c1d.length>=7?((price-c1d[c1d.length-7])/c1d[c1d.length-7]*100):0;
-      analyses.push({sym:sym,price:price,rsi:rsi,macd:macd,ema20:ema20,ema50:ema50,volTrend:volTrend,support:support,resistance:resistance,recentHigh:recentHigh,recentLow:recentLow,fib618Up:fib618Up,fib100Up:fib100Up,fib618Dn:fib618Dn,fib100Dn:fib100Dn,trend:trend,trendScore:trendScore,fr:fr,ls:ls,oi:OI[sym],ch4h:ch4h,ch24:ch24,ch7d:ch7d})
-    }
-    /* Build report HTML */
-    var html='';
-    var overallScore=0;
-    analyses.forEach(function(a){
-      if(!a)return;
-      overallScore+=a.trendScore;
-      var isBTC=a.sym==='BTC';
+      /* Direction labels */
       var tDir,tCol,tBg,tIcon;
-      if(a.trend==='strong_bull'){tDir=lang==='ar'?'صعودي قوي':'Strong Bullish';tCol='var(--up)';tBg='var(--ud)';tIcon='🟢🟢'}
-      else if(a.trend==='bull'){tDir=lang==='ar'?'صعودي':'Bullish';tCol='var(--up)';tBg='var(--ud)';tIcon='🟢'}
-      else if(a.trend==='strong_bear'){tDir=lang==='ar'?'هبوطي قوي':'Strong Bearish';tCol='var(--dn)';tBg='var(--dd)';tIcon='🔴🔴'}
-      else if(a.trend==='bear'){tDir=lang==='ar'?'هبوطي':'Bearish';tCol='var(--dn)';tBg='var(--dd)';tIcon='🔴'}
+      if(ts>=4){tDir=lang==='ar'?'صعودي قوي':'Strong Bull';tCol='var(--up)';tBg='var(--ud)';tIcon='🟢🟢'}
+      else if(ts>=2){tDir=lang==='ar'?'صعودي':'Bullish';tCol='var(--up)';tBg='var(--ud)';tIcon='🟢'}
+      else if(ts<=-4){tDir=lang==='ar'?'هبوطي قوي':'Strong Bear';tCol='var(--dn)';tBg='var(--dd)';tIcon='🔴🔴'}
+      else if(ts<=-2){tDir=lang==='ar'?'هبوطي':'Bearish';tCol='var(--dn)';tBg='var(--dd)';tIcon='🔴'}
       else{tDir=lang==='ar'?'محايد':'Neutral';tCol='var(--warn)';tBg='var(--wd)';tIcon='🟡'}
       /* Recommendation */
       var rec,recIcon;
-      if(a.trendScore>=4){rec=lang==='ar'?'شراء قوي — الاتجاه صعودي مؤكد بكل المؤشرات. وقف خسارة عند '+fP(a.fib618Dn):'Strong Buy — All indicators confirm uptrend. Stop loss at '+fP(a.fib618Dn);recIcon='💰'}
-      else if(a.trendScore>=2){rec=lang==='ar'?'شراء — الاتجاه إيجابي. دخول تدريجي مع وقف عند '+fP(a.support):'Buy — Positive trend. Scale in with stop at '+fP(a.support);recIcon='📈'}
-      else if(a.trendScore<=-4){rec=lang==='ar'?'بيع / تجنب — هبوط قوي. لا تشتري حتى يستقر فوق '+fP(a.ema20):'Sell / Avoid — Strong decline. Don\'t buy until stable above '+fP(a.ema20);recIcon='⚠️'}
-      else if(a.trendScore<=-2){rec=lang==='ar'?'حذر — الاتجاه سلبي. انتظر إشارة انعكاس':'Caution — Negative trend. Wait for reversal signal';recIcon='🛑'}
-      else{rec=lang==='ar'?'انتظار — السوق محايد. لا تتسرع بالدخول':'Wait — Market neutral. Don\'t rush entries';recIcon='⏳'}
-      html+='<div class="rpt-coin '+(isBTC?'btc':'eth')+'">'
-        +'<div class="rpt-head"><div class="rpt-name"><span style="font-size:22px">'+(isBTC?'₿':'Ξ')+'</span> '+a.sym+'/USDT</div><div class="rpt-dir" style="background:'+tBg+';color:'+tCol+'">'+tIcon+' '+tDir+'</div></div>'
-        +'<div style="text-align:center;margin:6px 0"><span style="font-family:var(--fm);font-size:24px;font-weight:800;color:var(--t0)">'+fP(a.price)+'</span></div>'
-        /* Changes */
-        +'<div class="rpt-grid">'
-        +'<div class="rpt-g"><div class="rpt-gv" style="color:'+(a.ch4h>=0?'var(--up)':'var(--dn)')+'">'+(a.ch4h>=0?'+':'')+a.ch4h.toFixed(2)+'%</div><div class="rpt-gl">4H</div></div>'
-        +'<div class="rpt-g"><div class="rpt-gv" style="color:'+(a.ch24>=0?'var(--up)':'var(--dn)')+'">'+(a.ch24>=0?'+':'')+a.ch24.toFixed(2)+'%</div><div class="rpt-gl">24H</div></div>'
-        +'<div class="rpt-g"><div class="rpt-gv" style="color:'+(a.ch7d>=0?'var(--up)':'var(--dn)')+'">'+(a.ch7d>=0?'+':'')+a.ch7d.toFixed(2)+'%</div><div class="rpt-gl">7D</div></div>'
-        +'</div>'
-        /* Indicators */
-        +'<div class="rpt-inds">'
-        +'<span class="rpt-ind" style="color:'+(a.rsi<30?'var(--up)':a.rsi>70?'var(--dn)':'var(--t1)')+'">RSI: '+a.rsi.toFixed(0)+'</span>'
-        +'<span class="rpt-ind" style="color:'+(a.macd.h>0?'var(--up)':'var(--dn)')+'">MACD: '+(a.macd.h>0?'🟢':'🔴')+'</span>'
-        +'<span class="rpt-ind" style="color:'+(a.price>a.ema20?'var(--up)':'var(--dn)')+'">EMA20: '+(a.price>a.ema20?'↑':'↓')+'</span>'
-        +'<span class="rpt-ind" style="color:'+(a.price>a.ema50?'var(--up)':'var(--dn)')+'">EMA50: '+(a.price>a.ema50?'↑':'↓')+'</span>'
-        +'<span class="rpt-ind" style="color:'+(a.volTrend>1.3?'var(--neon)':'var(--t2)')+'">Vol: '+a.volTrend.toFixed(1)+'x</span>'
-        +(a.fr?'<span class="rpt-ind" style="color:'+(a.fr.rate>0.05?'var(--dn)':a.fr.rate<-0.01?'var(--up)':'var(--t2)')+'">FR: '+(a.fr.rate>=0?'+':'')+a.fr.rate.toFixed(4)+'%</span>':'')
-        +(a.ls?'<span class="rpt-ind">L/S: '+a.ls.ratio.toFixed(2)+'</span>':'')
-        +(a.oi?'<span class="rpt-ind" style="color:var(--neon)">OI: '+fmt(a.oi)+'</span>':'')
-        +'</div>'
-        /* Targets */
-        +'<div class="rpt-targets">'
-        +'<div class="rpt-tgt up"><div class="rpt-tgt-l">🎯 '+(lang==='ar'?'أهداف الصعود':'Upside Targets')+'</div><div class="rpt-tgt-v" style="color:var(--up)">'+fP(a.fib618Up)+'</div><div class="rpt-tgt-s" style="color:var(--neon)">'+fP(a.fib100Up)+'</div></div>'
-        +'<div class="rpt-tgt dn"><div class="rpt-tgt-l">🛑 '+(lang==='ar'?'أهداف الهبوط':'Downside Targets')+'</div><div class="rpt-tgt-v" style="color:var(--dn)">'+fP(a.fib618Dn)+'</div><div class="rpt-tgt-s" style="color:var(--warn)">'+fP(a.fib100Dn)+'</div></div>'
-        +'</div>'
-        /* S/R */
-        +'<div class="rpt-grid" style="grid-template-columns:1fr 1fr">'
-        +'<div class="rpt-g"><div class="rpt-gv" style="color:var(--up)">'+fP(a.resistance)+'</div><div class="rpt-gl">'+(lang==='ar'?'المقاومة':'Resistance')+'</div></div>'
-        +'<div class="rpt-g"><div class="rpt-gv" style="color:var(--dn)">'+fP(a.support)+'</div><div class="rpt-gl">'+(lang==='ar'?'الدعم':'Support')+'</div></div>'
-        +'</div>'
-        /* Recommendation */
-        +'<div class="rpt-adv" style="background:'+(a.trendScore>=2?'rgba(0,255,136,.05);border:1px solid rgba(0,255,136,.1)':a.trendScore<=-2?'rgba(255,56,96,.05);border:1px solid rgba(255,56,96,.1)':'rgba(255,184,0,.05);border:1px solid rgba(255,184,0,.1)')+'"><span style="font-size:18px;flex-shrink:0">'+recIcon+'</span><span>'+rec+'</span></div>'
+      if(ts>=4){rec=lang==='ar'?'💰 شراء قوي — كل المؤشرات إيجابية. وقف خسارة '+fP(fib618Dn):'💰 Strong Buy — All indicators positive. Stop '+fP(fib618Dn);recIcon='💰'}
+      else if(ts>=2){rec=lang==='ar'?'📈 شراء — اتجاه إيجابي. دخول تدريجي. وقف '+fP(support):'📈 Buy — Positive trend. Scale in. Stop '+fP(support);recIcon='📈'}
+      else if(ts<=-4){rec=lang==='ar'?'⛔ بيع / تجنب — هبوط قوي. انتظر استقرار فوق '+fP(ema20):'⛔ Sell / Avoid — Strong decline. Wait above '+fP(ema20);recIcon='⛔'}
+      else if(ts<=-2){rec=lang==='ar'?'⚠️ حذر — اتجاه سلبي. انتظر انعكاس':'⚠️ Caution — Negative trend. Wait for reversal';recIcon='⚠️'}
+      else{rec=lang==='ar'?'⏳ انتظار — محايد. لا تتسرع':'⏳ Wait — Neutral. Don\'t rush';recIcon='⏳'}
+      /* Build coin section */
+      html+='<div class="rpt-coin '+coin.cls+'">'
+        +'<div class="rpt-head"><div class="rpt-name"><span style="font-size:22px">'+coin.icon+'</span> '+coin.sym+'/USDT</div><div class="rpt-dir" style="background:'+tBg+';color:'+tCol+'">'+tIcon+' '+tDir+'</div></div>'
+        +'<div style="text-align:center;margin:8px 0"><span style="font-family:var(--fm);font-size:26px;font-weight:800;color:var(--t0)">'+fP(price)+'</span></div>'
+        +'<div class="rpt-grid"><div class="rpt-g"><div class="rpt-gv" style="color:'+(ch4h>=0?'var(--up)':'var(--dn)')+'">'+(ch4h>=0?'+':'')+ch4h.toFixed(2)+'%</div><div class="rpt-gl">4H</div></div><div class="rpt-g"><div class="rpt-gv" style="color:'+(ch24>=0?'var(--up)':'var(--dn)')+'">'+(ch24>=0?'+':'')+ch24.toFixed(2)+'%</div><div class="rpt-gl">24H</div></div><div class="rpt-g"><div class="rpt-gv" style="color:'+(ch7d>=0?'var(--up)':'var(--dn)')+'">'+(ch7d>=0?'+':'')+ch7d.toFixed(2)+'%</div><div class="rpt-gl">7D</div></div></div>'
+        +'<div class="rpt-inds"><span class="rpt-ind" style="color:'+(rsi<30?'var(--up)':rsi>70?'var(--dn)':'var(--t1)')+'">📊 RSI: '+rsi.toFixed(0)+'</span><span class="rpt-ind" style="color:'+(macd.h>0?'var(--up)':'var(--dn)')+'">📈 MACD: '+(macd.h>0?'إيجابي ✅':'سلبي ❌')+'</span><span class="rpt-ind" style="color:'+(price>ema20?'var(--up)':'var(--dn)')+'">EMA20: '+(price>ema20?'فوق ↑':'تحت ↓')+'</span><span class="rpt-ind" style="color:'+(price>ema50?'var(--up)':'var(--dn)')+'">EMA50: '+(price>ema50?'فوق ↑':'تحت ↓')+'</span><span class="rpt-ind" style="color:'+(volTrend>1.3?'var(--neon)':'var(--t2)')+'">🔊 Vol: '+volTrend.toFixed(1)+'x</span>'+(fr?'<span class="rpt-ind" style="color:'+(fr.rate>0.05?'var(--dn)':fr.rate<-0.01?'var(--up)':'var(--t2)')+'">💰 FR: '+(fr.rate>=0?'+':'')+fr.rate.toFixed(4)+'%</span>':'')+(ls?'<span class="rpt-ind">⚖️ L/S: '+ls.ratio.toFixed(2)+'</span>':'')+(OI[coin.sym]?'<span class="rpt-ind" style="color:var(--neon)">📈 OI: '+fmt(OI[coin.sym])+'</span>':'')+'</div>'
+        +'<div class="rpt-targets"><div class="rpt-tgt up"><div class="rpt-tgt-l">🎯 '+(lang==='ar'?'أهداف الصعود':'Upside Targets')+'</div><div class="rpt-tgt-v" style="color:var(--up)">'+fP(fib618Up)+'</div><div class="rpt-tgt-s" style="color:var(--neon)">'+fP(fib100Up)+'</div></div><div class="rpt-tgt dn"><div class="rpt-tgt-l">🛑 '+(lang==='ar'?'أهداف الهبوط':'Downside Targets')+'</div><div class="rpt-tgt-v" style="color:var(--dn)">'+fP(fib618Dn)+'</div><div class="rpt-tgt-s" style="color:var(--warn)">'+fP(fib100Dn)+'</div></div></div>'
+        +'<div class="rpt-grid" style="grid-template-columns:1fr 1fr"><div class="rpt-g"><div class="rpt-gv" style="color:var(--dn)">'+fP(resistance)+'</div><div class="rpt-gl">🔴 '+(lang==='ar'?'المقاومة':'Resistance')+'</div></div><div class="rpt-g"><div class="rpt-gv" style="color:var(--up)">'+fP(support)+'</div><div class="rpt-gl">🟢 '+(lang==='ar'?'الدعم':'Support')+'</div></div></div>'
+        +'<div class="rpt-adv" style="background:'+(ts>=2?'rgba(0,255,136,.05);border:1px solid rgba(0,255,136,.1)':ts<=-2?'rgba(255,56,96,.05);border:1px solid rgba(255,56,96,.1)':'rgba(255,184,0,.05);border:1px solid rgba(255,184,0,.1)')+'"><span style="font-size:18px;flex-shrink:0">'+recIcon+'</span><span>'+rec+'</span></div>'
         +'</div>';
-    });
-    /* Overall Market Summary */
+    }
+    /* Summary */
     var ovDir=overallScore>=6?(lang==='ar'?'🟢🟢 صعودي قوي':'🟢🟢 Strong Bull'):overallScore>=2?(lang==='ar'?'🟢 صعودي':'🟢 Bullish'):overallScore<=-6?(lang==='ar'?'🔴🔴 هبوطي قوي':'🔴🔴 Strong Bear'):overallScore<=-2?(lang==='ar'?'🔴 هبوطي':'🔴 Bearish'):(lang==='ar'?'🟡 محايد':'🟡 Neutral');
     var ovCol=overallScore>=2?'var(--up)':overallScore<=-2?'var(--dn)':'var(--warn)';
-    html+='<div class="rpt-summary">'
-      +'<div style="text-align:center;margin-bottom:8px"><div style="font-family:var(--fd);font-weight:800;font-size:13px;color:var(--t0)">📋 '+(lang==='ar'?'ملخص السوق':'Market Summary')+'</div></div>'
+    html+='<div class="rpt-summary"><div style="text-align:center;margin-bottom:8px"><div style="font-family:var(--fd);font-weight:800;font-size:13px;color:var(--t0)">📋 '+(lang==='ar'?'ملخص السوق':'Market Summary')+'</div></div>'
       +'<div class="rpt-sum-row"><span>🧭 '+(lang==='ar'?'الاتجاه العام':'Overall Trend')+'</span><span style="font-weight:700;color:'+ovCol+'">'+ovDir+'</span></div>'
       +'<div class="rpt-sum-row"><span>😰 Fear & Greed</span><span style="font-weight:700;color:var(--warn)">'+fgValue+'</span></div>'
       +'<div class="rpt-sum-row"><span>₿ BTC Dom</span><span style="font-weight:700">'+btcDom.toFixed(1)+'%</span></div>'
-      +'<div class="rpt-sum-row"><span>🔥 '+(lang==='ar'?'عملات صاعدة':'Rising Coins')+'</span><span style="font-weight:700;color:var(--up)">'+Object.values(T).filter(function(x){return x.c>0}).length+'/'+Object.keys(T).length+'</span></div>'
-      +'<div class="rpt-sum-row"><span>⏰ '+(lang==='ar'?'التحديث القادم':'Next Update')+'</span><span style="font-weight:700;color:var(--blue)">'+(lang==='ar'?'بعد 4 ساعات':'In 4 hours')+'</span></div>'
-      +'</div>';
-    html+='<div style="text-align:center;margin-top:10px;font-size:8px;color:var(--t3);font-family:var(--fm)">⚠️ '+(lang==='ar'?'هذا تحليل فني وليس نصيحة مالية — تداول بمسؤوليتك':'Technical analysis only — Not financial advice — Trade at your own risk')+'</div>';
+      +'<div class="rpt-sum-row"><span>🔥 '+(lang==='ar'?'عملات صاعدة':'Rising')+'</span><span style="font-weight:700;color:var(--up)">'+Object.values(T).filter(function(x){return x.c>0}).length+'/'+Object.keys(T).length+'</span></div>'
+      +'<div class="rpt-sum-row"><span>⏰ '+(lang==='ar'?'التحديث القادم':'Next Update')+'</span><span style="font-weight:700;color:var(--blue)">'+(lang==='ar'?'4 ساعات':'4 hours')+'</span></div></div>';
+    html+='<div style="text-align:center;margin-top:10px;font-size:8px;color:var(--t3);font-family:var(--fm)">⚠️ '+(lang==='ar'?'تحليل فني — ليس نصيحة مالية':'Technical analysis — Not financial advice')+'</div>';
     reportCache.html=html;reportCache.time=Date.now();
-    document.getElementById('rptBody').innerHTML=html;
-    updateReportHeader();
-  }catch(e){document.getElementById('rptBody').innerHTML='<div class="empty"><div class="empty-ic">📊</div><div class="empty-tx">'+(lang==='ar'?'خطأ بالتحليل — حاول مرة ثانية':'Analysis error — Try again')+'</div></div>'}}
-function updateReportHeader(){var now=new Date();var h=now.getHours(),m=now.getMinutes();document.getElementById('rptTime').textContent=(lang==='ar'?'آخر تحديث: ':'Updated: ')+String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')+(lang==='ar'?' — كل 4 ساعات':' — Every 4h');
-  var os=0;if(reportCache.html){var el=document.createElement('div');el.innerHTML=reportCache.html;var dirs=el.querySelectorAll('.rpt-dir');dirs.forEach(function(d){if(d.textContent.includes('صعودي')||d.textContent.includes('Bull'))os++;else if(d.textContent.includes('هبوطي')||d.textContent.includes('Bear'))os--})}
-  var badge=document.getElementById('rptBadge');if(os>0){badge.textContent=lang==='ar'?'🟢 صعودي':'🟢 BULL';badge.style.background='var(--ud)';badge.style.color='var(--up)'}else if(os<0){badge.textContent=lang==='ar'?'🔴 هبوطي':'🔴 BEAR';badge.style.background='var(--dd)';badge.style.color='var(--dn)'}else{badge.textContent=lang==='ar'?'🟡 محايد':'🟡 NEUTRAL';badge.style.background='var(--wd)';badge.style.color='var(--warn)'}}
+    document.getElementById('rptBody').innerHTML=html;updateReportHeader();
+  }catch(e){document.getElementById('rptBody').innerHTML='<div class="empty"><div class="empty-ic">📊</div><div class="empty-tx">'+(lang==='ar'?'خطأ — اضغط تحديث':'Error — Try refresh')+'</div></div><button class="rfr" onclick="reportCache.time=0;loadReport()">🔄</button>'}}
+function updateReportHeader(){var now=new Date();document.getElementById('rptTime').textContent=(lang==='ar'?'آخر تحديث: ':'Updated: ')+String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0')+(lang==='ar'?' — كل 4 ساعات':' — Every 4h');var b=document.getElementById('rptBadge');if(!reportCache.html){b.textContent='...';return}b.textContent=lang==='ar'?'🟢 جاهز':'🟢 Ready';b.style.background='var(--ud)';b.style.color='var(--up)'}
 /* PORTFOLIO */
 var sP=function(){localStorage.setItem('nxp10',JSON.stringify(portfolio))};
 function addPort(){var sym=document.getElementById('aSym').value.toUpperCase().trim(),amt=+document.getElementById('aAmt').value,pr=+document.getElementById('aPr').value;if(!sym||!amt)return;portfolio.push({sym:sym,amt:amt,bp:pr});sP();closeMo('addMo');renderPort()}

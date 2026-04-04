@@ -335,23 +335,24 @@ canvas{width:100%!important;border-radius:4px}
 .rpt-preview:active{border-color:var(--neon)}
 
 /* COIN CARDS */
-.coin-card{background:var(--glass);backdrop-filter:var(--gb);border-radius:14px;padding:12px;margin-bottom:8px;cursor:pointer;position:relative;overflow:hidden;border:1px solid var(--bdr);transition:border-color .2s}
-.coin-card:active{transform:scale(.98)}
-.coin-card.up{border-left:3px solid var(--up);background:linear-gradient(135deg,rgba(0,255,136,.03),transparent)}
-.coin-card.dn{border-left:3px solid var(--dn);background:linear-gradient(135deg,rgba(255,56,96,.03),transparent)}
+.coin-card{background:var(--glass);backdrop-filter:var(--gb);border-radius:16px;padding:14px;margin-bottom:10px;cursor:pointer;position:relative;overflow:hidden;border:1px solid var(--bdr);transition:all .2s}
+.coin-card:active{transform:scale(.97)}
+.coin-card.up{border-left:3px solid var(--up);background:linear-gradient(135deg,rgba(0,255,136,.04),rgba(0,255,136,.01),transparent)}
+.coin-card.dn{border-left:3px solid var(--dn);background:linear-gradient(135deg,rgba(255,56,96,.04),rgba(255,56,96,.01),transparent)}
+.coin-card.up::after{content:'';position:absolute;top:-30%;right:-10%;width:50%;height:80%;background:radial-gradient(circle,rgba(0,255,136,.04),transparent 70%);pointer-events:none}
+.coin-card.dn::after{content:'';position:absolute;top:-30%;right:-10%;width:50%;height:80%;background:radial-gradient(circle,rgba(255,56,96,.04),transparent 70%);pointer-events:none}
 [data-lang="en"] .coin-card.up{border-left:none;border-right:3px solid var(--up)}
 [data-lang="en"] .coin-card.dn{border-left:none;border-right:3px solid var(--dn)}
-.coin-card-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-.coin-card-name{display:flex;align-items:center;gap:8px;font-family:var(--fd);font-weight:800;font-size:14px}
-.coin-card-ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:14px;font-weight:800;color:#fff;flex-shrink:0}
-.coin-card-ch{font-family:var(--fm);font-size:13px;font-weight:800;display:flex;align-items:center;gap:4px}
-.coin-card-body{display:flex;align-items:center;justify-content:space-between}
-.coin-card-info{text-align:right;font-size:9px;font-family:var(--fm);color:var(--t2);line-height:1.6;flex-shrink:0}
-[data-lang="en"] .coin-card-info{text-align:left}
-.coin-card-price{font-family:var(--fm);font-size:20px;font-weight:800;color:var(--t0)}
-.coin-card-meta{display:flex;gap:8px;font-size:8px;font-family:var(--fm);color:var(--t3);margin-top:4px}
-.coin-card-spark{display:flex;align-items:flex-end;gap:1px;height:24px;margin-top:6px}
-.coin-card-spark b{width:3px;border-radius:1px;min-height:2px}
+.coin-card-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.coin-card-name{display:flex;align-items:center;gap:10px;font-family:var(--fd);font-weight:800;font-size:15px}
+.coin-card-ic{width:36px;height:36px;border-radius:12px;display:grid;place-items:center;font-size:16px;font-weight:800;flex-shrink:0}
+.coin-card-ch{font-family:var(--fm);font-size:14px;font-weight:800;padding:4px 10px;border-radius:8px}
+.coin-card-body{display:flex;align-items:flex-end;justify-content:space-between;position:relative;z-index:1}
+.coin-card-info{font-size:9px;font-family:var(--fm);color:var(--t2);line-height:1.7;flex-shrink:0}
+.coin-card-price{font-family:var(--fm);font-size:22px;font-weight:800;color:var(--t0);letter-spacing:-0.5px}
+.coin-card-spark{display:flex;align-items:flex-end;gap:1.5px;height:28px;margin-top:8px}
+.coin-card-spark b{width:3.5px;border-radius:1.5px;min-height:2px;transition:height .3s}
+.coin-card-vol{display:flex;gap:6px;margin-top:8px;font-size:8px;font-family:var(--fm);color:var(--t3);position:relative;z-index:1}
 
 /* TOP 3 OPPORTUNITIES */
 .top3-card{background:var(--glass);backdrop-filter:var(--gb);border:1px solid var(--bdr);border-radius:14px;padding:12px;margin-bottom:8px;cursor:pointer;position:relative;overflow:hidden;transition:border-color .2s}

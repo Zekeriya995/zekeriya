@@ -230,18 +230,33 @@ function renderAcc(id){var a=getAcc();var el=document.getElementById(id);if(!el)
   var wR=types.whale.t>0?Math.round(types.whale.h/types.whale.t*100):0;
   var bR=types.brk.t>0?Math.round(types.brk.h/types.brk.t*100):0;
   var accCol=a.rate>=70?'var(--up)':a.rate>=50?'var(--warn)':'var(--t2)';
-  /* Recent checked predictions */
-  var recent=predictions.filter(function(p){return p.checked}).slice(-5).reverse();
-  el.innerHTML='<div class="acc-card" style="cursor:pointer" onclick="var det=this.querySelector(\'.acc-det\');det.style.display=det.style.display===\'none\'?\'block\':\'none\'">'
-    +'<div style="display:flex;align-items:center;justify-content:space-between">'
-    +'<div style="display:flex;align-items:center;gap:12px"><div style="font-family:var(--fd);font-size:38px;font-weight:800;color:'+accCol+'">'+a.rate+'%</div><div><div style="font-size:11px;color:var(--t1);font-weight:700">'+a.hits+'/'+a.total+' '+t('confirmed')+'</div><div style="font-size:8px;color:var(--t3);margin-top:2px">'+(lang==='ar'?'اضغط للتفاصيل ▼':'Tap for details ▼')+'</div></div></div>'
-    +'<div style="width:40px;height:40px;border-radius:12px;background:'+accCol+'15;display:grid;place-items:center;font-size:18px">'+(a.rate>=70?'🏆':a.rate>=50?'📊':'📉')+'</div></div>'
-    +'<div class="acc-det" style="display:none;margin-top:10px;border-top:1px solid var(--bdr);padding-top:10px">'
+  var recent=predictions.filter(function(p){return p.checked}).slice(-8).reverse();
+  /* Calculate total profit estimation */
+  var totalProfit=0;recent.forEach(function(p){if(p.hit)totalProfit+=((p.target-p.price)/p.price*100);else totalProfit-=7});
+  el.innerHTML='<div class="cd" style="padding:14px">'
+    /* Header: Big accuracy number + stats */
+    +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;cursor:pointer" onclick="var det=document.getElementById(\'accDet_'+id+'\');det.style.display=det.style.display===\'none\'?\'block\':\'none\'">'
+    +'<div style="display:flex;align-items:center;gap:14px">'
+    +'<div style="position:relative;width:56px;height:56px"><svg viewBox="0 0 36 36" style="width:56px;height:56px;transform:rotate(-90deg)"><circle cx="18" cy="18" r="15.9" fill="none" stroke="var(--bdr)" stroke-width="2.5"/><circle cx="18" cy="18" r="15.9" fill="none" stroke="'+accCol+'" stroke-width="2.5" stroke-linecap="round" stroke-dasharray="'+Math.round(a.rate)+' '+(100-Math.round(a.rate))+'"/></svg><div style="position:absolute;inset:0;display:grid;place-items:center;font-family:var(--fd);font-size:16px;font-weight:800;color:'+accCol+'">'+a.rate+'%</div></div>'
+    +'<div><div style="font-family:var(--fd);font-size:13px;font-weight:700;color:var(--t0)">'+(lang==='ar'?'نسبة النجاح':'Success Rate')+'</div><div style="font-size:9px;color:var(--t2);font-family:var(--fm)">'+a.hits+' '+(lang==='ar'?'نجحت من':'hit of')+' '+a.total+' '+(lang==='ar'?'صفقة':'trades')+'</div><div style="font-size:8px;color:var(--t3);margin-top:2px">'+(lang==='ar'?'▼ اضغط للتفاصيل':'▼ Tap for details')+'</div></div></div>'
+    +'<div style="text-align:center"><div style="font-size:24px">'+(a.rate>=70?'🏆':a.rate>=50?'📊':'📉')+'</div><div style="font-size:8px;font-family:var(--fm);color:'+(totalProfit>=0?'var(--up)':'var(--dn)');font-weight:700">'+(totalProfit>=0?'+':'')+totalProfit.toFixed(1)+'%</div></div></div>'
+    /* Expandable details */
+    +'<div id="accDet_'+id+'" style="display:none">'
+    /* 3 type bars */
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:10px">'
-    +'<div style="background:var(--ultd);border-radius:8px;padding:8px;text-align:center"><div style="font-family:var(--fm);font-size:18px;font-weight:800;color:var(--ultra)">'+uR+'%</div><div style="font-size:8px;color:var(--t3);margin-top:2px">⭐ ULTRA</div><div style="font-size:7px;color:var(--t3)">'+types.ultra.h+'/'+types.ultra.t+'</div></div>'
-    +'<div style="background:var(--nd);border-radius:8px;padding:8px;text-align:center"><div style="font-family:var(--fm);font-size:18px;font-weight:800;color:var(--neon)">'+wR+'%</div><div style="font-size:8px;color:var(--t3);margin-top:2px">🐋 '+(lang==='ar'?'حيتان':'Whales')+'</div><div style="font-size:7px;color:var(--t3)">'+types.whale.h+'/'+types.whale.t+'</div></div>'
-    +'<div style="background:var(--dd);border-radius:8px;padding:8px;text-align:center"><div style="font-family:var(--fm);font-size:18px;font-weight:800;color:var(--dn)">'+bR+'%</div><div style="font-size:8px;color:var(--t3);margin-top:2px">💥 '+(lang==='ar'?'انفجار':'Breakout')+'</div><div style="font-size:7px;color:var(--t3)">'+types.brk.h+'/'+types.brk.t+'</div></div></div>'
-    +(recent.length?'<div style="font-size:9px;font-weight:700;color:var(--t2);margin-bottom:4px">'+(lang==='ar'?'📜 آخر الإشارات:':'📜 Recent Signals:')+'</div>'+recent.map(function(p){return'<div style="display:flex;justify-content:space-between;padding:3px 0;font-size:8px;font-family:var(--fm);border-bottom:1px solid var(--bdr)"><span style="font-weight:700">'+p.sym+'</span><span style="color:var(--t2)">'+fP(p.price)+'→'+fP(p.target)+'</span><span style="color:'+(p.hit?'var(--up)':'var(--dn)')+';font-weight:700">'+(p.hit?'✅ HIT':'❌ MISS')+'</span></div>'}).join(''):'')
+    +'<div style="background:var(--ultd);border-radius:10px;padding:10px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:var(--ultra)">'+uR+'%</div><div style="font-size:8px;color:var(--t2);font-weight:600;margin-top:2px">⭐ ULTRA</div><div style="font-size:7px;font-family:var(--fm);color:var(--t3)">'+types.ultra.h+'/'+types.ultra.t+' '+(lang==='ar'?'صفقة':'trades')+'</div><div style="height:4px;border-radius:2px;background:var(--bg2);margin-top:4px;overflow:hidden"><div style="height:100%;width:'+uR+'%;background:var(--ultra);border-radius:2px"></div></div></div>'
+    +'<div style="background:var(--nd);border-radius:10px;padding:10px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:var(--neon)">'+wR+'%</div><div style="font-size:8px;color:var(--t2);font-weight:600;margin-top:2px">🐋 '+(lang==='ar'?'حيتان':'Whales')+'</div><div style="font-size:7px;font-family:var(--fm);color:var(--t3)">'+types.whale.h+'/'+types.whale.t+'</div><div style="height:4px;border-radius:2px;background:var(--bg2);margin-top:4px;overflow:hidden"><div style="height:100%;width:'+wR+'%;background:var(--neon);border-radius:2px"></div></div></div>'
+    +'<div style="background:var(--dd);border-radius:10px;padding:10px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:var(--dn)">'+bR+'%</div><div style="font-size:8px;color:var(--t2);font-weight:600;margin-top:2px">💥 '+(lang==='ar'?'انفجار':'Breakout')+'</div><div style="font-size:7px;font-family:var(--fm);color:var(--t3)">'+types.brk.h+'/'+types.brk.t+'</div><div style="height:4px;border-radius:2px;background:var(--bg2);margin-top:4px;overflow:hidden"><div style="height:100%;width:'+bR+'%;background:var(--dn);border-radius:2px"></div></div></div></div>'
+    /* Recent trades table */
+    +(recent.length?'<div style="font-size:10px;font-weight:700;color:var(--t1);margin-bottom:6px">📜 '+(lang==='ar'?'آخر الصفقات':'Recent Trades')+' ('+recent.length+')</div>'
+    +'<div style="background:var(--bg2);border-radius:10px;overflow:hidden">'+recent.map(function(p,i){
+      var pnl=p.hit?((p.target-p.price)/p.price*100):-7;
+      var age=timeAgo(p.time);
+      return'<div style="display:grid;grid-template-columns:40px 1fr 60px 50px;align-items:center;padding:7px 8px;font-size:8px;font-family:var(--fm);'+(i<recent.length-1?'border-bottom:1px solid var(--bdr)':'')+'">'
+      +'<span style="font-weight:800;color:var(--t0)">'+p.sym+'</span>'
+      +'<span style="color:var(--t3)">'+fP(p.price)+' → '+fP(p.target)+'</span>'
+      +'<span style="text-align:center;font-weight:700;color:'+(p.hit?'var(--up)':'var(--dn)')+'">'+(p.hit?'✅ +'+pnl.toFixed(1)+'%':'❌ -7%')+'</span>'
+      +'<span style="text-align:left;color:var(--t3);font-size:7px">'+age.text+'</span></div>'}).join('')+'</div>':'')
     +'</div></div>'}
 /* 💰 STABLECOIN FLOW INDICATOR — uses already-loaded T data (no extra API calls) */
 async function loadStableFlow(){
@@ -389,8 +404,26 @@ async function loadDash(){
   var ultras=results.filter(function(r){return r.ultra});var conf=results.filter(function(r){return r.confirmed});
   document.getElementById('ultraL').innerHTML=ultras.length?ultras.slice(0,3).map(ultraCard).join(''):conf.length?conf.slice(0,2).map(ultraCard).join(''):'<div class="muted">'+t('no_ultra')+'</div>';
   document.getElementById('ulC').textContent=ultras.length||conf.length;document.getElementById('pUl').textContent=ultras.length||conf.length;document.getElementById('notifB').dataset.c=(ultras.length||conf.length).toString();
-  /* L/S on homepage */
-  var lsC=['BTC','ETH','SOL'].filter(function(s){return LS[s]});document.getElementById('dashLS').innerHTML=lsC.map(function(s){var d=LS[s];return'<div class="ls-item"><div class="ls-head"><span class="ls-sym">'+s+'</span><span class="ls-ratio"'+(d.ratio<0.8||d.ratio>1.8?' style="color:var(--dn)"':'')+'>'+d.ratio.toFixed(2)+'</span></div><div class="ls-bar"><div class="ls-l" style="width:'+d.long+'%"></div><div class="ls-s" style="width:'+d.short+'%"></div></div><div class="ls-nums"><span style="color:var(--up)">🟢 '+d.long.toFixed(0)+'%</span><span style="color:var(--dn)">🔴 '+d.short.toFixed(0)+'%</span></div></div>'}).join('')||'<div class="muted">'+t('scanning')+'</div>';
+  /* ⚖️ L/S Professional */
+  var lsC=['BTC','ETH','SOL','BNB','XRP','DOGE'].filter(function(s){return LS[s]});
+  if(lsC.length){
+    var avgLong=lsC.reduce(function(s,c){return s+LS[c].long},0)/lsC.length;
+    var avgShort=100-avgLong;
+    var sentiment=avgLong>=60?(lang==='ar'?'🟢 ضغط شراء قوي':'🟢 Strong Buy Pressure'):avgLong>=55?(lang==='ar'?'🟢 ميل للشراء':'🟢 Bullish Bias'):avgShort>=55?(lang==='ar'?'🔴 ميل للبيع':'🔴 Bearish Bias'):(lang==='ar'?'🟡 متوازن':'🟡 Balanced');
+    var sentCol=avgLong>=55?'var(--up)':avgShort>=55?'var(--dn)':'var(--warn)';
+    document.getElementById('dashLS').innerHTML='<div class="cd" style="padding:12px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><span style="font-size:10px;font-weight:700;color:'+sentCol+'">'+sentiment+'</span><span style="font-family:var(--fm);font-size:9px;color:var(--t3)">L:'+avgLong.toFixed(0)+'% / S:'+avgShort.toFixed(0)+'%</span></div>'
+      +lsC.map(function(s){var d=LS[s];var bg=COL[s]||'#888';
+        var warn=d.ratio>1.8?'⚠️':d.ratio<0.6?'⚠️':'';
+        var signal=d.long>=60?(lang==='ar'?'Long مفرط':'Excess L'):d.short>=55?(lang==='ar'?'ضغط Short':'Short P'):'';
+        return'<div style="margin-bottom:10px">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+        +'<div style="display:flex;align-items:center;gap:6px"><div style="width:22px;height:22px;border-radius:7px;background:'+bg+'18;color:'+bg+';border:1px solid '+bg+'30;display:grid;place-items:center;font-size:8px;font-weight:800">'+s.slice(0,2)+'</div><span style="font-family:var(--fd);font-weight:700;font-size:12px">'+s+'</span></div>'
+        +'<div style="display:flex;align-items:center;gap:4px"><span style="font-family:var(--fm);font-size:11px;font-weight:800;color:'+(d.ratio>1.5?'var(--warn)':d.ratio<0.7?'var(--dn)':'var(--t1)')+'">'+d.ratio.toFixed(2)+'</span>'+(warn?'<span style="font-size:8px">'+warn+'</span>':'')+'</div></div>'
+        +'<div style="display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--bg2);position:relative"><div style="width:'+d.long+'%;background:linear-gradient(90deg,var(--up),rgba(0,255,136,.5));border-radius:5px 0 0 5px;transition:width .5s"></div><div style="width:'+d.short+'%;background:linear-gradient(90deg,rgba(255,56,96,.5),var(--dn));border-radius:0 5px 5px 0;transition:width .5s"></div></div>'
+        +'<div style="display:flex;justify-content:space-between;margin-top:3px;font-size:9px;font-family:var(--fm)"><span style="color:var(--up);font-weight:700">🟢 Long '+d.long.toFixed(0)+'%</span>'+(signal?'<span style="font-size:7px;color:var(--warn);font-weight:700">'+signal+'</span>':'')+'<span style="color:var(--dn);font-weight:700">Short '+d.short.toFixed(0)+'% 🔴</span></div>'
+        +'</div>'}).join('')+'</div>'}
+  else{document.getElementById('dashLS').innerHTML='<div class="muted">'+t('scanning')+'</div>'}
   renderAcc('accCard');
   renderTopCoins();
   renderTop3();

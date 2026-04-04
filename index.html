@@ -351,7 +351,9 @@ canvas{width:100%!important;border-radius:4px}
 .coin-card-info{font-size:9px;font-family:var(--fm);color:var(--t2);line-height:1.7;flex-shrink:0}
 .coin-card-price{font-family:var(--fm);font-size:22px;font-weight:800;color:var(--t0);letter-spacing:-0.5px}
 .coin-card-spark{display:flex;align-items:flex-end;gap:1.5px;height:28px;margin-top:8px}
-.coin-card-spark b{width:3.5px;border-radius:1.5px;min-height:2px;transition:height .3s}
+.coin-card-spark b{width:3px;border-radius:2px;min-height:2px;transition:height .3s}
+.spark{display:flex;align-items:flex-end;gap:1px;height:16px}
+.spark b{width:2px;border-radius:1px;min-height:1px}
 .coin-card-vol{display:flex;gap:6px;margin-top:8px;font-size:8px;font-family:var(--fm);color:var(--t3);position:relative;z-index:1}
 
 /* TOP 3 OPPORTUNITIES */
@@ -393,7 +395,7 @@ canvas{width:100%!important;border-radius:4px}
 <!-- Coin Cards -->
 <div id="topCoins"></div>
 <!-- 🎯 Top 3 Opportunities -->
-<div class="sec"><span class="sec-t">🎯 <span data-t="top3">أفضل 3 فرص الآن</span></span></div>
+<div style="display:flex;align-items:center;gap:8px;margin:14px 0 8px"><span style="font-size:20px">🎯</span><span style="font-family:var(--fd);font-weight:800;font-size:16px;color:#ffd700;text-shadow:0 0 12px rgba(255,215,0,.3)" data-t="top3">أفضل 3 فرص الآن</span></div>
 <div id="top3List"><div class="muted" data-t="scanning">جاري المسح...</div></div>
 <!-- L/S -->
 <div class="sec"><span class="sec-t">⚖️ Long / Short</span></div>

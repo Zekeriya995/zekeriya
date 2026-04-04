@@ -334,6 +334,25 @@ canvas{width:100%!important;border-radius:4px}
 .rpt-preview{background:linear-gradient(135deg,rgba(91,156,255,.06),rgba(176,124,255,.04));border:1px solid rgba(91,156,255,.12);border-radius:14px;padding:12px;margin-bottom:12px;cursor:pointer;position:relative;overflow:hidden;transition:border-color .3s}
 .rpt-preview:active{border-color:var(--neon)}
 
+/* COIN CARDS */
+.coin-card{background:var(--glass);backdrop-filter:var(--gb);border-radius:14px;padding:12px;margin-bottom:8px;cursor:pointer;position:relative;overflow:hidden;border:1px solid var(--bdr);transition:border-color .2s}
+.coin-card:active{transform:scale(.98)}
+.coin-card.up{border-left:3px solid var(--up);background:linear-gradient(135deg,rgba(0,255,136,.03),transparent)}
+.coin-card.dn{border-left:3px solid var(--dn);background:linear-gradient(135deg,rgba(255,56,96,.03),transparent)}
+[data-lang="en"] .coin-card.up{border-left:none;border-right:3px solid var(--up)}
+[data-lang="en"] .coin-card.dn{border-left:none;border-right:3px solid var(--dn)}
+.coin-card-h{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.coin-card-name{display:flex;align-items:center;gap:8px;font-family:var(--fd);font-weight:800;font-size:14px}
+.coin-card-ic{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-size:14px;font-weight:800;color:#fff;flex-shrink:0}
+.coin-card-ch{font-family:var(--fm);font-size:13px;font-weight:800;display:flex;align-items:center;gap:4px}
+.coin-card-body{display:flex;align-items:center;justify-content:space-between}
+.coin-card-info{text-align:right;font-size:9px;font-family:var(--fm);color:var(--t2);line-height:1.6;flex-shrink:0}
+[data-lang="en"] .coin-card-info{text-align:left}
+.coin-card-price{font-family:var(--fm);font-size:20px;font-weight:800;color:var(--t0)}
+.coin-card-meta{display:flex;gap:8px;font-size:8px;font-family:var(--fm);color:var(--t3);margin-top:4px}
+.coin-card-spark{display:flex;align-items:flex-end;gap:1px;height:24px;margin-top:6px}
+.coin-card-spark b{width:3px;border-radius:1px;min-height:2px}
+
 @media(max-width:520px){.grid-2{grid-template-columns:1fr}.mst{grid-template-columns:repeat(2,1fr)}.mh-factors{grid-template-columns:repeat(2,1fr)}.u-conf{grid-template-columns:repeat(4,1fr)}}
 @media(min-width:768px){.mst{grid-template-columns:repeat(4,1fr)}.hm{grid-template-columns:repeat(6,1fr)}.main{padding:10px 24px 92px}}
 @media(min-width:1024px){.sidebar{display:flex;flex-direction:column;gap:2px;padding-top:16px}.bnv{display:none}.main{padding:10px 24px 24px}.hm{grid-template-columns:repeat(8,1fr)}}
@@ -362,44 +381,15 @@ canvas{width:100%!important;border-radius:4px}
 
 <!-- 🏠 HOME -->
 <div class="pg act" id="pg-dash">
-<div class="mh" id="mhCard"><div class="mst-lbl" data-t="market_health">🏥 صحة السوق</div><div class="mh-score" id="mhScore" style="color:var(--warn)">--</div><div class="mh-label" id="mhLabel">...</div><div class="mh-bar"><div class="mh-pt" id="mhPt" style="left:50%"></div></div><div class="mh-factors" id="mhFactors"></div></div>
-
-<!-- 💰 STABLECOIN FLOW -->
-<div class="cd" style="padding:14px;margin-bottom:12px">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-<div class="cd-t">💰 <span data-t="stable_flow">تدفق العملات المستقرة</span></div>
-<div id="sfSignal" style="font-size:9px;font-family:var(--fm);font-weight:700;padding:3px 8px;border-radius:6px">...</div>
-</div>
-<div style="display:flex;gap:6px;margin-bottom:8px">
-<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)">USDT Vol</div><div id="sfUSDT" style="font-family:var(--fm);font-size:14px;font-weight:800;color:var(--t0)">--</div><div id="sfUSDTch" style="font-size:9px;font-family:var(--fm);font-weight:700">--</div></div>
-<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)">USDC Vol</div><div id="sfUSDC" style="font-family:var(--fm);font-size:14px;font-weight:800;color:var(--t0)">--</div><div id="sfUSDCch" style="font-size:9px;font-family:var(--fm);font-weight:700">--</div></div>
-<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)" data-t="sf_index">مؤشر التدفق</div><div id="sfIndex" style="font-family:var(--fd);font-size:20px;font-weight:800">--</div><div id="sfIndexLbl" style="font-size:8px;font-family:var(--fm)">...</div></div>
-</div>
-<div style="height:8px;border-radius:4px;background:linear-gradient(90deg,var(--up),var(--up),var(--warn),var(--dn),var(--dn));position:relative;margin-bottom:6px"><div id="sfPt" style="position:absolute;top:-4px;width:16px;height:16px;background:var(--t0);border-radius:50%;border:2px solid var(--bg);transform:translateX(-50%);box-shadow:0 0 8px rgba(255,255,255,.3);transition:left .8s;left:50%"></div></div>
-<div style="display:flex;justify-content:space-between;font-size:7px;font-family:var(--fm);color:var(--t3)"><span>🟢 <span data-t="sf_buy">شراء كريبتو</span></span><span data-t="sf_neutral">متوازن</span><span>🔴 <span data-t="sf_sell">بيع كريبتو</span></span></div>
-<div id="sfAdvice" style="margin-top:8px;padding:8px;background:var(--bg2);border-radius:8px;font-size:10px;text-align:center;font-weight:600">...</div>
-</div>
-
-<div class="mst"><div class="mst-i"><div class="mst-val" id="fgV" style="color:var(--warn)">--</div><div class="mst-lbl">😰 FEAR</div><div class="mst-sub" id="fgL">...</div></div><div class="mst-i"><div class="mst-val" id="btcD" style="color:var(--neon)">--</div><div class="mst-lbl">₿ BTC DOM</div><div class="mst-sub">Dominance</div></div><div class="mst-i"><div class="mst-val" id="brkC" style="color:var(--dn)">0</div><div class="mst-lbl">🔥 BREAKOUTS</div><div class="mst-sub">Active</div></div><div class="mst-i"><div class="mst-val" id="ulC" style="color:var(--ultra)">0</div><div class="mst-lbl">⭐ ULTRA</div><div class="mst-sub" data-t="confirmed">مؤكدة</div></div></div>
-<div id="warnBox"></div>
-
-<!-- 📊 MARKET DIRECTION -->
-<div onclick="openMo('reportMo');loadReport()" style="background:linear-gradient(135deg,rgba(91,156,255,.08),rgba(176,124,255,.06));border:1px solid rgba(91,156,255,.15);border-radius:14px;padding:14px;margin-bottom:12px;cursor:pointer;position:relative;overflow:hidden">
-<div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--blue),var(--purple),var(--neon))"></div>
-<div style="display:flex;align-items:center;justify-content:space-between">
-<div style="display:flex;align-items:center;gap:10px">
-<div style="width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,var(--blue),var(--purple));display:grid;place-items:center;font-size:20px">📊</div>
-<div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)" data-t="mkt_dir">اتجاه السوق</div>
-<div style="font-size:9px;color:var(--t2);font-family:var(--fm)" data-t="mkt_dir_sub">تقرير مفصل — BTC & ETH — كل 4 ساعات</div></div>
-</div>
-<div style="font-size:9px;font-family:var(--fm);color:var(--blue)">📋 ←</div>
-</div>
-</div>
-
-<div class="sec"><span class="sec-t">⭐ ULTRA SIGNALS</span></div>
-<div id="ultraL"><div class="muted" data-t="scanning">جاري المسح...</div></div>
+<!-- Coin Cards -->
+<div id="topCoins"></div>
+<!-- L/S first -->
 <div class="sec"><span class="sec-t">⚖️ Long / Short</span></div>
 <div id="dashLS"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>
+<!-- ULTRA second -->
+<div class="sec"><span class="sec-t">⭐ ULTRA SIGNALS</span></div>
+<div id="ultraL"><div class="muted" data-t="scanning">جاري المسح...</div></div>
+<!-- Accuracy -->
 <div class="sec"><span class="sec-t" data-t="sec_accuracy">📈 نسبة النجاح</span></div>
 <div id="accCard"></div>
 </div>
@@ -421,6 +411,35 @@ canvas{width:100%!important;border-radius:4px}
 <div id="wh1" style="display:none"><div id="liqL"></div><div class="sec"><span class="sec-t">📗 ORDER BOOK</span></div><div id="obS"></div></div>
 <div id="wh2" style="display:none"><div class="muted">💎 صيد مبكر — عملات صغيرة بحجم غير عادي قبل الانفجار</div><div style="display:flex;gap:4px;margin-bottom:6px;font-size:8px;font-family:var(--fm)"><span style="color:var(--up)">🟢 مبكر = ادخل</span><span style="color:var(--warn)">🟡 فيه فرصة = حذر</span><span style="color:var(--dn)">🔴 متأخر = راقب</span></div><div id="gemL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div></div>
 <button class="rfr" onclick="loadWhales()">🔄 <span data-t="refresh">تحديث</span></button>
+</div>
+
+<!-- 📈 MARKET MOVEMENT PAGE -->
+<div class="pg" id="pg-market">
+<!-- Health -->
+<div class="mh" id="mhCard"><div class="mst-lbl" data-t="market_health">🏥 صحة السوق</div><div class="mh-score" id="mhScore" style="color:var(--warn)">--</div><div class="mh-label" id="mhLabel">...</div><div class="mh-bar"><div class="mh-pt" id="mhPt" style="left:50%"></div></div><div class="mh-factors" id="mhFactors"></div></div>
+<!-- Stats -->
+<div class="mst"><div class="mst-i"><div class="mst-val" id="fgV" style="color:var(--warn)">--</div><div class="mst-lbl">😰 FEAR</div><div class="mst-sub" id="fgL">...</div></div><div class="mst-i"><div class="mst-val" id="btcD" style="color:var(--neon)">--</div><div class="mst-lbl">₿ BTC DOM</div><div class="mst-sub">Dominance</div></div><div class="mst-i"><div class="mst-val" id="brkC" style="color:var(--dn)">0</div><div class="mst-lbl">🔥 BREAKOUTS</div><div class="mst-sub">Active</div></div><div class="mst-i"><div class="mst-val" id="ulC" style="color:var(--ultra)">0</div><div class="mst-lbl">⭐ ULTRA</div><div class="mst-sub" data-t="confirmed">مؤكدة</div></div></div>
+<!-- Warnings -->
+<div id="warnBox"></div>
+<!-- Stablecoin Flow -->
+<div class="cd" style="padding:14px;margin-bottom:12px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+<div class="cd-t">💰 <span data-t="stable_flow">تدفق العملات المستقرة</span></div>
+<div id="sfSignal" style="font-size:9px;font-family:var(--fm);font-weight:700;padding:3px 8px;border-radius:6px">...</div>
+</div>
+<div style="display:flex;gap:6px;margin-bottom:8px">
+<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)">USDT Vol</div><div id="sfUSDT" style="font-family:var(--fm);font-size:14px;font-weight:800;color:var(--t0)">--</div><div id="sfUSDTch" style="font-size:9px;font-family:var(--fm);font-weight:700">--</div></div>
+<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)">USDC Vol</div><div id="sfUSDC" style="font-family:var(--fm);font-size:14px;font-weight:800;color:var(--t0)">--</div><div id="sfUSDCch" style="font-size:9px;font-family:var(--fm);font-weight:700">--</div></div>
+<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)" data-t="sf_index">مؤشر التدفق</div><div id="sfIndex" style="font-family:var(--fd);font-size:20px;font-weight:800">--</div><div id="sfIndexLbl" style="font-size:8px;font-family:var(--fm)">...</div></div>
+</div>
+<div style="height:8px;border-radius:4px;background:linear-gradient(90deg,var(--up),var(--up),var(--warn),var(--dn),var(--dn));position:relative;margin-bottom:6px"><div id="sfPt" style="position:absolute;top:-4px;width:16px;height:16px;background:var(--t0);border-radius:50%;border:2px solid var(--bg);transform:translateX(-50%);box-shadow:0 0 8px rgba(255,255,255,.3);transition:left .8s;left:50%"></div></div>
+<div style="display:flex;justify-content:space-between;font-size:7px;font-family:var(--fm);color:var(--t3)"><span>🟢 <span data-t="sf_buy">شراء كريبتو</span></span><span data-t="sf_neutral">متوازن</span><span>🔴 <span data-t="sf_sell">بيع كريبتو</span></span></div>
+<div id="sfAdvice" style="margin-top:8px;padding:8px;background:var(--bg2);border-radius:8px;font-size:10px;text-align:center;font-weight:600">...</div>
+</div>
+<!-- Report inline -->
+<div class="sec"><span class="sec-t">📊 <span data-t="mkt_dir">اتجاه السوق</span></span></div>
+<div id="rptBody" style="margin-bottom:12px"><div class="muted" data-t="scanning">جاري المسح...</div></div>
+<button class="rfr" onclick="reportCache.time=0;loadReport()" style="background:var(--bd);color:var(--blue);border-color:rgba(91,156,255,.15)">🔄 <span data-t="refresh">تحديث التقرير</span></button>
 </div>
 
 <!-- 📊 INDICATORS + HEATMAP + WATCHLIST -->
@@ -460,6 +479,7 @@ canvas{width:100%!important;border-radius:4px}
 <button class="bb act" data-p="dash"><span class="bi">🏠</span><span data-t="nav_home">الرئيسية</span></button>
 <button class="bb" data-p="scan"><span class="bi">📡</span><span data-t="nav_scan">السكانر</span></button>
 <button class="bb" data-p="whale"><span class="bi">🐋</span><span data-t="nav_whale">حيتان</span></button>
+<button class="bb" data-p="market"><span class="bi">📈</span><span data-t="nav_market">حركة السوق</span></button>
 <button class="bb" data-p="ind"><span class="bi">📊</span><span data-t="nav_ind">مؤشرات</span></button>
 <button class="bb" data-p="me"><span class="bi">👤</span><span data-t="nav_me">حسابي</span></button>
 </div>
@@ -467,18 +487,6 @@ canvas{width:100%!important;border-radius:4px}
 <!-- MODALS -->
 <div class="mo" id="addMo"><div class="mo-c"><div class="mo-bar"></div><h3>➕ <span data-t="add_coin">إضافة عملة</span></h3><input class="mo-inp" id="aSym" placeholder="BTC"><input class="mo-inp" id="aAmt" type="number"><input class="mo-inp" id="aPr" type="number"><button class="mo-btn" onclick="addPort()">✅ <span data-t="add">إضافة</span></button><button class="rfr" onclick="closeMo('addMo')" style="margin-top:4px" data-t="cancel">إلغاء</button></div></div>
 <div class="mo" id="coinMo"><div class="mo-c"><div class="mo-bar"></div><h3 id="cmT">BTC</h3><div class="cm-price" id="cmP">$0</div><div class="cm-ch" id="cmC">0%</div><div class="chart-w"><div class="chart-ctl"><button class="chart-ind act" data-i="vol" onclick="tgI('vol',this)">VOL</button><button class="chart-ind" data-i="sma" onclick="tgI('sma',this)">EMA</button><button class="chart-ind" data-i="rsi" onclick="tgI('rsi',this)">RSI</button><button class="chart-ind" data-i="sr" onclick="tgI('sr',this)">S/R</button><div style="flex:1"></div><button class="chart-tf" data-t2="15m" onclick="cTF('15m',this)">15M</button><button class="chart-tf act" data-t2="1h" onclick="cTF('1h',this)">1H</button><button class="chart-tf" data-t2="4h" onclick="cTF('4h',this)">4H</button><button class="chart-tf" data-t2="1d" onclick="cTF('1d',this)">1D</button></div><canvas id="chCv" height="280"></canvas></div><div class="sts" id="cmSts"></div><div id="cmExtra"></div><button class="rfr" onclick="closeMo('coinMo')">🔙 <span data-t="back">رجوع</span></button></div></div>
-
-<!-- 📊 MARKET DIRECTION REPORT MODAL -->
-<div class="mo" id="reportMo"><div class="mo-c" style="max-height:92vh;padding:0">
-<div style="position:sticky;top:0;z-index:10;background:linear-gradient(180deg,rgba(10,16,28,.98),rgba(10,16,28,.9));padding:14px;border-bottom:1px solid var(--bdr)">
-<div class="mo-bar"></div>
-<div style="display:flex;align-items:center;justify-content:space-between">
-<div style="display:flex;align-items:center;gap:8px"><span style="font-size:20px">📊</span><div><div style="font-family:var(--fd);font-weight:800;font-size:15px;color:var(--t0)" data-t="mkt_dir">اتجاه السوق</div><div id="rptTime" style="font-size:8px;color:var(--t3);font-family:var(--fm)">...</div></div></div>
-<div id="rptBadge" style="padding:4px 10px;border-radius:6px;font-size:9px;font-family:var(--fm);font-weight:700">...</div>
-</div></div>
-<div id="rptBody" style="padding:14px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>
-<div style="padding:0 14px 14px;display:flex;gap:6px"><button class="rfr" onclick="reportCache.time=0;loadReport()" style="flex:1;background:var(--bd);color:var(--blue);border-color:rgba(91,156,255,.15)">🔄 <span data-t="refresh">تحديث</span></button><button class="rfr" onclick="closeMo('reportMo')" style="flex:1">🔙 <span data-t="back">رجوع</span></button></div>
-</div></div>
 
 <!-- NOTIFICATION SOUND (louder) -->
 <audio id="sndAlert" preload="auto"><source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVYGAACBAIA/f4CAgIB/f39/gICAgH9/f4CAgIB/f4CAgIB/f3+AgICBgH5+f4GBgYB+fn+BgYGAfn5/gYGBgH19foKCgoF8fH6CgoKBfHx+goODgnx7foODg4J7e36EhISCenp/hISEg3p5f4WFhIN5eYCFhYWDeHiAhoaGhHd3gIeHh4R2doCHh4iEdXWBiIiIhHR0gYmJiYRzc4GJiomFcnKCioqKhXFxgouLi4VwcIKLjIyGb2+CjIyMhm5ugoyNjYZtbYONjY2HbGyDjo6Oh2trg4+Pj4dqaoOPj5CHaWmEkJCQiGhoAA==" type="audio/wav"></audio>

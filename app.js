@@ -142,7 +142,13 @@ async function loadFutures(){
   await Promise.all(p1.concat(p2));
   if(!Object.keys(LS).length)WL.slice(0,6).forEach(function(s){var fr=FR[s];if(fr){var b=fr.rate>0?55+Math.min(20,fr.rate*200):45-Math.min(15,Math.abs(fr.rate)*200);LS[s]={long:Math.round(b),short:Math.round(100-b),ratio:+(b/(100-b)).toFixed(2)}}});}
 /* ═══ EARLY DETECTION SCANNER — catches coins BEFORE they pump ═══ */
-function quickScan(){var cands=[];Object.entries(T).forEach(function(e){var s=e[0],d=e[1];if(d.v<200000)return;var sc=0,tags=[];
+function quickScan(){var cands=[];Object.entries(T).forEach(function(e){var s=e[0],d=e[1];
+  /* Smart volume filter: lower threshold for small coins with momentum */
+  var minVol=200000;
+  if(d.p<0.1&&d.c>=3)minVol=50000;  /* Micro caps moving = lower bar */
+  else if(d.p<1&&d.c>=2)minVol=100000; /* Small caps with momentum */
+  if(d.v<minVol)return;
+  var sc=0,tags=[];
   /* EARLY DETECTION: low change + high volume = accumulation before pump */
   if(d.c>=0.5&&d.c<3&&d.v>5e7){sc+=25;tags.push('🔍EARLY')}
   if(d.c>=0.5&&d.c<5&&d.v>1e8){sc+=20;tags.push('🔍STEALTH')}
@@ -164,13 +170,18 @@ function quickScan(){var cands=[];Object.entries(T).forEach(function(e){var s=e[
   if(d.h&&d.l&&d.h!==d.l&&((d.p-d.l)/(d.h-d.l))*100<25&&d.v>1e7){sc+=10;tags.push('📉BOTTOM')}
   if(sc>=15)cands.push({s:s,p:d.p,c:d.c,v:d.v,score:sc,tags:tags,fr:fr?fr.rate:null,by:d.by,cb:CBP[s]})});
   return cands.sort(function(a,b){return b.score-a.score})}
-/* DEEP ANALYZE — 6 checks, parallel OB requests */
+/* DEEP ANALYZE — 6 checks, parallel + Bybit fallback */
 async function deepAnalyze(cands){var results=[];var top=cands.slice(0,30);
-  /* Parallel: fetch klines + OB for all at once */
   var klData={},obData={};
+  /* Parallel: Binance klines + OB */
   var klProms=top.slice(0,25).map(function(c){return fj(BN+'/klines?symbol='+c.s+'USDT&interval=1h&limit=30').then(function(d){klData[c.s]=d}).catch(function(){})});
   var obProms=top.slice(0,15).map(function(c){return fj(BN+'/depth?symbol='+c.s+'USDT&limit=10').then(function(d){obData[c.s]=d}).catch(function(){})});
   await Promise.all(klProms.concat(obProms));
+  /* Bybit fallback: for coins without Binance klines */
+  var byMissing=top.filter(function(c){return!klData[c.s]&&T[c.s]&&T[c.s].src==='BY'}).slice(0,10);
+  if(byMissing.length){var byProms=byMissing.map(function(c){return fj('https://api.bybit.com/v5/market/kline?category=spot&symbol='+c.s+'USDT&interval=60&limit=30').then(function(d){if(d&&d.result&&d.result.list){klData[c.s]=d.result.list.reverse().map(function(k){return[+k[0],+k[1],+k[2],+k[3],+k[4],+k[5]]})}}).catch(function(){})});
+    var byObProms=byMissing.map(function(c){return fj('https://api.bybit.com/v5/market/orderbook?category=spot&symbol='+c.s+'USDT&limit=10').then(function(d){if(d&&d.result){obData[c.s]={bids:(d.result.b||[]).map(function(x){return[x[0],x[1]]}),asks:(d.result.a||[]).map(function(x){return[x[0],x[1]]})}}}).catch(function(){})});
+    await Promise.all(byProms.concat(byObProms))}
   for(var ci=0;ci<top.length;ci++){var c=top[ci];var ds=c.score,dt=c.tags.slice();
     var checks={vol:false,ob:false,rsi:false,macd:false,fr:false,oi:false};var passed=0;
     /* CHECK 1: Volume Spike 25% */
@@ -653,12 +664,19 @@ function updateValidatorUI(issues,fixes){
 function renderValidatorLog(){
   var el=document.getElementById('validatorPanel');if(!el)return;
   el.innerHTML=validatorLog.length?validatorLog.map(function(l){var a=timeAgo(l.time);return'<div style="display:flex;gap:6px;padding:4px 0;border-bottom:1px solid var(--bdr);font-size:9px"><span>'+l.type+'</span><span style="flex:1;color:var(--t1)">'+l.msg+'</span><span style="color:var(--t3);font-family:var(--fm);font-size:7px;flex-shrink:0">'+a.text+'</span></div>'}).join(''):'<div style="text-align:center;color:var(--t3);font-size:10px;padding:10px">🤖 '+(lang==='ar'?'لم يتم الفحص بعد':'Not scanned yet')+'</div>'}
+/* 🎯 BYBIT TOP GAINERS — catch Bybit-only movers */
+async function scanBybitGainers(){
+  try{var by=await fj('https://api.bybit.com/v5/market/tickers?category=spot');if(!by||!by.result)return;
+    var gainers=by.result.list.filter(function(x){return x.symbol.endsWith('USDT')&&+x.price24hPcnt*100>=3&&+x.turnover24h>50000}).sort(function(a,b){return+b.price24hPcnt-+a.price24hPcnt}).slice(0,20);
+    gainers.forEach(function(x){var s=x.symbol.replace('USDT','');var chg=+x.price24hPcnt*100;
+      if(!T[s]||T[s].src==='BY'){T[s]={p:+x.lastPrice,c:chg,v:+x.turnover24h,h:+x.highPrice24h,l:+x.lowPrice24h,src:'BY',by:+x.lastPrice}}
+      if(chg>=5&&chg<=15){var k='by_'+s+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;localStorage.setItem('nxnot10',JSON.stringify(notifiedSet));recSig(s,'breakout');if(chg<8)notify(s,'gem',0)}}})}catch(e){}}
 /* INIT */
 async function init(){document.getElementById('sInp').placeholder=t('search_ph');document.getElementById('notifB').dataset.c='0';
   loadProfile();loadToneUI();updateMenuLang();updateMenuTheme();
   if(tg){tg.setHeaderColor(document.body.dataset.theme==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(document.body.dataset.theme==='dark'?'#020408':'#f0f4f8')}
   await loadDash();renderPort();
-  setInterval(async function(){try{await loadTk();await loadFutures();lastDataTime=Date.now();checkWatchlistAlerts()}catch(e){}},30000);
+  setInterval(async function(){try{await loadTk();await loadFutures();lastDataTime=Date.now();checkWatchlistAlerts();scanBybitGainers()}catch(e){}},30000);
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))await loadDash()},120000);
   setInterval(function(){if(!ws||ws.readyState!==1)initWS()},30000);
   setInterval(function(){notifiedSet={};localStorage.setItem('nxnot10','{}')},3600000);

@@ -348,71 +348,58 @@ canvas{width:100%!important;border-radius:4px}
 
 <div class="srch" style="position:relative"><div class="srch-b"><span style="color:var(--t3)">🔍</span><input id="sInp" oninput="onSrch(this.value)"></div><div class="srch-r" id="sRes"></div></div>
 
+<div class="pls-bar">
+<div class="pls-i">🏥 <span id="pMH" style="font-weight:700;color:var(--neon)">--</span>/100</div>
+<div class="pls-i">😰 <span id="pFG" style="font-weight:700;color:var(--warn)">--</span></div>
+<div class="pls-i">🔥 <span id="pBrk" style="font-weight:700;color:var(--dn)">0</span></div>
+<div class="pls-i">⭐ <span id="pUl" style="font-weight:700;color:var(--ultra)">0</span></div>
+<div class="pls-i">FR <span id="pFR" style="font-weight:700;color:var(--warn)">--</span></div>
+</div>
+
 <div class="tkr"><div class="tkr-s" id="tkrEl">⏳</div></div>
 
 <div class="app"><main class="main">
 
-<!-- 🏠 HOME: Professional Layout -->
+<!-- 🏠 HOME -->
 <div class="pg act" id="pg-dash">
+<div class="mh" id="mhCard"><div class="mst-lbl" data-t="market_health">🏥 صحة السوق</div><div class="mh-score" id="mhScore" style="color:var(--warn)">--</div><div class="mh-label" id="mhLabel">...</div><div class="mh-bar"><div class="mh-pt" id="mhPt" style="left:50%"></div></div><div class="mh-factors" id="mhFactors"></div></div>
 
-<!-- HERO: Market Health Circle -->
-<div class="hero-card" id="mhCard">
-<div class="hero-circle"><svg viewBox="0 0 120 120" class="hero-svg"><circle cx="60" cy="60" r="52" fill="none" stroke="var(--bdr)" stroke-width="6"/><circle cx="60" cy="60" r="52" fill="none" stroke="var(--neon)" stroke-width="6" stroke-linecap="round" stroke-dasharray="327" stroke-dashoffset="327" id="mhArc" style="transition:stroke-dashoffset 1.5s,stroke .5s;transform:rotate(-90deg);transform-origin:center"/></svg><div class="hero-num" id="mhScore">--</div><div class="hero-lbl" id="mhLabel">...</div></div>
-<div class="hero-stats">
-<div class="hero-st"><span class="hero-st-v" id="fgV" style="color:var(--warn)">--</span><span class="hero-st-l">😰 <span id="fgL">Fear</span></span></div>
-<div class="hero-st"><span class="hero-st-v" id="btcD" style="color:var(--neon)">--</span><span class="hero-st-l">₿ BTC Dom</span></div>
-<div class="hero-st"><span class="hero-st-v" id="brkC" style="color:var(--dn)">0</span><span class="hero-st-l">🔥 <span data-t="breakout">انفجار</span></span></div>
-<div class="hero-st"><span class="hero-st-v" id="ulC" style="color:var(--ultra)">0</span><span class="hero-st-l">⭐ ULTRA</span></div>
+<!-- 💰 STABLECOIN FLOW -->
+<div class="cd" style="padding:14px;margin-bottom:12px">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+<div class="cd-t">💰 <span data-t="stable_flow">تدفق العملات المستقرة</span></div>
+<div id="sfSignal" style="font-size:9px;font-family:var(--fm);font-weight:700;padding:3px 8px;border-radius:6px">...</div>
 </div>
-<div class="mh-bar" style="margin-top:8px"><div class="mh-pt" id="mhPt" style="left:50%"></div></div>
-<div class="mh-factors" id="mhFactors"></div>
+<div style="display:flex;gap:6px;margin-bottom:8px">
+<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)">USDT Vol</div><div id="sfUSDT" style="font-family:var(--fm);font-size:14px;font-weight:800;color:var(--t0)">--</div><div id="sfUSDTch" style="font-size:9px;font-family:var(--fm);font-weight:700">--</div></div>
+<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)">USDC Vol</div><div id="sfUSDC" style="font-family:var(--fm);font-size:14px;font-weight:800;color:var(--t0)">--</div><div id="sfUSDCch" style="font-size:9px;font-family:var(--fm);font-weight:700">--</div></div>
+<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)" data-t="sf_index">مؤشر التدفق</div><div id="sfIndex" style="font-family:var(--fd);font-size:20px;font-weight:800">--</div><div id="sfIndexLbl" style="font-size:8px;font-family:var(--fm)">...</div></div>
 </div>
-
-<!-- 📊 MARKET DIRECTION PREVIEW -->
-<div class="rpt-preview" onclick="openMo('reportMo');loadReport()">
-<div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--blue),var(--purple),var(--neon))"></div>
-<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-<div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px">📊</span><span style="font-family:var(--fd);font-weight:800;font-size:13px;color:var(--t0)" data-t="mkt_dir">اتجاه السوق</span></div>
-<span style="font-size:8px;font-family:var(--fm);color:var(--blue)">📋 <span data-t="mkt_dir_sub">تقرير مفصل</span> →</span>
-</div>
-<div id="rptPreviewContent" style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-<div style="background:var(--bg2);border-radius:8px;padding:8px;display:flex;align-items:center;gap:6px"><span style="font-size:16px">₿</span><div><div style="font-family:var(--fm);font-size:11px;font-weight:800;color:var(--t0)" id="rptBTC">--</div><div style="font-size:8px;font-family:var(--fm);color:var(--t3)" id="rptBTCdir">...</div></div></div>
-<div style="background:var(--bg2);border-radius:8px;padding:8px;display:flex;align-items:center;gap:6px"><span style="font-size:16px">Ξ</span><div><div style="font-family:var(--fm);font-size:11px;font-weight:800;color:var(--t0)" id="rptETH">--</div><div style="font-size:8px;font-family:var(--fm);color:var(--t3)" id="rptETHdir">...</div></div></div>
-</div>
+<div style="height:8px;border-radius:4px;background:linear-gradient(90deg,var(--up),var(--up),var(--warn),var(--dn),var(--dn));position:relative;margin-bottom:6px"><div id="sfPt" style="position:absolute;top:-4px;width:16px;height:16px;background:var(--t0);border-radius:50%;border:2px solid var(--bg);transform:translateX(-50%);box-shadow:0 0 8px rgba(255,255,255,.3);transition:left .8s;left:50%"></div></div>
+<div style="display:flex;justify-content:space-between;font-size:7px;font-family:var(--fm);color:var(--t3)"><span>🟢 <span data-t="sf_buy">شراء كريبتو</span></span><span data-t="sf_neutral">متوازن</span><span>🔴 <span data-t="sf_sell">بيع كريبتو</span></span></div>
+<div id="sfAdvice" style="margin-top:8px;padding:8px;background:var(--bg2);border-radius:8px;font-size:10px;text-align:center;font-weight:600">...</div>
 </div>
 
-<!-- ⭐ ULTRA SIGNALS -->
-<div class="sec"><span class="sec-t">⭐ ULTRA SIGNALS</span></div>
-<div id="ultraL"><div class="muted" data-t="scanning">جاري المسح...</div></div>
-
-<!-- ⚠️ WARNINGS -->
+<div class="mst"><div class="mst-i"><div class="mst-val" id="fgV" style="color:var(--warn)">--</div><div class="mst-lbl">😰 FEAR</div><div class="mst-sub" id="fgL">...</div></div><div class="mst-i"><div class="mst-val" id="btcD" style="color:var(--neon)">--</div><div class="mst-lbl">₿ BTC DOM</div><div class="mst-sub">Dominance</div></div><div class="mst-i"><div class="mst-val" id="brkC" style="color:var(--dn)">0</div><div class="mst-lbl">🔥 BREAKOUTS</div><div class="mst-sub">Active</div></div><div class="mst-i"><div class="mst-val" id="ulC" style="color:var(--ultra)">0</div><div class="mst-lbl">⭐ ULTRA</div><div class="mst-sub" data-t="confirmed">مؤكدة</div></div></div>
 <div id="warnBox"></div>
 
-<!-- ⚖️ MARKET NOW: Flow + L/S side by side -->
-<div class="sec"><span class="sec-t">⚖️ <span data-t="market_now">السوق الآن</span></span></div>
-<div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:12px">
-
-<!-- 💰 Stablecoin Flow Mini -->
-<div class="cd" style="padding:10px">
-<div style="font-size:9px;font-weight:700;color:var(--t2);margin-bottom:6px">💰 <span data-t="stable_flow">تدفق المستقرة</span></div>
-<div style="text-align:center"><div id="sfIndex" style="font-family:var(--fd);font-size:24px;font-weight:800">--</div><div id="sfIndexLbl" style="font-size:8px;font-family:var(--fm)">...</div></div>
-<div style="height:6px;border-radius:3px;background:linear-gradient(90deg,var(--up),var(--warn),var(--dn));position:relative;margin:6px 0"><div id="sfPt" style="position:absolute;top:-3px;width:12px;height:12px;background:var(--t0);border-radius:50%;border:2px solid var(--bg);transform:translateX(-50%);box-shadow:0 0 6px rgba(255,255,255,.3);transition:left .8s;left:50%"></div></div>
-<div id="sfSignal" style="font-size:8px;font-family:var(--fm);font-weight:700;text-align:center;padding:2px 6px;border-radius:4px">...</div>
-<!-- Hidden elements for StableFlow function -->
-<div style="display:none"><span id="sfUSDT">0</span><span id="sfUSDC">0</span><span id="sfUSDTch">-</span><span id="sfUSDCch">-</span><span id="sfAdvice">-</span></div>
+<!-- 📊 MARKET DIRECTION -->
+<div onclick="openMo('reportMo');loadReport()" style="background:linear-gradient(135deg,rgba(91,156,255,.08),rgba(176,124,255,.06));border:1px solid rgba(91,156,255,.15);border-radius:14px;padding:14px;margin-bottom:12px;cursor:pointer;position:relative;overflow:hidden">
+<div style="position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,var(--blue),var(--purple),var(--neon))"></div>
+<div style="display:flex;align-items:center;justify-content:space-between">
+<div style="display:flex;align-items:center;gap:10px">
+<div style="width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,var(--blue),var(--purple));display:grid;place-items:center;font-size:20px">📊</div>
+<div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)" data-t="mkt_dir">اتجاه السوق</div>
+<div style="font-size:9px;color:var(--t2);font-family:var(--fm)" data-t="mkt_dir_sub">تقرير مفصل — BTC & ETH — كل 4 ساعات</div></div>
 </div>
-
-<!-- ⚖️ L/S Mini -->
-<div class="cd" style="padding:10px">
-<div style="font-size:9px;font-weight:700;color:var(--t2);margin-bottom:6px">⚖️ Long / Short</div>
-<div id="dashLS" style="font-size:9px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>
+<div style="font-size:9px;font-family:var(--fm);color:var(--blue)">📋 ←</div>
 </div>
 </div>
 
-<!-- Hidden stats for pills bar compatibility -->
-<div style="display:none"><span id="pMH">--</span><span id="pFG">--</span><span id="pBrk">0</span><span id="pUl">0</span><span id="pFR">--</span></div>
-
-<!-- 📈 ACCURACY -->
+<div class="sec"><span class="sec-t">⭐ ULTRA SIGNALS</span></div>
+<div id="ultraL"><div class="muted" data-t="scanning">جاري المسح...</div></div>
+<div class="sec"><span class="sec-t">⚖️ Long / Short</span></div>
+<div id="dashLS"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>
 <div class="sec"><span class="sec-t" data-t="sec_accuracy">📈 نسبة النجاح</span></div>
 <div id="accCard"></div>
 </div>

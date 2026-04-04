@@ -353,6 +353,14 @@ canvas{width:100%!important;border-radius:4px}
 .coin-card-spark{display:flex;align-items:flex-end;gap:1px;height:24px;margin-top:6px}
 .coin-card-spark b{width:3px;border-radius:1px;min-height:2px}
 
+/* TOP 3 OPPORTUNITIES */
+.top3-card{background:var(--glass);backdrop-filter:var(--gb);border:1px solid var(--bdr);border-radius:14px;padding:12px;margin-bottom:8px;cursor:pointer;position:relative;overflow:hidden;transition:border-color .2s}
+.top3-card:active{border-color:var(--neon)}
+.top3-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.top3-card.gold::before{background:linear-gradient(90deg,#ffd700,#ff8c00)}.top3-card.silver::before{background:linear-gradient(90deg,#c0c0c0,#a0a0a0)}.top3-card.bronze::before{background:linear-gradient(90deg,#cd7f32,#8b4513)}
+.top3-rank{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;font-size:12px;font-weight:800;flex-shrink:0}
+.top3-conf{display:inline-block;padding:2px 8px;border-radius:10px;font-size:8px;font-family:var(--fm);font-weight:700}
+
 @media(max-width:520px){.grid-2{grid-template-columns:1fr}.mst{grid-template-columns:repeat(2,1fr)}.mh-factors{grid-template-columns:repeat(2,1fr)}.u-conf{grid-template-columns:repeat(4,1fr)}}
 @media(min-width:768px){.mst{grid-template-columns:repeat(4,1fr)}.hm{grid-template-columns:repeat(6,1fr)}.main{padding:10px 24px 92px}}
 @media(min-width:1024px){.sidebar{display:flex;flex-direction:column;gap:2px;padding-top:16px}.bnv{display:none}.main{padding:10px 24px 24px}.hm{grid-template-columns:repeat(8,1fr)}}
@@ -383,10 +391,13 @@ canvas{width:100%!important;border-radius:4px}
 <div class="pg act" id="pg-dash">
 <!-- Coin Cards -->
 <div id="topCoins"></div>
-<!-- L/S first -->
+<!-- 🎯 Top 3 Opportunities -->
+<div class="sec"><span class="sec-t">🎯 <span data-t="top3">أفضل 3 فرص الآن</span></span></div>
+<div id="top3List"><div class="muted" data-t="scanning">جاري المسح...</div></div>
+<!-- L/S -->
 <div class="sec"><span class="sec-t">⚖️ Long / Short</span></div>
 <div id="dashLS"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>
-<!-- ULTRA second -->
+<!-- ULTRA -->
 <div class="sec"><span class="sec-t">⭐ ULTRA SIGNALS</span></div>
 <div id="ultraL"><div class="muted" data-t="scanning">جاري المسح...</div></div>
 <!-- Accuracy -->

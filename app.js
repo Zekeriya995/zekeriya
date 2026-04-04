@@ -353,6 +353,11 @@ async function loadDash(){
   document.getElementById('mhScore').textContent=h.score;document.getElementById('mhScore').style.color='var(--'+hc+')';
   document.getElementById('mhLabel').textContent=h.score>=70?(lang==='ar'?'سوق صحي':'Healthy'):h.score>=45?(lang==='ar'?'محايد — حذر':'Neutral'):(lang==='ar'?'ضعيف':'Weak');
   document.getElementById('mhPt').style.left=h.score+'%';document.getElementById('pMH').textContent=h.score;
+  /* Hero circle animation */
+  var arc=document.getElementById('mhArc');if(arc){var pct=h.score/100;arc.style.strokeDashoffset=327-(327*pct);arc.style.stroke=hc==='up'?'var(--up)':hc==='warn'?'var(--warn)':'var(--dn)'}
+  /* Report preview */
+  if(T.BTC){document.getElementById('rptBTC').textContent=fP(T.BTC.p)+' '+(T.BTC.c>=0?'+':'')+T.BTC.c.toFixed(1)+'%';document.getElementById('rptBTCdir').textContent=T.BTC.c>=2?(lang==='ar'?'🟢 صعودي':'🟢 Bull'):T.BTC.c<=-2?(lang==='ar'?'🔴 هبوطي':'🔴 Bear'):(lang==='ar'?'🟡 محايد':'🟡 Neutral');document.getElementById('rptBTCdir').style.color=T.BTC.c>=2?'var(--up)':T.BTC.c<=-2?'var(--dn)':'var(--warn)'}
+  if(T.ETH){document.getElementById('rptETH').textContent=fP(T.ETH.p)+' '+(T.ETH.c>=0?'+':'')+T.ETH.c.toFixed(1)+'%';document.getElementById('rptETHdir').textContent=T.ETH.c>=2?(lang==='ar'?'🟢 صعودي':'🟢 Bull'):T.ETH.c<=-2?(lang==='ar'?'🔴 هبوطي':'🔴 Bear'):(lang==='ar'?'🟡 محايد':'🟡 Neutral');document.getElementById('rptETHdir').style.color=T.ETH.c>=2?'var(--up)':T.ETH.c<=-2?'var(--dn)':'var(--warn)'}
   document.getElementById('mhFactors').innerHTML=h.factors.map(function(f){return'<div class="mh-f"><div class="mh-f-v" style="color:var(--'+f.c+')">'+f.v+'</div><div class="mh-f-l">'+f.l+'</div></div>'}).join('');
   /* Stablecoin Flow */
   loadStableFlow();

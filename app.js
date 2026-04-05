@@ -297,74 +297,235 @@ function mkSpark(s){var hist=sparkHist[s];var up=T[s]?(!isNaN(T[s].c)?T[s].c>=0:
   return hist.slice(-12).map(function(v,i,a){var h=Math.max(3,Math.round((v-mn)/rng*24+3));var op=0.3+i/a.length*0.7;return'<b style="height:'+h+'px;background:var(--'+(up?'up':'dn')+');opacity:'+op.toFixed(2)+'"></b>'}).join('')}
 function coinRow(s,d,i,sub){var up=d.c>=0;var bg=COL[s]||'#444';return'<div class="cr" onclick="openCoin(\''+s+'\')"><div class="cr-l">'+(i!==undefined?'<div class="cr-rk">'+i+'</div>':'')+'<div class="cr-ic" style="background:'+bg+'0a;color:'+bg+';border:1px solid '+bg+'22">'+s.slice(0,2)+'</div><div><div class="cr-n">'+s+'</div><div class="cr-sub">'+(sub||fmt(d.v))+'</div></div></div><div class="cr-spark">'+mkSpark(s)+'</div><div class="cr-r"><div class="cr-p">'+fP(d.p)+'</div><div class="cr-ch '+(up?'up':'dn')+'">'+(up?'+':'')+d.c.toFixed(1)+'%</div></div></div>'}
 function ultraCard(r){/* Dedup: only save prediction once per coin per hour */var predKey=r.s+'_'+new Date().getHours();if(!predictions.some(function(p){return p.sym===r.s&&Date.now()-p.time<3600000}))savePred(r.s,r.p,r.p*1.03,r.score);var src=[];if(T[r.s])src.push('Binance');if(r.by)src.push('Bybit');if(CBP[r.s])src.push('Coinbase');return'<div class="ultra" onclick="openCoin(\''+r.s+'\')"><div class="u-badge">⭐ '+(r.ultra?'🟢 CONFIRMED':'🟡 PROBABLE')+' — '+r.passed+'/'+r.total+' CHECKS</div><div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div class="u-sym">'+r.s+'/USDT</div><div class="u-price"><span style="color:'+(r.c>=0?'var(--up)':'var(--dn)')+';font-weight:700">'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</span> '+fP(r.p)+'</div></div><div style="text-align:center"><div class="u-score-val">'+r.score+'</div><div class="u-score-lbl">SCORE</div></div></div><div style="margin:8px 0">'+timeBadge(r.detectedAt)+'</div><div class="u-conf">'+Object.entries(r.checks).map(function(e){return'<div class="u-conf-i '+(e[1]?'pass':'fail')+'">'+e[0]+' '+(e[1]?'✅':'❌')+'</div>'}).join('')+'</div><div class="u-tags">'+r.tags.slice(0,6).map(function(x){return'<span class="u-tag" style="background:var(--ud);color:var(--up)">'+x+'</span>'}).join('')+'</div><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div><div class="u-range" style="margin-top:8px"><div style="font-size:10px;font-weight:700;margin-bottom:4px">🎯 Target</div><div class="u-range-row"><span style="color:var(--up)">Conservative</span><span style="font-weight:700">'+fP(r.p*1.08)+'</span></div><div class="u-range-row"><span style="color:var(--neon)">Target</span><span style="font-weight:700">'+fP(r.p*1.15)+'</span></div><div class="u-range-row"><span style="color:var(--dn)">🛑 Stop</span><span style="font-weight:700;color:var(--dn)">'+fP(r.p*0.93)+'</span></div></div></div>'}
-/* 🐋 WHALE WAVE DETECTION — tracks multiple buying waves per coin */
+/* ═══ 🐋 WHALE INTELLIGENCE ENGINE v2.0 — 5 Layers ═══ */
+var wCache={};var prevOBSnapshots={};var liqEvents=[];
+function wGet(k){var c=wCache[k];if(c&&Date.now()-c.t<c.ttl)return c.d;return null}
+function wSet(k,d,ttl){wCache[k]={d:d,t:Date.now(),ttl:ttl||15000}}
+
+/* LAYER 1: Order Book — walls, spoofing, imbalance (15%) */
+async function whaleL1(sym){
+  var ck=wGet('L1_'+sym);if(ck)return ck;
+  var ob=await fj(BN+'/depth?symbol='+sym+'USDT&limit=20');
+  var byOb=null;try{var bd=await fj('https://api.bybit.com/v5/market/orderbook?category=spot&symbol='+sym+'USDT&limit=15');if(bd&&bd.result)byOb={bids:(bd.result.b||[]).map(function(x){return[x[0],x[1]]}),asks:(bd.result.a||[]).map(function(x){return[x[0],x[1]]})}}catch(e){}
+  if(!ob||!ob.bids){if(!byOb)return{score:0,signal:'OFFLINE'};ob=byOb}
+  var bids=ob.bids,asks=ob.asks;
+  var bV=bids.reduce(function(s,b){return s+ +b[0]* +b[1]},0);
+  var aV=asks.reduce(function(s,a){return s+ +a[0]* +a[1]},0);
+  var ratio=bV/Math.max(aV,1);
+  /* Wall detection */
+  var avgB=bV/bids.length;
+  var bidWalls=bids.filter(function(b){return(+b[0]* +b[1])>avgB*3});
+  var askWalls=asks.filter(function(a){return(+a[0]* +a[1])>avgB*3});
+  /* Near-price imbalance (top 5) */
+  var nBV=bids.slice(0,5).reduce(function(s,b){return s+ +b[0]* +b[1]},0);
+  var nAV=asks.slice(0,5).reduce(function(s,a){return s+ +a[0]* +a[1]},0);
+  var nearImb=nBV/Math.max(nAV,1);
+  /* Spoofing check */
+  var spoof=0;var prev=prevOBSnapshots[sym];
+  if(prev&&prev.bidWalls){var gone=prev.bidWalls.filter(function(w){return!bidWalls.some(function(bw){return Math.abs(+bw[0]- +w[0])<+w[0]*0.001})});if(gone.length>0)spoof=-10}
+  prevOBSnapshots[sym]={bidWalls:bidWalls,time:Date.now()};
+  /* Bybit merge */
+  if(byOb){var byBV=byOb.bids.reduce(function(s,b){return s+ +b[0]* +b[1]},0);var byAV=byOb.asks.reduce(function(s,a){return s+ +a[0]* +a[1]},0);var byR=byBV/Math.max(byAV,1);if(byR>1.5&&ratio>1.3)spoof+=3}
+  var sc=0;
+  if(ratio>2.0)sc+=20;else if(ratio>1.5)sc+=15;else if(ratio>1.2)sc+=10;else if(ratio>1.1)sc+=5;
+  if(nearImb>3)sc+=12;else if(nearImb>2)sc+=8;else if(nearImb>1.5)sc+=4;
+  if(bidWalls.length>0)sc+=5;if(bidWalls.length>=2)sc+=5;
+  /* Old-style OB change detection — keep the sensitivity */
+  var prevBV=wGet('prevBV_'+sym);if(prevBV){var inc=bV-prevBV;var thresh=bV*0.15;if(inc>thresh&&inc>30000)sc+=8}
+  wSet('prevBV_'+sym,bV,120000);
+  sc+=spoof;sc=Math.max(0,Math.min(35,sc));
+  var r={score:sc,ratio:ratio,nearImbalance:nearImb,bidVolume:bV,askVolume:aV,bidWalls:bidWalls.length,askWalls:askWalls.length,spoofWarning:spoof<0,signal:ratio>1.8?'STRONG_BUY':ratio>1.3?'BUY':ratio<0.6?'SELL':'NEUTRAL'};
+  wSet('L1_'+sym,r,10000);return r}
+
+/* LAYER 2: Trade Flow — real executed trades (25%) */
+async function whaleL2(sym){
+  var ck=wGet('L2_'+sym);if(ck)return ck;
+  var trades=await fj(BN+'/trades?symbol='+sym+'USDT&limit=100');
+  if(!trades||!trades.length)return{score:0,signal:'OFFLINE'};
+  var vol=T[sym]?T[sym].v:1e8;
+  var thresh=vol>1e9?200000:vol>1e8?50000:vol>1e7?10000:3000;
+  /* Cluster trades within 60s windows */
+  var clusters=[],cur={trades:[],vol:0,st:0};
+  trades.forEach(function(tr){
+    var tv= +tr.price* +tr.qty;var tt= +tr.time;
+    if(!cur.trades.length)cur.st=tt;
+    if(tt-cur.st>60000){if(cur.vol>=thresh)clusters.push({trades:cur.trades,vol:cur.vol,st:cur.st});cur={trades:[],vol:0,st:tt}}
+    cur.trades.push(tr);cur.vol+=tv});
+  if(cur.vol>=thresh)clusters.push(cur);
+  /* Classify buy vs sell */
+  var whaleBuys=clusters.filter(function(c){var buyV=c.trades.filter(function(t){return!t.isBuyerMaker}).reduce(function(s,t){return s+ +t.price* +t.qty},0);return buyV>c.vol*0.6});
+  var whaleSells=clusters.filter(function(c){var sellV=c.trades.filter(function(t){return t.isBuyerMaker}).reduce(function(s,t){return s+ +t.price* +t.qty},0);return sellV>c.vol*0.6});
+  var sc=Math.min(30,whaleBuys.length*10);
+  if(whaleSells.length>whaleBuys.length)sc-=8;
+  var totalBuyVol=whaleBuys.reduce(function(s,c){return s+c.vol},0);
+  var largest=clusters.length?Math.max.apply(null,clusters.map(function(c){return c.vol})):0;
+  var r={score:Math.max(0,sc),whaleBuys:whaleBuys.length,whaleSells:whaleSells.length,totalBuyVolume:totalBuyVol,largestTrade:largest,threshold:thresh,signal:whaleBuys.length>=3?'HEAVY_ACCUMULATION':whaleBuys.length>=1?'WHALE_BUYING':whaleSells.length>=2?'WHALE_SELLING':'NO_ACTIVITY'};
+  wSet('L2_'+sym,r,15000);return r}
+
+/* LAYER 3: Liquidation Monitor (10%) */
+async function whaleL3(sym){
+  var ck=wGet('L3_'+sym);if(ck)return ck;
+  /* Use stored liq events from WS or fetch */
+  var recent=liqEvents.filter(function(e){return e.sym===sym&&Date.now()-e.time<300000});
+  if(!recent.length){try{var fd=await fj('https://fapi.binance.com/fapi/v1/allForceOrders?symbol='+sym+'USDT&limit=20');if(fd)fd.forEach(function(o){var v= +o.price* +o.origQty;if(v>50000)recent.push({sym:sym,side:o.side,value:v,price:+o.price,time:+o.time})})}catch(e){}}
+  var longLiq=recent.filter(function(e){return e.side==='SELL'}).reduce(function(s,e){return s+e.value},0);
+  var shortLiq=recent.filter(function(e){return e.side==='BUY'}).reduce(function(s,e){return s+e.value},0);
+  var sc=0,sig='NEUTRAL';
+  if(shortLiq>500000){sc+=12;sig='SHORT_SQUEEZE'}else if(shortLiq>200000){sc+=8;sig='SHORTS_PAIN'}else if(shortLiq>50000){sc+=4;sig='MINOR_SQUEEZE'}
+  if(longLiq>1000000){sc+=6;sig='CAPITULATION_BUY'}else if(longLiq>200000){sc+=3;sig=sig==='NEUTRAL'?'LONG_PAIN':sig}
+  var r={score:sc,longLiqValue:longLiq,shortLiqValue:shortLiq,signal:sig,count:recent.length};
+  wSet('L3_'+sym,r,30000);return r}
+
+/* LAYER 4: Funding Rate Anomaly (10%) */
+function whaleL4(sym){
+  var fr=FR[sym];var oi=OI[sym];if(!fr)return{score:0,signal:'NO_DATA'};
+  var sc=0,sig='NEUTRAL';
+  if(fr.rate<-0.03){sc+=10;sig='VERY_BULLISH_FR'}
+  else if(fr.rate<-0.01){sc+=7;sig='BULLISH_FR'}
+  else if(fr.rate>0.08){sc-=5;sig='DANGER_HIGH_FR'}
+  /* OI rising + negative FR = whale longs building */
+  if(oi&&fr.rate<0){var prevOI=wGet('prevOI_'+sym);if(prevOI&&oi>prevOI*1.05){sc+=5;sig='WHALE_LONG_BUILDUP'}wSet('prevOI_'+sym,oi,120000)}
+  return{score:Math.max(-5,sc),fundingRate:fr.rate,openInterest:oi||0,signal:sig}}
+
+/* LAYER 5: Cross-Exchange Flow (15%) */
+function whaleL5(sym){
+  var d=T[sym];if(!d)return{score:0,signal:'NO_DATA'};
+  var sc=0,sigs=[];
+  if(d.by&&d.p){var div=((d.by-d.p)/d.p)*100;
+    if(Math.abs(div)>0.3){sc+=6;sigs.push(div>0?'BYBIT_PREMIUM':'BINANCE_PREMIUM')}
+    if(Math.abs(div)>0.7){sc+=8;sigs.push('LARGE_DIVERGENCE')}
+    if(Math.abs(div)>1.5){sc+=6;sigs.push('EXTREME_DIVERGENCE')}}
+  if(CBP[sym]&&d.p){var cbDiv=((CBP[sym]-d.p)/d.p)*100;
+    if(cbDiv>0.2){sc+=6;sigs.push('COINBASE_PREMIUM')}
+    if(cbDiv>0.5){sc+=4;sigs.push('INSTITUTIONAL_BUYING')}}
+  return{score:Math.max(0,sc),signals:sigs,signal:sigs[0]||'NO_DIVERGENCE'}}
+
+/* ═══ WHALE INTELLIGENCE ENGINE — combines 5 layers ═══ */
+var LAYER_WEIGHTS={L1:0.20,L2:0.30,L3:0.10,L4:0.15,L5:0.25};
+async function whaleEngine(sym){
+  var t0=Date.now();
+  var results=await Promise.allSettled([whaleL1(sym),whaleL2(sym),whaleL3(sym)]);
+  var layers={
+    ob:results[0].status==='fulfilled'?results[0].value:{score:0,signal:'OFFLINE'},
+    trades:results[1].status==='fulfilled'?results[1].value:{score:0,signal:'OFFLINE'},
+    liqs:results[2].status==='fulfilled'?results[2].value:{score:0,signal:'OFFLINE'},
+    fr:whaleL4(sym),
+    xex:whaleL5(sym)};
+  /* Weighted confidence */
+  var maxPerLayer=20;var wScore=0;var active=0;
+  var layerArr=[{k:'ob',w:LAYER_WEIGHTS.L1},{k:'trades',w:LAYER_WEIGHTS.L2},{k:'liqs',w:LAYER_WEIGHTS.L3},{k:'fr',w:LAYER_WEIGHTS.L4},{k:'xex',w:LAYER_WEIGHTS.L5}];
+  layerArr.forEach(function(l){var d=layers[l.k];if(d&&d.signal!=='OFFLINE'&&d.signal!=='NO_DATA'){wScore+=(d.score/maxPerLayer)*l.w*100;active++}});
+  /* Normalize */
+  if(active<5){var activeW=layerArr.filter(function(l){var d=layers[l.k];return d&&d.signal!=='OFFLINE'&&d.signal!=='NO_DATA'}).reduce(function(s,l){return s+l.w},0);if(activeW>0)wScore=wScore/activeW*0.9}
+  var conf=Math.round(Math.max(0,Math.min(100,wScore)));
+  var sig,str;
+  if(conf>=80){sig='WHALE_ACCUMULATION_CONFIRMED';str='VERY_STRONG'}
+  else if(conf>=60){sig='WHALE_BUYING_DETECTED';str='STRONG'}
+  else if(conf>=40){sig='POSSIBLE_WHALE_ACTIVITY';str='MODERATE'}
+  else if(conf>=20){sig='MINOR_ACTIVITY';str='WEAK'}
+  else{sig='NO_WHALE_ACTIVITY';str='NONE'}
+  /* Check bearish */
+  var bearish=layerArr.filter(function(l){return layers[l.k].score<0}).length;
+  if(bearish>=3){sig='WHALE_DISTRIBUTION';str='BEARISH'}
+  var reasons=[];
+  if(layers.trades.whaleBuys>=2)reasons.push(layers.trades.whaleBuys+' '+(lang==='ar'?'صفقات حوت':'whale buys')+' ($'+fmt(layers.trades.totalBuyVolume)+')');
+  if(layers.ob.nearImbalance>2)reasons.push('OB '+(lang==='ar'?'ضغط شراء':'buy pressure')+' '+layers.ob.nearImbalance.toFixed(1)+'x');
+  if(layers.fr.fundingRate<-0.01)reasons.push('FR '+(lang==='ar'?'سلبي':'negative')+' '+layers.fr.fundingRate.toFixed(4)+'%');
+  if(layers.xex.signals&&layers.xex.signals.includes('COINBASE_PREMIUM'))reasons.push(lang==='ar'?'Coinbase أعلى (مؤسسات)':'Coinbase premium');
+  if(layers.liqs.signal==='SHORT_SQUEEZE')reasons.push(lang==='ar'?'تصفية شورت':'Short squeeze');
+  if(layers.ob.spoofWarning)reasons.push(lang==='ar'?'⚠️ تلاعب محتمل':'⚠️ Possible spoofing');
+  return{symbol:sym,confidence:conf,signal:sig,strength:str,layers:layers,activeLayers:active,execTime:(Date.now()-t0)+'ms',reasons:reasons.slice(0,4),action:conf>=70?{type:'BUY',target:'+8% to +15%',stop:'-7%'}:conf<=20?{type:'AVOID'}:{type:'WATCH'}}}
+
+/* ═══ WHALE DETECTION — uses engine for top coins ═══ */
 async function detectWhaleWaves(candidates){
   if(!candidates||!candidates.length)return;
-  var top=candidates.filter(function(x){return x.tags.some(function(t){return t.includes('ACC')||t.includes('STEALTH')||t.includes('EARLY')})||(x.v>5e7&&Math.abs(x.c)<3)}).slice(0,10);
-  var proms=top.map(function(c){return fj(BN+'/depth?symbol='+c.s+'USDT&limit=20')});
-  var obs=await Promise.all(proms);
-  top.forEach(function(c,i){
-    var ob=obs[i];if(!ob||!ob.bids)return;
-    var buyVol=ob.bids.reduce(function(s,b){return s+ +b[0]* +b[1]},0);
-    var sellVol=ob.asks.reduce(function(s,a){return s+ +a[0]* +a[1]},0);
-    var ratio=buyVol/Math.max(sellVol,1);
-    /* Initialize waves for this coin */
-    if(!whaleWaves[c.s])whaleWaves[c.s]={waves:[],totalBuy:0,lastOB:0};
-    var w=whaleWaves[c.s];
-    var prevBuy=w.lastOB||0;
-    var increase=buyVol-prevBuy;
-    w.lastOB=buyVol;
-    /* Detect new wave: significant increase in buy side */
-    var threshold=c.p>1000?buyVol*0.15:buyVol*0.2; /* 15-20% increase = new wave */
-    if(prevBuy>0&&increase>threshold&&increase>50000){
-      /* New whale wave detected! */
-      w.waves.push({amount:increase,price:c.p,time:Date.now(),ratio:ratio});
-      w.totalBuy+=increase;
-      /* Keep max 5 waves per coin */
-      if(w.waves.length>5)w.waves=w.waves.slice(-5);
-      /* Notify if 2+ waves */
-      if(w.waves.length>=2){notify(c.s,'whale',w.waves.length)}
-    }
-    /* Clean old waves (>2 hours) */
+  var top=candidates.filter(function(x){return x.tags.some(function(t){return t.includes('ACC')||t.includes('STEALTH')||t.includes('EARLY')})||(x.v>5e7&&Math.abs(x.c)<3)||(x.checks&&x.checks.ob)}).slice(0,15);
+  /* Run whale engine on top 10, layers 1+4+5 only for rest */
+  var full=top.slice(0,15);var light=top.slice(15);
+  var fullResults=await Promise.allSettled(full.map(function(c){return whaleEngine(c.s)}));
+  full.forEach(function(c,i){
+    var eng=fullResults[i].status==='fulfilled'?fullResults[i].value:null;
+    if(!eng)return;
+    if(!whaleWaves[c.s])whaleWaves[c.s]={waves:[],totalBuy:0,engine:null};
+    var w=whaleWaves[c.s];w.engine=eng;
+    /* Record wave if any whale activity detected */
+    if(eng.confidence>=20||eng.layers.trades.whaleBuys>0||eng.layers.ob.ratio>1.3){
+      var buyVol=eng.layers.trades.totalBuyVolume||eng.layers.ob.bidVolume*0.1||c.v*0.05;
+      var lastWave=w.waves.length?w.waves[w.waves.length-1]:null;
+      if(!lastWave||Date.now()-lastWave.time>60000){
+        w.waves.push({amount:buyVol,price:c.p,time:Date.now(),confidence:eng.confidence,layers:eng.activeLayers});
+        w.totalBuy+=buyVol;
+        if(w.waves.length>5)w.waves=w.waves.slice(-5);
+        if(w.waves.length>=2)notify(c.s,'whale',w.waves.length)}}
     w.waves=w.waves.filter(function(wave){return Date.now()-wave.time<7200000});
-    if(w.waves.length===0)delete whaleWaves[c.s];
-  });
+    if(w.waves.length===0&&!eng.confidence)delete whaleWaves[c.s]});
+  /* Light analysis for remaining */
+  light.forEach(function(c){
+    var l4=whaleL4(c.s);var l5=whaleL5(c.s);
+    if(l4.score+l5.score>5){
+      if(!whaleWaves[c.s])whaleWaves[c.s]={waves:[],totalBuy:0,engine:null};
+      whaleWaves[c.s].engine={confidence:Math.round((l4.score+l5.score)*2),signal:'POSSIBLE_WHALE_ACTIVITY',strength:'WEAK',layers:{ob:{score:0,signal:'SKIP'},trades:{score:0,signal:'SKIP'},liqs:{score:0,signal:'SKIP'},fr:l4,xex:l5},activeLayers:2,reasons:[]}}});
   localStorage.setItem('nxww10',JSON.stringify(whaleWaves))}
+
+/* ═══ WHALE CARD v2.0 — with layer breakdown ═══ */
 function whaleCard(r){
   var wt=getSigTime(r.s,'whale');
-  var waves=whaleWaves[r.s]?whaleWaves[r.s].waves:[];
+  var ww=whaleWaves[r.s]||{waves:[],totalBuy:0,engine:null};
+  var waves=ww.waves;var eng=ww.engine;
   var waveCount=waves.length;
-  var totalWhaleBuy=waves.reduce(function(s,w){return s+w.amount},0)||r.v*0.05;
-  var str=waveCount>=3?{t:lang==='ar'?'🔥 تجميع قوي جداً':'🔥 Very Strong',c:'str-strong'}:waveCount>=2?{t:lang==='ar'?'⚡ تجميع قوي':'⚡ Strong',c:'str-strong'}:totalWhaleBuy>5e6?{t:lang==='ar'?'قوي':'Strong',c:'str-normal'}:totalWhaleBuy>1e6?{t:lang==='ar'?'عادي':'Normal',c:'str-normal'}:{t:lang==='ar'?'ضعيف':'Weak',c:'str-weak'};
-  var src=[];if(T[r.s])src.push('Binance');if(r.by)src.push('Bybit');if(CBP[r.s])src.push('Coinbase');
-  var whaleIcons='🐋';if(waveCount>=3)whaleIcons='🐋🐋🐋';else if(waveCount>=2)whaleIcons='🐋🐋';
-  /* Build wave details */
+  var totalBuy=waves.reduce(function(s,w){return s+w.amount},0)||r.v*0.05;
+  var conf=eng?eng.confidence:0;
+  var sig=eng?eng.signal:'NO_DATA';
+  /* Strength badge */
+  var str;
+  if(conf>=80)str={t:lang==='ar'?'🔥 تجميع مؤكد':'🔥 Confirmed',c:'str-strong'};
+  else if(conf>=60)str={t:lang==='ar'?'⚡ تجميع قوي':'⚡ Strong',c:'str-strong'};
+  else if(conf>=40)str={t:lang==='ar'?'📊 نشاط متوسط':'📊 Moderate',c:'str-normal'};
+  else str={t:lang==='ar'?'👀 مراقبة':'👀 Watch',c:'str-weak'};
+  var src=[];if(T[r.s])src.push(T[r.s].src==='BY'?'Bybit':'Binance');if(T[r.s]&&T[r.s].by)src.push('Bybit');if(CBP[r.s])src.push('Coinbase');
+  var whaleIc=conf>=80?'🐋🐋🐋':conf>=60?'🐋🐋':'🐋';
+  /* Layer bars */
+  var layerHTML='';
+  if(eng&&eng.activeLayers>0){
+    var lNames={ob:{n:lang==='ar'?'دفتر الأوامر':'Order Book',ic:'📗'},trades:{n:lang==='ar'?'صفقات كبيرة':'Trade Flow',ic:'💰'},liqs:{n:lang==='ar'?'تصفيات':'Liquidations',ic:'💥'},fr:{n:'Funding Rate',ic:'📊'},xex:{n:lang==='ar'?'بين المنصات':'Cross-Exchange',ic:'🔄'}};
+    layerHTML='<div style="margin:8px 0;padding:8px;background:var(--bg2);border-radius:8px">';
+    layerHTML+='<div style="font-size:8px;font-weight:700;color:var(--t2);margin-bottom:6px">'+(lang==='ar'?'📊 تحليل 5 طبقات:':'📊 5-Layer Analysis:')+'</div>';
+    ['ob','trades','liqs','fr','xex'].forEach(function(k){
+      var l=eng.layers[k];if(!l)return;var off=l.signal==='OFFLINE'||l.signal==='SKIP'||l.signal==='NO_DATA';
+      var pct=off?0:Math.min(100,Math.max(0,l.score*3.3));
+      var col=off?'var(--t3)':pct>60?'var(--up)':pct>30?'var(--warn)':'var(--dn)';
+      var info=lNames[k];
+      layerHTML+='<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;font-size:8px">'
+        +'<span style="width:14px">'+info.ic+'</span>'
+        +'<span style="width:65px;color:var(--t2)">'+info.n+'</span>'
+        +'<div style="flex:1;height:4px;background:var(--bdr);border-radius:2px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+col+';border-radius:2px"></div></div>'
+        +'<span style="width:50px;text-align:left;color:'+col+';font-family:var(--fm);font-weight:700">'+(off?(lang==='ar'?'—':'—'):l.signal.replace(/_/g,' ').slice(0,12))+'</span></div>'});
+    layerHTML+='</div>'}
+  /* Wave details */
   var waveHTML='';
   if(waveCount>0){
     waveHTML='<div style="margin:6px 0;border-top:1px solid var(--bdr);padding-top:6px">';
     waves.forEach(function(wave,i){
       var isNew=Date.now()-wave.time<120000;
-      waveHTML+='<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:9px'+(i<waves.length-1?';border-bottom:1px solid rgba(56,72,96,.15)':'')+'">'
-        +'<span style="color:var(--neon);font-weight:700;width:16px">🐋</span>'
-        +'<span style="font-family:var(--fm);font-weight:700;color:var(--t0);width:22px">#'+(i+1)+'</span>'
+      waveHTML+='<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:8px'+(i<waves.length-1?';border-bottom:1px solid rgba(56,72,96,.15)':'')+'">'
+        +'<span style="color:var(--neon);font-weight:700">🐋</span>'
+        +'<span style="font-family:var(--fm);font-weight:700;color:var(--t0)">#'+(i+1)+'</span>'
         +'<span style="font-family:var(--fm);font-weight:700;color:var(--neon);flex:1">'+fmt(wave.amount)+'</span>'
         +'<span style="font-family:var(--fm);color:var(--t2)">'+fP(wave.price)+'</span>'
-        +'<span class="time-badge '+(isNew?'fresh':'')+'">⏱ '+timeAgo(wave.time).text+'</span>'
-        +'</div>'});
-    /* Pressure indicator */
-    var firstPrice=waves[0].price;var lastPrice=waves[waves.length-1].price;
-    var priceChange=firstPrice>0?((lastPrice-firstPrice)/firstPrice*100):0;
-    var pressureUp=priceChange>0;
-    waveHTML+='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)">'
-      +'<span style="font-size:9px;font-family:var(--fm);font-weight:700;color:var(--t0)">📊 '+(lang==='ar'?'إجمالي':'Total')+': '+fmt(totalWhaleBuy)+' | '+waveCount+' '+(lang==='ar'?'موجات':'waves')+'</span>'
-      +'<span style="font-size:8px;font-family:var(--fm);font-weight:700;color:'+(pressureUp?'var(--up)':'var(--warn)')+'">'+(!pressureUp&&priceChange===0?(lang==='ar'?'تجميع صامت 🤫':'Silent acc 🤫'):(priceChange>=0?'↑':'↓')+Math.abs(priceChange).toFixed(1)+'%')+'</span>'
-      +'</div>';
+        +'<span class="time-badge '+(isNew?'fresh':'')+'">⏱'+timeAgo(wave.time).text+'</span></div>'});
     waveHTML+='</div>'}
+  /* Reasons */
+  var reasonHTML='';
+  if(eng&&eng.reasons&&eng.reasons.length){
+    reasonHTML='<div style="margin-top:6px;padding:6px;background:var(--bg2);border-radius:6px;font-size:8px;color:var(--t1)">';
+    eng.reasons.forEach(function(r){reasonHTML+='<div>✅ '+r+'</div>'});
+    if(eng.action&&eng.action.type==='BUY')reasonHTML+='<div style="margin-top:4px;font-weight:700;color:var(--up)">💡 '+(lang==='ar'?'توصية: شراء | 🎯 '+eng.action.target+' | 🛑 '+eng.action.stop:'Rec: BUY | 🎯 '+eng.action.target+' | 🛑 '+eng.action.stop)+'</div>';
+    reasonHTML+='</div>'}
   return'<div class="whale-card" onclick="openCoin(\''+r.s+'\')">'
-    +'<div class="whale-head"><div class="whale-sym">'+whaleIcons+' '+r.s+'/USDT <span class="str-badge '+str.c+'">'+str.t+'</span></div>'+timeBadge(wt)+'</div>'
-    +'<div class="whale-grid"><div class="whale-item"><div class="whale-item-v" style="color:var(--neon)">'+fmt(totalWhaleBuy)+'</div><div class="whale-item-l">'+(lang==='ar'?'إجمالي الشراء':'Total Buy')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:var(--blue)">'+waveCount+'</div><div class="whale-item-l">'+(lang==='ar'?'موجات':'Waves')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:var(--up)">'+fP(r.p)+'</div><div class="whale-item-l">'+(lang==='ar'?'الحالي':'Current')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:'+(r.c>=0?'var(--up)':'var(--dn)')+'">'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</div><div class="whale-item-l">24H</div></div></div>'
-    +waveHTML
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div><span style="font-family:var(--fm);font-size:9px;color:var(--t2)">Vol:'+fmt(r.v)+'</span></div></div>'}
+    +'<div class="whale-head"><div class="whale-sym">'+whaleIc+' '+r.s+'/USDT <span class="str-badge '+str.c+'">'+str.t+'</span></div><div style="display:flex;align-items:center;gap:4px">'+timeBadge(wt)+'<span style="font-family:var(--fm);font-size:9px;font-weight:800;padding:2px 6px;border-radius:6px;background:'+(conf>=70?'var(--ud)':conf>=40?'var(--wd)':'var(--bg2)')+';color:'+(conf>=70?'var(--up)':conf>=40?'var(--warn)':'var(--t3)')+'">'+conf+'%</span></div></div>'
+    +'<div class="whale-grid"><div class="whale-item"><div class="whale-item-v" style="color:var(--neon)">'+fmt(totalBuy)+'</div><div class="whale-item-l">'+(lang==='ar'?'إجمالي':'Total')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:var(--blue)">'+waveCount+'</div><div class="whale-item-l">'+(lang==='ar'?'موجات':'Waves')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:var(--up)">'+fP(r.p)+'</div><div class="whale-item-l">'+(lang==='ar'?'السعر':'Price')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:'+(r.c>=0?'var(--up)':'var(--dn)')+'">'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</div><div class="whale-item-l">24H</div></div></div>'
+    +layerHTML+waveHTML+reasonHTML
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div>'+(eng?'<span style="font-family:var(--fm);font-size:7px;color:var(--t3)">⚡'+eng.execTime+' | '+eng.activeLayers+'/5</span>':'')+'</div></div>'}
 function scanItem(r){var sc=r.score>=60?'background:var(--ud);color:var(--up)':r.score>=40?'background:var(--wd);color:var(--warn)':'background:rgba(56,72,96,.3);color:var(--t2)';return'<div class="'+(r.ultra?'scan-r ultra-r':'scan-r')+'" onclick="openCoin(\''+r.s+'\')"><div class="scan-h"><div class="scan-sym">'+(r.ultra?'⭐':r.confirmed?'🟢':'💎')+' '+r.s+' '+timeBadge(r.detectedAt)+'</div><span class="scan-score" style="'+sc+'">'+r.score+' · '+r.passed+'/'+r.total+'✓</span></div><div class="scan-det"><span>💰 <b>'+fP(r.p)+'</b></span><span>'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</span><span>'+fmt(r.v)+'</span>'+(r.cb?'<span>CB:'+fP(r.cb)+'</span>':'')+'</div><div class="scan-checks">'+r.tags.slice(0,5).map(function(x){return'<span class="scan-chk chk-y">'+x+'</span>'}).join('')+'</div><div class="prw"><div class="prb" style="width:'+Math.min(100,r.score)+'%;background:'+(r.ultra?'linear-gradient(90deg,var(--ultra),var(--dn))':r.score>=50?'var(--up)':'var(--warn)')+'"></div></div></div>'}
 function frRow(s,d){var cls=d.rate>0.05?'dn':d.rate<-0.01?'up':'warn';var w=Math.min(48,Math.abs(d.rate)*500);return'<div class="fr-row"><span class="fr-sym">'+s+'</span><div class="fr-bar"><div class="fr-mid"></div><div class="fr-fill" style="'+(d.rate>=0?'left':'right')+':50%;width:'+w+'%;background:var(--'+cls+')"></div></div><div><div class="fr-val" style="color:var(--'+cls+')">'+(d.rate>=0?'+':'')+d.rate.toFixed(4)+'%</div><div class="fr-sub-t">'+(d.rate>0.05?(lang==='ar'?'⚠️ خطر':'⚠️ Danger'):d.rate<-0.01?(lang==='ar'?'فرصة':'Opportunity'):(lang==='ar'?'طبيعي':'Normal'))+'</div></div></div>'}
 /* DASHBOARD */
@@ -415,7 +576,7 @@ async function runScan(){if(cache.scan&&Date.now()-cache.scanTime<CACHE_TTL){ren
 function renderScanResults(results){var mode=(document.querySelector('#fltM .big-tab.act')||{dataset:{m:'ultra'}}).dataset.m;var f=results;if(mode==='ultra')f=results.filter(function(r){return r.ultra||r.confirmed});else if(mode==='brk')f=results.filter(function(r){return r.c>=3&&r.score>=40});else if(mode==='fr')f=results.filter(function(r){return r.fr!=null}).sort(function(a,b){return Math.abs(b.fr||0)-Math.abs(a.fr||0)});document.getElementById('scanI').textContent='📊 '+Object.keys(T).length+' '+(lang==='ar'?'عملة':'coins')+' → ✅ '+f.length;document.getElementById('scanR').innerHTML=f.length?f.slice(0,30).map(scanItem).join(''):'<div class="empty"><div class="empty-ic">📡</div><div class="empty-tx">'+t('no_data')+'</div></div>'}
 /* WHALE PAGE */
 async function loadWhales(){var c=quickScan();var r=await deepAnalyze(c);cache.scan=r;cache.scanTime=Date.now();await detectWhaleWaves(r);renderWhaleResults(r)}
-function renderWhaleResults(results){var w=results.filter(function(x){return x.tags.some(function(t){return t.includes('ACC')||t.includes('STEALTH')||t.includes('EARLY')||t.includes('BOTTOM')})||(x.v>5e7&&Math.abs(x.c)<3)||(x.checks.ob&&x.v>1e7)}).slice(0,15);
+function renderWhaleResults(results){var w=results.filter(function(x){return x.tags.some(function(t){return t.includes('ACC')||t.includes('STEALTH')||t.includes('EARLY')||t.includes('BOTTOM')})||(x.v>5e7&&Math.abs(x.c)<3)||(x.checks&&x.checks.ob&&x.v>1e7)||whaleWaves[x.s]}).slice(0,20);
   /* Sort by wave count (most waves first) */
   w.sort(function(a,b){var wa=whaleWaves[a.s]?whaleWaves[a.s].waves.length:0;var wb=whaleWaves[b.s]?whaleWaves[b.s].waves.length:0;return wb-wa||b.score-a.score});
   var totalBuy=w.reduce(function(s,x){var ww=whaleWaves[x.s];return s+(ww?ww.totalBuy:x.v*0.05)},0);

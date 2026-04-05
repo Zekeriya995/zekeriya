@@ -21,7 +21,7 @@ const t=k=>TR[k]?TR[k][lang]:(k||'');
 const fmt=n=>{if(n>=1e9)return'$'+(n/1e9).toFixed(1)+'B';if(n>=1e6)return'$'+(n/1e6).toFixed(1)+'M';if(n>=1e3)return'$'+(n/1e3).toFixed(1)+'K';return'$'+n.toFixed(0)};
 const fP=p=>{if(!p||isNaN(p))return'$0';if(p>=1e3)return'$'+p.toLocaleString('en',{maximumFractionDigits:2});if(p>=1)return'$'+p.toFixed(2);if(p>=.01)return'$'+p.toFixed(4);return'$'+p.toFixed(6)};
 const safeC=c=>{return(c&&!isNaN(c))?c:0}; /* NaN-safe change % */
-const fj=async u=>{try{var c=new AbortController();var tm=setTimeout(function(){c.abort()},8000);var r=await fetch(u,{signal:c.signal});clearTimeout(tm);if(!r.ok)throw 0;return r.json()}catch(e){return null}};
+const fj=async u=>{try{var c=new AbortController();var tm=setTimeout(function(){c.abort()},8000);var t0=Date.now();var r=await fetch(u,{signal:c.signal});clearTimeout(tm);connMetrics.lastLatency=Date.now()-t0;if(!r.ok){connMetrics.apiFail++;throw 0}connMetrics.apiOk++;return r.json()}catch(e){connMetrics.apiFail++;return null}};
 function calcRSI(c,p){p=p||14;if(c.length<p+1)return 50;var g=0,l=0;for(var i=c.length-p;i<c.length;i++){var d=c[i]-c[i-1];if(d>0)g+=d;else l+=Math.abs(d)}return 100-100/(1+g/Math.max(l,.001))}
 function calcMACD(c){if(c.length<26)return{h:0,signal:0,cross:'none'};var ema=function(d,p){var k=2/(p+1),e=d[0];for(var i=1;i<d.length;i++)e=d[i]*k+e*(1-k);return e};var macdLine=ema(c.slice(-12),12)-ema(c,26);var macdHist=[];for(var i=26;i<=c.length;i++){macdHist.push(ema(c.slice(i-12,i),12)-ema(c.slice(0,i),26))}var signal=macdHist.length>=9?ema(macdHist.slice(-9),9):macdLine;var prev=macdHist.length>=2?macdHist[macdHist.length-2]:0;var cross=macdLine>signal&&prev<=signal?'bull':macdLine<signal&&prev>=signal?'bear':'none';return{h:macdLine,signal:signal,cross:cross}}
 function timeAgo(ts){var d=Date.now()-ts,m=Math.floor(d/60000),h=Math.floor(d/3600000);if(m<2)return{text:lang==='ar'?'🆕 الآن':'🆕 Now',cls:'fresh'};if(m<60)return{text:lang==='ar'?'منذ '+m+' دقيقة':m+'m ago',cls:'fresh'};return{text:lang==='ar'?'منذ '+h+' ساعة':h+'h ago',cls:h<6?'':'old'}}
@@ -697,49 +697,59 @@ function renderTop3(){
     +'</div>'}).join(''):'<div class="muted">'+(lang==='ar'?'لا فرص قوية حالياً — السوق هادئ':'No strong opportunities — Market quiet')+'</div>'}
 /* 📈 MARKET MOVEMENT PAGE */
 async function loadMarket(){loadStableFlow();loadReport()}
-/* 🤖 DATA VALIDATOR + AUTO-REPAIR SYSTEM */
+/* 🤖 DATA VALIDATOR + AUTO-REPAIR + CONNECTION QUALITY */
 var validatorLog=[];var lastDataTime=Date.now();var validatorStatus='ok';
+var connMetrics={apiOk:0,apiFail:0,wsUp:false,lastLatency:0,lastCheck:Date.now()};
 function addVLog(type,msg){validatorLog.unshift({type:type,msg:msg,time:Date.now()});if(validatorLog.length>30)validatorLog=validatorLog.slice(0,30)}
+function getConnQuality(){
+  var score=100;
+  /* WS connected? */
+  if(!ws||ws.readyState!==1)score-=30;
+  /* Data freshness */
+  var age=Date.now()-lastDataTime;
+  if(age>120000)score-=40;else if(age>60000)score-=15;
+  /* API success rate */
+  var total=connMetrics.apiOk+connMetrics.apiFail;
+  if(total>0){var rate=connMetrics.apiOk/total;if(rate<0.5)score-=30;else if(rate<0.8)score-=10}
+  /* Coins loaded */
+  var coins=Object.keys(T).length;
+  if(coins<100)score-=20;else if(coins<300)score-=5;
+  return Math.max(0,Math.min(100,score))}
+function updateConnStatus(){
+  var q=getConnQuality();var el=document.getElementById('connStatus');var dot=document.getElementById('validatorDot');
+  var txt,col;
+  if(q>=80){txt=lang==='ar'?'ممتازة':'Excellent';col='var(--up)'}
+  else if(q>=50){txt=lang==='ar'?'جيدة':'Good';col='var(--neon)'}
+  else if(q>=30){txt=lang==='ar'?'عادية':'Fair';col='var(--warn)'}
+  else{txt=lang==='ar'?'ضعيفة':'Poor';col='var(--dn)'}
+  if(el){el.textContent=txt;el.style.color=col}
+  if(dot){dot.style.background=col;dot.style.boxShadow='0 0 6px '+col}}
 async function runValidator(){
   var issues=0,fixes=0;
-  /* CHECK 1: Data Freshness — is T data updating? */
   var tkAge=Date.now()-lastDataTime;
-  if(tkAge>120000){addVLog('🔴','البيانات قديمة '+Math.round(tkAge/60000)+' دقيقة — يعيد التحميل');issues++;try{await loadTk();lastDataTime=Date.now();fixes++;addVLog('🔧','تم إعادة تحميل البيانات ✅')}catch(e){addVLog('❌','فشل إعادة التحميل')}}
+  if(tkAge>120000){addVLog('🔴','البيانات قديمة '+Math.round(tkAge/60000)+' دقيقة — يعيد التحميل');issues++;try{await loadTk();lastDataTime=Date.now();fixes++;connMetrics.apiOk++;addVLog('🔧','تم إعادة تحميل البيانات ✅')}catch(e){connMetrics.apiFail++;addVLog('❌','فشل إعادة التحميل')}}
   else if(tkAge>90000){addVLog('🟡','البيانات عمرها '+Math.round(tkAge/60000)+' دقيقة');issues++}
-  /* CHECK 2: WebSocket alive */
   if(!ws||ws.readyState!==1){addVLog('🔴','WebSocket غير متصل — يعيد الاتصال');issues++;initWS();fixes++;addVLog('🔧','أعاد اتصال WebSocket')}
-  /* CHECK 3: Cross-Exchange Price Validation (BTC) */
-  if(T.BTC&&T.BTC.by){var diff=Math.abs(T.BTC.p-T.BTC.by)/T.BTC.p*100;if(diff>2){addVLog('🔴','فرق BTC بين Binance/Bybit: '+diff.toFixed(1)+'% — غير طبيعي!');issues++}else{addVLog('✅','BTC Binance/Bybit متطابق ('+diff.toFixed(2)+'%)')}}
+  if(T.BTC&&T.BTC.by){var diff=Math.abs(T.BTC.p-T.BTC.by)/T.BTC.p*100;if(diff>2){addVLog('🔴','فرق BTC بين Binance/Bybit: '+diff.toFixed(1)+'%');issues++}else{addVLog('✅','BTC Binance/Bybit متطابق ('+diff.toFixed(2)+'%)')}}
   if(T.BTC&&CBP.BTC){var cbDiff=Math.abs(T.BTC.p-CBP.BTC)/T.BTC.p*100;if(cbDiff>3){addVLog('🔴','فرق BTC Binance/Coinbase: '+cbDiff.toFixed(1)+'%');issues++;CBP.BTC=T.BTC.p;fixes++;addVLog('🔧','صحح سعر Coinbase')}else{addVLog('✅','BTC Coinbase متطابق ('+cbDiff.toFixed(2)+'%)')}}
-  /* CHECK 4: Whale Signal Validation */
   if(cache.scan){var whales=cache.scan.filter(function(x){return x.tags.some(function(t){return t.includes('ACC')||t.includes('STEALTH')})});
     whales.slice(0,5).forEach(function(w){
-      var realVol=T[w.s]?T[w.s].v:0;var estWhale=w.v*0.05;
-      if(estWhale>realVol*0.2){addVLog('🟡','حوت '+w.s+': تقدير $'+fmt(estWhale)+' مبالغ مقارنة بالحجم $'+fmt(realVol));issues++}
       if(w.c>15){addVLog('🟡','حوت '+w.s+': صعد +'+w.c.toFixed(1)+'% — ممكن اكتشاف متأخر');issues++}
-      else{addVLog('✅','حوت '+w.s+': +'+w.c.toFixed(1)+'% — اكتشاف مبكر ✅')}
-    })}
-  /* CHECK 5: Breakout Signal Timing */
+      else{addVLog('✅','حوت '+w.s+': +'+w.c.toFixed(1)+'% — اكتشاف مبكر ✅')}})}
   if(cache.scan){cache.scan.filter(function(r){return r.c>=8&&r.score>=40}).slice(0,3).forEach(function(r){
-    var sigAge=Date.now()-r.detectedAt;var hrs=sigAge/3600000;
-    if(r.c>=25&&hrs<0.5){addVLog('🟡','انفجار '+r.s+': +'+r.c.toFixed(0)+'% — اكتشاف متأخر (صعدت كثير)');issues++}
-    else if(r.c<8){addVLog('✅','انفجار '+r.s+': +'+r.c.toFixed(1)+'% — توقيت جيد')}})}
-  /* CHECK 6: Gem Signal Freshness */
+    if(r.c>=25){addVLog('🟡','انفجار '+r.s+': +'+r.c.toFixed(0)+'% — اكتشاف متأخر');issues++}})}
   if(cache.scan){var gems=cache.scan.filter(function(r){return r.tags.some(function(t){return t.includes('EARLY')})&&r.c<3});
-    if(gems.length>0)addVLog('✅','جواهر: '+gems.length+' إشارة مبكرة (<3%) — صيد ممتاز');
+    if(gems.length>0)addVLog('✅','جواهر: '+gems.length+' إشارة مبكرة (<3%)');
     var lateGems=cache.scan.filter(function(r){return r.c>=20&&r.tags.some(function(t){return t.includes('LATE')})});
     if(lateGems.length>0){addVLog('🟡','جواهر متأخرة: '+lateGems.length+' عملة فوق +20%');issues++}}
-  /* CHECK 7: FR Data Completeness */
   var frCount=Object.keys(FR).length;
-  if(frCount<10){addVLog('🟡','FR: فقط '+frCount+' عملة — يعيد التحميل');issues++;try{await loadFutures();fixes++;addVLog('🔧','أعاد تحميل Futures ✅')}catch(e){}}
+  if(frCount<10){addVLog('🟡','FR: فقط '+frCount+' عملة — يعيد التحميل');issues++;try{await loadFutures();fixes++;connMetrics.apiOk++;addVLog('🔧','أعاد تحميل Futures ✅')}catch(e){connMetrics.apiFail++}}
   else{addVLog('✅','FR: '+frCount+' عملة محمّلة')}
-  /* CHECK 8: Total Coins Count */
   var coinCount=Object.keys(T).length;
-  if(coinCount<100){addVLog('🔴','عملات: '+coinCount+' فقط — المفروض 500+');issues++;try{await loadTk();lastDataTime=Date.now();fixes++;addVLog('🔧','أعاد تحميل العملات: '+Object.keys(T).length+' ✅')}catch(e){}}
+  if(coinCount<100){addVLog('🔴','عملات: '+coinCount+' فقط');issues++;try{await loadTk();lastDataTime=Date.now();fixes++;connMetrics.apiOk++}catch(e){connMetrics.apiFail++}}
   else{addVLog('✅','عملات: '+coinCount+' محمّلة')}
-  /* STATUS */
   validatorStatus=issues===0?'ok':issues<=3?'ok':'warn';
-  updateValidatorUI(issues,fixes);
+  updateValidatorUI(issues,fixes);updateConnStatus();
   return{issues:issues,fixes:fixes}}
 function updateValidatorUI(issues,fixes){
   var el=document.getElementById('validatorDot');var el2=document.getElementById('validatorDot2');var st=document.getElementById('validatorStatus');
@@ -763,8 +773,8 @@ async function scanBybitGainers(){
 async function init(){document.getElementById('sInp').placeholder=t('search_ph');document.getElementById('notifB').dataset.c='0';
   loadProfile();loadToneUI();updateMenuLang();updateMenuTheme();
   if(tg){tg.setHeaderColor(document.body.dataset.theme==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(document.body.dataset.theme==='dark'?'#020408':'#f0f4f8')}
-  await loadDash();renderPort();
-  setInterval(async function(){try{await loadTk();await loadFutures();lastDataTime=Date.now();checkWatchlistAlerts();scanBybitGainers()}catch(e){}},30000);
+  await loadDash();renderPort();updateConnStatus();
+  setInterval(async function(){try{await loadTk();await loadFutures();lastDataTime=Date.now();checkWatchlistAlerts();scanBybitGainers();updateConnStatus()}catch(e){connMetrics.apiFail++;updateConnStatus()}},30000);
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))await loadDash()},120000);
   setInterval(function(){if(!ws||ws.readyState!==1)initWS()},30000);
   setInterval(function(){notifiedSet={};localStorage.setItem('nxnot10','{}')},3600000);

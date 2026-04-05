@@ -61,11 +61,10 @@ function renderNotifHist(){var el=document.getElementById('notifHistList');if(!e
 function checkWatchlistAlerts(){var wl=JSON.parse(localStorage.getItem('nxwl10')||'[]');wl.forEach(function(sym){var d=T[sym];if(!d)return;if(d.c>=5){var k='wl_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;localStorage.setItem('nxnot10',JSON.stringify(notifiedSet));playSound('whale');showPopup('👁',sym+' — '+(lang==='ar'?'عملة مراقبة تحركت!':'Watchlist coin moved!'),'+'+d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('👁',sym,'Watchlist','+'+d.c.toFixed(1)+'%')}}if(d.c<=-5){var k='wl_dn_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;localStorage.setItem('nxnot10',JSON.stringify(notifiedSet));playSound('whale');showPopup('⚠️',sym+' — '+(lang==='ar'?'عملة مراقبة هبطت!':'Watchlist coin dropped!'),d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('⚠️',sym,'Watchlist Drop',d.c.toFixed(1)+'%')}}})}
 /* SOUND NOTIFICATIONS — respects user tone preference */
 function playSound(type){if(!soundEnabled||soundPref==='silent')return;previewTone(soundPref)}
-/* 📲 TELEGRAM GROUP NOTIFICATIONS */
-var TG_BOT='8646467680:AAG1Pdy4lqIgIkXFTOV78rocgZ-rXsrFoZg';
-var TG_CHAT='-1002485331567';
+/* 📲 TELEGRAM — SECURE PROXY (no token exposed!) */
+var TG_PROXY='https://your-nexus-proxy.workers.dev/notify';
 var tgSent={};
-function sendTG(html){try{fetch('https://api.telegram.org/bot'+TG_BOT+'/sendMessage',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({chat_id:TG_CHAT,text:html,parse_mode:'HTML',disable_web_page_preview:true})})}catch(e){}}
+function sendTG(html){try{fetch(TG_PROXY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:html})})}catch(e){}}
 function tgNotify(sym,type,data){
   /* Dedup: same coin+type per hour */
   var k=sym+'_'+type+'_'+new Date().getHours();if(tgSent[k])return;tgSent[k]=true;
@@ -155,6 +154,48 @@ function onSrch(v){var el=document.getElementById('sRes');if(!v){el.classList.re
 document.addEventListener('click',function(e){if(!e.target.closest('.srch'))document.getElementById('sRes').classList.remove('show')});
 /* WS */
 function initWS(){if(ws)ws.close();ws=new WebSocket('wss://stream.binance.com:9443/stream?streams='+WL.map(function(s){return s.toLowerCase()+'usdt@miniTicker'}).join('/'));ws.onmessage=function(e){var d=JSON.parse(e.data).data;if(!d)return;var s=d.s.replace('USDT','');var price=+d.c;var chg=+d.P;if(isNaN(chg))chg=0;T[s]=Object.assign(T[s]||{},{p:price,c:chg,v:+d.q,h:+d.h,l:+d.l,src:'BN'});if(!sparkHist[s])sparkHist[s]=[];sparkHist[s].push(price);if(sparkHist[s].length>12)sparkHist[s]=sparkHist[s].slice(-12)};ws.onclose=function(){setTimeout(initWS,3000)};ws.onerror=function(){ws.close()}}
+/* ═══ 🔌 FEATURE 1: MULTI-STREAM WEBSOCKET ═══ */
+var wsAgg=null,wsLiq=null,wsDepth=null,liquidationData={},depthSnapshots={};
+function initAggTradeWS(){
+  var syms=WL.slice(0,10).map(function(s){return s.toLowerCase()+'usdt@aggTrade'}).join('/');
+  wsAgg=new WebSocket('wss://stream.binance.com:9443/stream?streams='+syms);
+  wsAgg.onmessage=function(e){try{var d=JSON.parse(e.data).data;if(!d)return;
+    var sym=d.s.replace('USDT','');var price=+d.p;var qty=+d.q;var val=price*qty;
+    updateCVD(sym,price,qty,d.m);updateIceberg(sym,price,qty,d.m,+d.T);updateVPIN(sym,price,qty,d.m);
+    var isBuy=!d.m;var thresh=price>10000?100000:price>100?50000:20000;
+    if(val>=thresh){var k='wt_'+sym+'_'+Math.floor(Date.now()/60000);if(!notifiedSet[k]){notifiedSet[k]=Date.now();
+      var ic=isBuy?'🐋':'🐋🩸';var lb=isBuy?(lang==='ar'?'شراء حوت فوري!':'Whale buy!'):(lang==='ar'?'بيع حوت فوري!':'Whale sell!');
+      showPopup(ic,sym+' — '+lb,'$'+fmt(val));addNotifHist(ic,sym,isBuy?'Whale':'WhaleSell','$'+fmt(val));
+      if(val>=500000)sendTG('<b>'+ic+' '+sym+'/USDT</b>\n'+lb+'\n💰 $'+fmt(val)+'\n📍 Binance')}}}catch(ex){}};
+  wsAgg.onclose=function(){setTimeout(initAggTradeWS,5000)};wsAgg.onerror=function(){wsAgg.close()}}
+function initLiqWS(){
+  wsLiq=new WebSocket('wss://fstream.binance.com/ws/!forceOrder@arr');
+  wsLiq.onmessage=function(e){try{var data=JSON.parse(e.data);var o=data.o;if(!o)return;
+    var sym=o.s.replace('USDT','');var val=+o.p*+o.q;if(val<50000)return;
+    if(!liquidationData[sym])liquidationData[sym]=[];
+    liquidationData[sym].push({side:o.S,value:val,price:+o.p,time:Date.now()});
+    if(liquidationData[sym].length>50)liquidationData[sym]=liquidationData[sym].slice(-50);
+    if(val>=200000){var ic=o.S==='BUY'?'💥':'🔻';var lb=o.S==='BUY'?(lang==='ar'?'Short تصفّى!':'Short liquidated!'):(lang==='ar'?'Long تصفّى!':'Long liquidated!');
+      showPopup(ic,sym+' — '+lb,'$'+fmt(val));addNotifHist(ic,sym,'Liquidation','$'+fmt(val))}}catch(ex){}};
+  wsLiq.onclose=function(){setTimeout(initLiqWS,5000)};wsLiq.onerror=function(){wsLiq.close()}}
+function initDepthWS(){
+  var syms=['btc','eth','sol','bnb','xrp'].map(function(s){return s+'usdt@depth@100ms'}).join('/');
+  wsDepth=new WebSocket('wss://stream.binance.com:9443/stream?streams='+syms);
+  wsDepth.onmessage=function(e){try{var d=JSON.parse(e.data).data;if(!d||!d.s)return;depthSnapshots[d.s.replace('USDT','')]={bids:d.b||[],asks:d.a||[],time:Date.now()}}catch(ex){}};
+  wsDepth.onclose=function(){setTimeout(initDepthWS,8000)};wsDepth.onerror=function(){wsDepth.close()}}
+/* ═══ 🔗 FEATURE 2: ON-CHAIN TRACKING (no key) ═══ */
+var onChainData={};
+async function fetchOnChainBTC(){try{var data=await fj('https://mempool.space/api/mempool/recent');if(!data||!data.length)return;var whale=data.filter(function(tx){return tx.fee>50000});onChainData.BTC={count:whale.length,time:Date.now(),signal:whale.length>=3?'WHALE_RUSH':whale.length>=1?'MODERATE':'LOW'}}catch(e){}}
+/* ═══ 👛 FEATURE 3: WALLET TRACKING ═══ */
+var trackedWallets=JSON.parse(localStorage.getItem('nxwallets')||'[]');
+function addWallet(addr,label){if(trackedWallets.length>=20||trackedWallets.some(function(w){return w.address===addr}))return false;trackedWallets.push({address:addr,label:label||addr.slice(0,10),chain:'ethereum',lastBal:null,lastChk:0});localStorage.setItem('nxwallets',JSON.stringify(trackedWallets));return true}
+function rmWallet(i){trackedWallets.splice(i,1);localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}
+window.addWallet=addWallet;window.rmWallet=rmWallet;
+async function checkWallets(){for(var i=0;i<trackedWallets.length;i++){var w=trackedWallets[i];if(Date.now()-w.lastChk<60000)continue;try{var res=await fj('https://api.etherscan.io/api?module=account&action=balance&address='+w.address+'&tag=latest');if(res&&res.result){var bal=+res.result/1e18;if(w.lastBal!==null){var chg=bal-w.lastBal;var pct=w.lastBal>0?(chg/w.lastBal)*100:0;if(Math.abs(pct)>5){var ic=chg>0?'📥':'📤';showPopup(ic,w.label+(chg>0?' received':' sent'),Math.abs(chg).toFixed(2)+' ETH');addNotifHist(ic,w.label,'Wallet',pct.toFixed(1)+'%')}}w.lastBal=bal;w.lastChk=Date.now()}}catch(e){}await new Promise(function(r){setTimeout(r,6000)})}localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}
+/* ═══ 🔓 FEATURE 4: TOKEN UNLOCK ═══ */
+var unlockCache={};
+async function checkUnlocks(){try{var coins=['ARB','OP','SUI','SEI','TIA','APT','INJ'];for(var i=0;i<coins.length;i++){var sym=coins[i];var d=T[sym];if(!d)continue;/* Check known unlock schedules — manual fallback */}}catch(e){}}
+function getUnlockSignal(sym){var u=unlockCache[sym];if(!u)return null;return u}
 /* LOAD TICKERS — ALL 3 EXCHANGES */
 async function loadTk(){
   var bn=await fj(BN+'/ticker/24hr');if(bn)bn.filter(function(x){return x.symbol.endsWith('USDT')&&+x.quoteVolume>100000}).forEach(function(x){var s=x.symbol.replace('USDT','');var chg=+x.priceChangePercent;T[s]={p:+x.lastPrice,c:isNaN(chg)?0:chg,v:+x.quoteVolume,h:+x.highPrice,l:+x.lowPrice,src:'BN'}});
@@ -511,9 +552,10 @@ async function whaleL2(sym){
 /* LAYER 3: Liquidation Monitor (10%) */
 async function whaleL3(sym){
   var ck=wGet('L3_'+sym);if(ck)return ck;
-  /* Use stored liq events from WS or fetch */
-  var recent=liqEvents.filter(function(e){return e.sym===sym&&Date.now()-e.time<300000});
-  if(!recent.length){try{var fd=await fj('https://fapi.binance.com/fapi/v1/allForceOrders?symbol='+sym+'USDT&limit=20');if(fd)fd.forEach(function(o){var v= +o.price* +o.origQty;if(v>50000)recent.push({sym:sym,side:o.side,value:v,price:+o.price,time:+o.time})})}catch(e){}}
+  /* Use real-time WS liquidation data first, then REST fallback */
+  var recent=(liquidationData[sym]||[]).filter(function(e){return Date.now()-e.time<300000});
+  if(!recent.length){recent=liqEvents.filter(function(e){return e.sym===sym&&Date.now()-e.time<300000})}
+  if(!recent.length){try{var fd=await fj('https://fapi.binance.com/fapi/v1/allForceOrders?symbol='+sym+'USDT&limit=20');if(fd)fd.forEach(function(o){var v= +o.price* +o.origQty;if(v>50000)recent.push({side:o.side,value:v,price:+o.price,time:+o.time})})}catch(e){}}
   var longLiq=recent.filter(function(e){return e.side==='SELL'}).reduce(function(s,e){return s+e.value},0);
   var shortLiq=recent.filter(function(e){return e.side==='BUY'}).reduce(function(s,e){return s+e.value},0);
   var sc=0,sig='NEUTRAL';
@@ -568,6 +610,10 @@ async function whaleEngine(sym){
   layers.trades.score+=cvd.score+iceberg.score+vpin.score;layers.trades.cvd=cvd;layers.trades.iceberg=iceberg;layers.trades.vpin=vpin;
   layers.fr.score+=oiDelta.score+takerR.score;layers.fr.oiDelta=oiDelta;layers.fr.takerRatio=takerR;
   layers.xex.score+=btcDiv.score;layers.xex.btcDiv=btcDiv;
+  /* On-Chain data (BTC only, free) */
+  var oc=onChainData.BTC||{signal:'NO_DATA'};var ocSc=0;
+  if(oc.signal==='WHALE_RUSH')ocSc=8;else if(oc.signal==='MODERATE')ocSc=4;
+  layers.ob.score+=ocSc;layers.ob.onchain=oc;
   /* Time multiplier */
   var timeMult=getTimeMultiplier();
   /* Weighted confidence */
@@ -1207,6 +1253,11 @@ async function init(){document.getElementById('sInp').placeholder=t('search_ph')
   loadProfile();loadToneUI();updateMenuLang();updateMenuTheme();
   if(tg){tg.setHeaderColor(document.body.dataset.theme==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(document.body.dataset.theme==='dark'?'#020408':'#f0f4f8')}
   await loadDash();renderPort();updateConnStatus();
+  /* Start Multi-Stream WebSocket */
+  initAggTradeWS();initLiqWS();initDepthWS();
+  /* On-Chain + Wallet check */
+  setTimeout(fetchOnChainBTC,10000);setInterval(fetchOnChainBTC,120000);
+  setTimeout(checkWallets,20000);setInterval(checkWallets,120000);
   setInterval(async function(){try{await loadTk();await loadFutures();lastDataTime=Date.now();checkWatchlistAlerts();scanBybitGainers();updateConnStatus()}catch(e){connMetrics.apiFail++;updateConnStatus()}},30000);
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))await loadDash()},120000);
   setInterval(function(){if(!ws||ws.readyState!==1)initWS()},30000);

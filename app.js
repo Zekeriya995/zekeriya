@@ -148,7 +148,7 @@ function openMo(id){document.getElementById(id).classList.add('show')}
 function closeMo(id){document.getElementById(id).classList.remove('show')}
 document.querySelectorAll('.mo').forEach(function(m){m.onclick=function(e){if(e.target===m)m.classList.remove('show')}});
 function indTab(i,btn){document.getElementById('pg-ind').querySelectorAll('.big-tab').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');['ind0','ind1','ind2','ind3','ind4'].forEach(function(id,j){document.getElementById(id).style.display=j===i?'block':'none'});if(i===0)loadFR();if(i===1)loadOI();if(i===2)loadCor();if(i===3)loadHM();if(i===4)renderWL()}
-function whTab(i,btn){document.getElementById('pg-whale').querySelectorAll('.big-tab').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');['wh0','wh1'].forEach(function(id,j){document.getElementById(id).style.display=j===i?'block':'none'});if(i===0)loadWhales();if(i===1)loadLiq()}
+function whTab(i,btn){document.getElementById('pg-whale').querySelectorAll('.big-tab').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');['wh0','wh1','wh2'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=([0,1,2].indexOf(i)===j)?'block':'none'});if(i===0)loadWhales();if(i===1)loadLiq();if(i===2)loadWhaleSells()}
 function pTab(i,btn){document.getElementById('pg-me').querySelectorAll('.big-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');['p0','p1','p2','p3'].forEach(function(id,j){document.getElementById(id).style.display=j===i?'block':'none'});if(i===3)renderNotifHist()}
 function sf(btn){btn.parentElement.querySelectorAll('.big-tab').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');var m=btn.dataset.m;if(m==='gem'){document.getElementById('scanR').style.display='none';document.getElementById('gemSection').style.display='block';loadGems()}else{document.getElementById('scanR').style.display='block';document.getElementById('gemSection').style.display='none';runScan()}}
 function onSrch(v){var el=document.getElementById('sRes');if(!v){el.classList.remove('show');return}v=v.toUpperCase();var m=Object.entries(T).filter(function(e){return e[0].includes(v)}).slice(0,8);if(!m.length){el.classList.remove('show');return}el.innerHTML=m.map(function(e){var s=e[0],d=e[1];return'<div class="sr-i" onclick="openCoin(\''+s+'\')"><span style="font-weight:700">'+s+'</span><span style="font-family:var(--fm);font-size:10px">'+fP(d.p)+' <span class="cr-ch '+(d.c>=0?'up':'dn')+'">'+(d.c>=0?'+':'')+d.c.toFixed(1)+'%</span></span></div>'}).join('');el.classList.add('show')}
@@ -712,6 +712,71 @@ function whaleCard(r){
     +'<div class="whale-grid"><div class="whale-item"><div class="whale-item-v" style="color:var(--neon);font-size:14px">'+fmt(totalBuy)+'</div><div class="whale-item-l" style="font-size:9px">'+(lang==='ar'?'إجمالي':'Total')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:var(--blue);font-size:14px">'+waveCount+'</div><div class="whale-item-l" style="font-size:9px">'+(lang==='ar'?'موجات':'Waves')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:var(--up);font-size:14px">'+fP(r.p)+'</div><div class="whale-item-l" style="font-size:9px">'+(lang==='ar'?'السعر':'Price')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:'+(r.c>=0?'var(--up)':'var(--dn)')+';font-size:14px">'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</div><div class="whale-item-l" style="font-size:9px">24H</div></div></div>'
     +layerHTML+waveHTML+reasonHTML
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)"><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div>'+(eng?'<span style="font-family:var(--fm);font-size:8px;color:var(--t3)">⚡'+eng.execTime+' | '+eng.activeLayers+'/5 | v3.0</span>':'')+'</div></div>'}
+/* ═══ 🔴 WHALE SELL DETECTION — 8 signals ═══ */
+async function detectWhaleSells(candidates){
+  if(!candidates||!candidates.length)return[];
+  var sells=[];
+  var top=candidates.filter(function(x){return getCoinTier(x.s)<=2}).slice(0,20);
+  for(var i=0;i<Math.min(top.length,12);i++){
+    var c=top[i];var d=T[c.s];if(!d)continue;
+    var sc=0,sigs=[];
+    /* Signal 1: Price dropping with high volume = dump */
+    if(d.c<-3&&d.v>1e8){sc+=15;sigs.push({n:lang==='ar'?'تراجع مع حجم عالي':'Drop + high volume',ic:'📉',col:'var(--dn)'})}
+    else if(d.c<-1&&d.v>5e7){sc+=8;sigs.push({n:lang==='ar'?'ضغط بيع':'Sell pressure',ic:'📉',col:'var(--warn)'})}
+    /* Signal 2: CVD Bearish — falling CVD + rising price = selling into FOMO */
+    var cvd=analyzeCVD(c.s);
+    if(cvd.divergence==='BEARISH'){sc+=18;sigs.push({n:lang==='ar'?'CVD هابط — بيع مخفي':'CVD Bearish — hidden selling',ic:'📊',col:'var(--dn)'})}
+    /* Signal 3: Iceberg sells */
+    var ice=detectIceberg(c.s);
+    if(ice.icebergs&&ice.icebergs.some(function(x){return x.side==='SELL'})){sc+=12;sigs.push({n:lang==='ar'?'أوامر بيع مخفية':'Hidden sell orders',ic:'🧊',col:'var(--blue)'})}
+    /* Signal 4: High Funding Rate = overcrowded longs = dump incoming */
+    var fr=FR[c.s];
+    if(fr&&fr.rate>0.08){sc+=10;sigs.push({n:'FR '+fr.rate.toFixed(3)+'% '+(lang==='ar'?'— خطر تصفية':'— liquidation risk'),ic:'⚠️',col:'var(--warn)'})}
+    else if(fr&&fr.rate>0.05){sc+=5;sigs.push({n:'FR '+(lang==='ar'?'مرتفع':'elevated'),ic:'🟡',col:'var(--warn)'})}
+    /* Signal 5: OI dropping = positions closing */
+    var ww=whaleWaves[c.s];var eng=ww?ww.engine:null;
+    if(eng&&eng.techniques&&eng.techniques.oiDelta){var oid=eng.techniques.oiDelta;var oiChg=parseFloat(oid.oiChange)||0;
+      if(oiChg<-8){sc+=10;sigs.push({n:'OI '+oid.oiChange+' '+(lang==='ar'?'— إغلاق مراكز':'— closing positions'),ic:'📉',col:'var(--dn)'})}
+      else if(oiChg<-3){sc+=5;sigs.push({n:'OI '+(lang==='ar'?'ينخفض':'declining'),ic:'📊',col:'var(--warn)'})}}
+    /* Signal 6: Whale sell trades from L2 */
+    if(eng&&eng.layers&&eng.layers.trades&&eng.layers.trades.whaleSells>0){sc+=12;sigs.push({n:eng.layers.trades.whaleSells+' '+(lang==='ar'?'صفقات بيع كبيرة':'large sell trades'),ic:'💰',col:'var(--dn)'})}
+    /* Signal 7: Order book sell-heavy */
+    if(eng&&eng.layers&&eng.layers.ob&&eng.layers.ob.ratio<0.7){sc+=8;sigs.push({n:'OB '+(lang==='ar'?'ضغط بيع':'sell pressure')+' '+eng.layers.ob.ratio.toFixed(1)+'x',ic:'📗',col:'var(--dn)'})}
+    /* Signal 8: BTC divergence bearish */
+    var btcDiv=detectBTCDivergence(c.s);
+    if(btcDiv.signal==='WHALE_DISTRIBUTING'){sc+=8;sigs.push({n:lang==='ar'?'حوت يبيع — مستقل عن BTC':'Whale dumping — BTC independent',ic:'🎯',col:'var(--dn)'})}
+    /* Only include if score >= 15 */
+    if(sc>=15&&sigs.length>=2){
+      var conf=Math.round(Math.min(100,sc*1.2));
+      sells.push({s:c.s,p:d.p,c:d.c,v:d.v,sellConf:conf,signals:sigs,totalScore:sc})}}
+  return sells.sort(function(a,b){return b.sellConf-a.sellConf})}
+
+async function loadWhaleSells(){
+  var c=quickScan();var r=await deepAnalyze(c);
+  var sells=await detectWhaleSells(r);
+  var totalSellVol=sells.reduce(function(s,x){return s+x.v*0.05},0);
+  document.getElementById('whSellT').textContent=fmt(totalSellVol);
+  document.getElementById('whSellC').textContent=sells.length;
+  document.getElementById('whSellMax').textContent=sells.length?sells[0].s:'--';
+  document.getElementById('whSellList').innerHTML=sells.length?sells.slice(0,10).map(whaleSellCard).join(''):'<div class="empty"><div class="empty-ic">✅</div><div class="empty-tx">'+(lang==='ar'?'لا بيع حيتان — السوق آمن':'No whale selling — Market safe')+'</div></div>'}
+
+function whaleSellCard(r){
+  var confCol=r.sellConf>=70?'var(--dn)':r.sellConf>=40?'var(--warn)':'var(--t2)';
+  var strTxt=r.sellConf>=70?(lang==='ar'?'🔴 بيع قوي':'🔴 Heavy Sell'):r.sellConf>=40?(lang==='ar'?'🟠 بيع متوسط':'🟠 Moderate'):lang==='ar'?'🟡 ضغط خفيف':'🟡 Light';
+  var tb=getTierBadge(r.s);
+  return'<div class="whale-card" style="border-right:3px solid var(--dn)" onclick="openCoin(\''+r.s+'\')">'
+    +'<div class="whale-head"><div class="whale-sym" style="font-size:14px">⚠️ '+r.s+'/USDT'+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+' <span class="str-badge str-weak" style="background:var(--dd);color:var(--dn)">'+strTxt+'</span></div>'
+    +'<span style="font-family:var(--fm);font-size:12px;font-weight:800;padding:3px 8px;border-radius:8px;background:var(--dd);color:var(--dn)">'+r.sellConf+'%</span></div>'
+    +'<div class="whale-grid"><div class="whale-item"><div class="whale-item-v" style="color:var(--dn);font-size:13px">'+fP(r.p)+'</div><div class="whale-item-l" style="font-size:9px">'+(lang==='ar'?'السعر':'Price')+'</div></div>'
+    +'<div class="whale-item"><div class="whale-item-v" style="color:var(--dn);font-size:13px">'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</div><div class="whale-item-l" style="font-size:9px">24H</div></div>'
+    +'<div class="whale-item"><div class="whale-item-v" style="color:var(--warn);font-size:13px">'+r.signals.length+'</div><div class="whale-item-l" style="font-size:9px">'+(lang==='ar'?'إشارات':'Signals')+'</div></div>'
+    +'<div class="whale-item"><div class="whale-item-v" style="color:var(--t2);font-size:13px">'+fmt(r.v)+'</div><div class="whale-item-l" style="font-size:9px">Vol</div></div></div>'
+    +'<div style="margin:8px 0;padding:8px;background:var(--bg2);border-radius:10px">'
+    +'<div style="font-size:10px;font-weight:800;color:var(--dn);margin-bottom:6px">'+(lang==='ar'?'🔴 إشارات البيع:':'🔴 Sell Signals:')+'</div>'
+    +r.signals.map(function(s){return'<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;font-size:9px"><span style="font-size:12px">'+s.ic+'</span><span style="color:'+s.col+';font-weight:700;flex:1">'+s.n+'</span></div>'}).join('')
+    +'</div>'
+    +'<div style="padding:6px;background:var(--dd);border-radius:6px;text-align:center;margin-top:4px"><span style="font-size:10px;font-weight:800;color:var(--dn)">⚠️ '+(lang==='ar'?'حذر — تجنب الشراء':'Caution — Avoid buying')+'</span></div>'
+    +'</div>'}
 function scanItem(r){var sc=r.score>=60?'background:var(--ud);color:var(--up)':r.score>=40?'background:var(--wd);color:var(--warn)':'background:rgba(56,72,96,.3);color:var(--t2)';var tb=getTierBadge(r.s);return'<div class="'+(r.ultra?'scan-r ultra-r':'scan-r')+'" onclick="openCoin(\''+r.s+'\')"><div class="scan-h"><div class="scan-sym">'+(r.ultra?'⭐':r.confirmed?'🟢':'💎')+' '+r.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+' '+timeBadge(r.detectedAt)+'</div><span class="scan-score" style="'+sc+'">'+r.score+' · '+r.passed+'/'+r.total+'✓</span></div><div class="scan-det"><span>💰 <b>'+fP(r.p)+'</b></span><span>'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</span><span>'+fmt(r.v)+'</span>'+(r.cb?'<span>CB:'+fP(r.cb)+'</span>':'')+'</div><div class="scan-checks">'+r.tags.slice(0,5).map(function(x){return'<span class="scan-chk chk-y">'+x+'</span>'}).join('')+'</div><div class="prw"><div class="prb" style="width:'+Math.min(100,r.score)+'%;background:'+(r.ultra?'linear-gradient(90deg,var(--ultra),var(--dn))':r.score>=50?'var(--up)':'var(--warn)')+'"></div></div></div>'}
 function frRow(s,d){var cls=d.rate>0.05?'dn':d.rate<-0.01?'up':'warn';var w=Math.min(48,Math.abs(d.rate)*500);return'<div class="fr-row"><span class="fr-sym">'+s+'</span><div class="fr-bar"><div class="fr-mid"></div><div class="fr-fill" style="'+(d.rate>=0?'left':'right')+':50%;width:'+w+'%;background:var(--'+cls+')"></div></div><div><div class="fr-val" style="color:var(--'+cls+')">'+(d.rate>=0?'+':'')+d.rate.toFixed(4)+'%</div><div class="fr-sub-t">'+(d.rate>0.05?(lang==='ar'?'⚠️ خطر':'⚠️ Danger'):d.rate<-0.01?(lang==='ar'?'فرصة':'Opportunity'):(lang==='ar'?'طبيعي':'Normal'))+'</div></div></div>'}
 /* DASHBOARD */

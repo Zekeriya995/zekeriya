@@ -2,6 +2,31 @@
 const tg=window.Telegram?.WebApp;if(tg){tg.ready();tg.expand();tg.setHeaderColor('#060b14');tg.setBackgroundColor('#020408')}
 const BN='https://api.binance.com/api/v3',BF='https://fapi.binance.com/fapi/v1',CG='https://api.coingecko.com/api/v3',CB='https://api.coinbase.com/v2';
 const WL=['BTC','ETH','SOL','BNB','XRP','LINK','AVAX','DOGE','ADA','DOT','MATIC','UNI','ATOM','ARB','OP','INJ','SUI','SEI','TIA','FTM','NEAR','APT','LTC','PEPE','WIF'];
+/* ═══ 🏆 3-TIER SYSTEM — Smart Coin Focus ═══ */
+var TIER1=new Set(WL); /* Top 25 — Full Power */
+var tier2Coins=[],tier3Coins=[];var tierLastRefresh=0;
+function getCoinTier(s){if(TIER1.has(s))return 1;if(tier2Coins.includes(s))return 2;if(tier3Coins.includes(s))return 3;return 0}
+function getTierBadge(s){var t=getCoinTier(s);return t===1?'🏆':t===2?'🥈':t===3?'🔍':''}
+async function refreshTiers(){if(Date.now()-tierLastRefresh<4*3600000&&tier2Coins.length>0)return;tierLastRefresh=Date.now();
+  var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD'];var ranked=Object.entries(T).filter(function(e){return!STABLES.includes(e[0])&&!TIER1.has(e[0])&&e[1].v>1000000}).sort(function(a,b){return b[1].v-a[1].v}).map(function(e){return e[0]});
+  tier2Coins=ranked.slice(0,75);tier3Coins=ranked.slice(75,275);
+  console.log('[Tiers] T1:'+TIER1.size+' T2:'+tier2Coins.length+' T3:'+tier3Coins.length)}
+/* Volume Spike: T3 → T2 auto-promote */
+var volBaselines={};
+function checkVolSpikes(){tier3Coins.forEach(function(s){var d=T[s];if(!d)return;if(!volBaselines[s]){volBaselines[s]=d.v;return}var spike=d.v/Math.max(volBaselines[s],1);if(spike>=5){tier2Coins.push(s);tier3Coins=tier3Coins.filter(function(x){return x!==s});notify(s,'gem',0);setTimeout(function(){if(!TIER1.has(s)){tier2Coins=tier2Coins.filter(function(x){return x!==s});tier3Coins.push(s)}},7200000)}volBaselines[s]=volBaselines[s]*0.95+d.v*0.05})}
+/* VPIN Calculator — simple version using REST trades */
+var vpinBuckets={};
+function updateVPIN(sym,price,qty,isBuyerMaker){
+  if(!vpinBuckets[sym])vpinBuckets[sym]={buckets:[],cur:{bv:0,sv:0,n:0}};
+  var d=vpinBuckets[sym];var val=price*qty;
+  if(isBuyerMaker)d.cur.sv+=val;else d.cur.bv+=val;d.cur.n++;
+  if(d.cur.n>=30){d.buckets.push({bv:d.cur.bv,sv:d.cur.sv});if(d.buckets.length>40)d.buckets.shift();d.cur={bv:0,sv:0,n:0}}}
+function calcVPIN(sym){
+  var d=vpinBuckets[sym];if(!d||d.buckets.length<8)return{vpin:0,score:0,signal:'NO_DATA'};
+  var tImb=0,tVol=0;d.buckets.forEach(function(b){tImb+=Math.abs(b.bv-b.sv);tVol+=b.bv+b.sv});
+  var vpin=tVol>0?tImb/tVol:0;var sc=0,sig='LOW_TOXICITY';
+  if(vpin>0.7){sc+=12;sig='EXTREME_TOXICITY'}else if(vpin>0.55){sc+=8;sig='HIGH_TOXICITY'}else if(vpin>0.4){sc+=3;sig='MODERATE'}
+  return{vpin:+vpin.toFixed(3),score:sc,signal:sig}}
 const COL={BTC:'#f7931a',ETH:'#627eea',SOL:'#9945ff',BNB:'#f0b90b',XRP:'#23292f',LINK:'#2a5ada',AVAX:'#e84142',DOGE:'#c2a633',ADA:'#0033ad',DOT:'#e6007a',MATIC:'#8247e5',UNI:'#ff007a',ATOM:'#2e3148',ARB:'#28a0f0',OP:'#ff0420',INJ:'#00f2fe',SUI:'#4da2ff',SEI:'#9b1c1c',TIA:'#7c3aed',FTM:'#1969ff',NEAR:'#00c08b',APT:'#00bfa6',LTC:'#bfbbbb',PEPE:'#4c8c2f',WIF:'#8b5cf6'};
 let T={},FR={},OI={},LS={},CBP={},ws=null,curCoin='BTC',curTF='1h',inds={vol:1,sma:0,rsi:0,sr:0};
 let sparkHist={}; /* Real sparkline data per coin */
@@ -16,7 +41,7 @@ let fgValue=50,btcDom=50;
 /* CACHE */
 let cache={scan:null,scanTime:0,whale:null,whaleTime:0,fr:null,frTime:0};
 const CACHE_TTL=60000;
-const TR={nav_home:{ar:'الرئيسية',en:'Home'},nav_scan:{ar:'السكانر',en:'Scanner'},nav_whale:{ar:'حيتان',en:'Whales'},nav_ind:{ar:'مؤشرات',en:'Indicators'},nav_me:{ar:'حسابي',en:'Profile'},breakout:{ar:'بداية صعود',en:'Rising'},whales:{ar:'شراء حيتان',en:'Whale Buying'},scanning:{ar:'جاري المسح...',en:'Scanning...'},all:{ar:'الكل',en:'All'},full_scan:{ar:'مسح شامل',en:'Full Scan'},refresh:{ar:'تحديث',en:'Refresh'},total:{ar:'إجمالي',en:'Total'},buying:{ar:'شراء',en:'Buying'},selling:{ar:'بيع',en:'Selling'},success:{ar:'النجاح',en:'Success'},portfolio:{ar:'المحفظة',en:'Portfolio'},risk_calc:{ar:'حاسبة المخاطر',en:'Risk Calc'},alerts:{ar:'تنبيهات',en:'Alerts'},add_coins:{ar:'أضف عملات',en:'Add coins'},add_coin:{ar:'إضافة عملة',en:'Add Coin'},add:{ar:'إضافة',en:'Add'},cancel:{ar:'إلغاء',en:'Cancel'},back:{ar:'رجوع',en:'Back'},capital:{ar:'رأس المال',en:'Capital'},risk_pct:{ar:'المخاطرة',en:'Risk'},entry_price:{ar:'سعر الدخول',en:'Entry'},enter_data:{ar:'ادخل البيانات',en:'Enter data'},search_ph:{ar:'ابحث عن أي عملة...',en:'Search any coin...'},no_ultra:{ar:'لا ULTRA حالياً',en:'No ULTRA'},no_whale:{ar:'لا تجميع حيتان',en:'No whales'},confirmed:{ar:'مؤكدة',en:'Confirmed'},buy_strong:{ar:'شراء قوي',en:'Strong Buy'},buy:{ar:'شراء',en:'Buy'},sell:{ar:'بيع',en:'Sell'},hold:{ar:'انتظار',en:'Hold'},risk_amt:{ar:'💰 المخاطرة',en:'💰 Risk'},pos_size:{ar:'📦 الحجم',en:'📦 Size'},pos_val:{ar:'💵 القيمة',en:'💵 Value'},leverage:{ar:'📊 الرافعة',en:'📊 Leverage'},exp_profit:{ar:'🎯 الربح',en:'🎯 Profit'},sl_loss:{ar:'🛑 الخسارة',en:'🛑 Loss'},no_data:{ar:'لا بيانات',en:'No data'},empty_port:{ar:'فارغة',en:'Empty'},market_health:{ar:'🏥 صحة السوق',en:'🏥 Market Health'},smart_warn:{ar:'تحذيرات ذكية',en:'Smart Warnings'},sec_accuracy:{ar:'📈 نسبة النجاح',en:'📈 Accuracy'},scan_desc:{ar:'صيد مبكر — 6 فحوصات — 500+ عملة','en':'Early detection — 6 checks — 500+ coins'},days:{ar:'يوم',en:'days'},today:{ar:'اليوم!',en:'Today!'},instant:{ar:'فوري',en:'Instant'},strong_signal:{ar:'شراء/بيع قوي',en:'Strong signal'},before_unlock:{ar:'قبل الفك',en:'Before unlock'},gems:{ar:'جواهر',en:'Gems'},gem_desc:{ar:'💎 عملات صغيرة بحركة غير عادية — فرص أرباح كبيرة',en:'💎 Small caps with unusual moves — big profit potential'},wl_desc:{ar:'👁 أضف عملات لمراقبتها 24/7',en:'👁 Add coins to watch 24/7'},stable_flow:{ar:'حركة الأموال',en:'Money Flow'},sf_index:{ar:'مؤشر التدفق',en:'Flow Index'},sf_buy:{ar:'شراء كريبتو',en:'Buying Crypto'},sf_sell:{ar:'بيع كريبتو',en:'Selling Crypto'},sf_neutral:{ar:'متوازن',en:'Balanced'},online:{ar:'متصل',en:'online'},settings:{ar:'الإعدادات',en:'Settings'},profile:{ar:'👤 الملف الشخصي',en:'👤 Profile'},general:{ar:'⚙️ عام',en:'⚙️ General'},language:{ar:'اللغة',en:'Language'},theme:{ar:'الثيم',en:'Theme'},sound:{ar:'الصوت',en:'Sound'},tone:{ar:'🔔 نغمة الإشعار',en:'🔔 Notification Tone'},t_bell:{ar:'جرس',en:'Bell'},t_horn:{ar:'بوق',en:'Horn'},t_pulse:{ar:'نبض',en:'Pulse'},t_silent:{ar:'صامت',en:'Silent'},about:{ar:'عن المنصة',en:'About'},clear_data:{ar:'مسح البيانات',en:'Clear Data'},mkt_dir:{ar:'اتجاه السوق',en:'Market Direction'},mkt_dir_sub:{ar:'تقرير مفصل — BTC & ETH — كل 4 ساعات',en:'Detailed Report — BTC & ETH — Every 4h'},nav_market:{ar:'حركة السوق',en:'Market'},top3:{ar:'أفضل 3 فرص الآن',en:'Top 3 Opportunities Now'}};
+const TR={nav_home:{ar:'الرئيسية',en:'Home'},nav_scan:{ar:'السكانر',en:'Scanner'},nav_whale:{ar:'حيتان',en:'Whales'},nav_ind:{ar:'مؤشرات',en:'Indicators'},nav_me:{ar:'حسابي',en:'Profile'},breakout:{ar:'بداية صعود',en:'Rising'},whales:{ar:'شراء حيتان',en:'Whale Buying'},scanning:{ar:'جاري المسح...',en:'Scanning...'},all:{ar:'الكل',en:'All'},full_scan:{ar:'مسح شامل',en:'Full Scan'},refresh:{ar:'تحديث',en:'Refresh'},total:{ar:'إجمالي',en:'Total'},buying:{ar:'شراء',en:'Buying'},selling:{ar:'بيع',en:'Selling'},success:{ar:'النجاح',en:'Success'},portfolio:{ar:'المحفظة',en:'Portfolio'},risk_calc:{ar:'حاسبة المخاطر',en:'Risk Calc'},alerts:{ar:'تنبيهات',en:'Alerts'},add_coins:{ar:'أضف عملات',en:'Add coins'},add_coin:{ar:'إضافة عملة',en:'Add Coin'},add:{ar:'إضافة',en:'Add'},cancel:{ar:'إلغاء',en:'Cancel'},back:{ar:'رجوع',en:'Back'},capital:{ar:'رأس المال',en:'Capital'},risk_pct:{ar:'المخاطرة',en:'Risk'},entry_price:{ar:'سعر الدخول',en:'Entry'},enter_data:{ar:'ادخل البيانات',en:'Enter data'},search_ph:{ar:'ابحث عن أي عملة...',en:'Search any coin...'},no_ultra:{ar:'لا ULTRA حالياً',en:'No ULTRA'},no_whale:{ar:'لا تجميع حيتان',en:'No whales'},confirmed:{ar:'مؤكدة',en:'Confirmed'},buy_strong:{ar:'شراء قوي',en:'Strong Buy'},buy:{ar:'شراء',en:'Buy'},sell:{ar:'بيع',en:'Sell'},hold:{ar:'انتظار',en:'Hold'},risk_amt:{ar:'💰 المخاطرة',en:'💰 Risk'},pos_size:{ar:'📦 الحجم',en:'📦 Size'},pos_val:{ar:'💵 القيمة',en:'💵 Value'},leverage:{ar:'📊 الرافعة',en:'📊 Leverage'},exp_profit:{ar:'🎯 الربح',en:'🎯 Profit'},sl_loss:{ar:'🛑 الخسارة',en:'🛑 Loss'},no_data:{ar:'لا بيانات',en:'No data'},empty_port:{ar:'فارغة',en:'Empty'},market_health:{ar:'🏥 صحة السوق',en:'🏥 Market Health'},smart_warn:{ar:'تحذيرات ذكية',en:'Smart Warnings'},sec_accuracy:{ar:'📈 نسبة النجاح',en:'📈 Accuracy'},scan_desc:{ar:'صيد مبكر — 6 فحوصات — 🏆 Top 100 Focus','en':'Early detection — 6 checks — 🏆 Top 100 Focus'},days:{ar:'يوم',en:'days'},today:{ar:'اليوم!',en:'Today!'},instant:{ar:'فوري',en:'Instant'},strong_signal:{ar:'شراء/بيع قوي',en:'Strong signal'},before_unlock:{ar:'قبل الفك',en:'Before unlock'},gems:{ar:'جواهر',en:'Gems'},gem_desc:{ar:'💎 عملات صغيرة بحركة غير عادية — فرص أرباح كبيرة',en:'💎 Small caps with unusual moves — big profit potential'},wl_desc:{ar:'👁 أضف عملات لمراقبتها 24/7',en:'👁 Add coins to watch 24/7'},stable_flow:{ar:'حركة الأموال',en:'Money Flow'},sf_index:{ar:'مؤشر التدفق',en:'Flow Index'},sf_buy:{ar:'شراء كريبتو',en:'Buying Crypto'},sf_sell:{ar:'بيع كريبتو',en:'Selling Crypto'},sf_neutral:{ar:'متوازن',en:'Balanced'},online:{ar:'متصل',en:'online'},settings:{ar:'الإعدادات',en:'Settings'},profile:{ar:'👤 الملف الشخصي',en:'👤 Profile'},general:{ar:'⚙️ عام',en:'⚙️ General'},language:{ar:'اللغة',en:'Language'},theme:{ar:'الثيم',en:'Theme'},sound:{ar:'الصوت',en:'Sound'},tone:{ar:'🔔 نغمة الإشعار',en:'🔔 Notification Tone'},t_bell:{ar:'جرس',en:'Bell'},t_horn:{ar:'بوق',en:'Horn'},t_pulse:{ar:'نبض',en:'Pulse'},t_silent:{ar:'صامت',en:'Silent'},about:{ar:'عن المنصة',en:'About'},clear_data:{ar:'مسح البيانات',en:'Clear Data'},mkt_dir:{ar:'اتجاه السوق',en:'Market Direction'},mkt_dir_sub:{ar:'تقرير مفصل — BTC & ETH — كل 4 ساعات',en:'Detailed Report — BTC & ETH — Every 4h'},nav_market:{ar:'حركة السوق',en:'Market'},top3:{ar:'أفضل 3 فرص الآن',en:'Top 3 Opportunities Now'}};
 const t=k=>TR[k]?TR[k][lang]:(k||'');
 const fmt=n=>{if(n>=1e9)return'$'+(n/1e9).toFixed(1)+'B';if(n>=1e6)return'$'+(n/1e6).toFixed(1)+'M';if(n>=1e3)return'$'+(n/1e3).toFixed(1)+'K';return'$'+n.toFixed(0)};
 const fP=p=>{if(!p||isNaN(p))return'$0';if(p>=1e3)return'$'+p.toLocaleString('en',{maximumFractionDigits:2});if(p>=1)return'$'+p.toFixed(2);if(p>=.01)return'$'+p.toFixed(4);return'$'+p.toFixed(6)};
@@ -144,12 +169,21 @@ async function loadFutures(){
   if(!Object.keys(LS).length)WL.slice(0,6).forEach(function(s){var fr=FR[s];if(fr){var b=fr.rate>0?55+Math.min(20,fr.rate*200):45-Math.min(15,Math.abs(fr.rate)*200);LS[s]={long:Math.round(b),short:Math.round(100-b),ratio:+(b/(100-b)).toFixed(2)}}});}
 /* ═══ EARLY DETECTION SCANNER — catches coins BEFORE they pump ═══ */
 function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD'];var cands=[];Object.entries(T).forEach(function(e){var s=e[0],d=e[1];if(STABLES.includes(s))return;
-  /* Smart volume filter: lower threshold for small coins with momentum */
+  var tier=getCoinTier(s);
+  /* Smart volume filter: tier-aware */
   var minVol=200000;
-  if(d.p<0.1&&d.c>=3)minVol=50000;  /* Micro caps moving = lower bar */
-  else if(d.p<1&&d.c>=2)minVol=100000; /* Small caps with momentum */
+  if(tier===1)minVol=100000; /* T1: lower bar — always worth checking */
+  else if(tier===2)minVol=500000; /* T2: higher bar — need real volume */
+  else if(tier===3||tier===0){minVol=1000000; /* T3/unknown: much higher bar */
+    if(d.p<0.01)minVol=2000000} /* Micro caps need massive volume to be real */
+  if(d.p<0.1&&d.c>=3)minVol=Math.min(minVol,50000);
+  else if(d.p<1&&d.c>=2)minVol=Math.min(minVol,100000);
   if(d.v<minVol)return;
   var sc=0,tags=[];
+  /* TIER BONUS: Top coins get priority — small coins penalized */
+  if(tier===1){sc+=8;tags.push('🏆T1')}
+  else if(tier===2){sc+=3;tags.push('🥈T2')}
+  else if(tier===0&&d.v<5e6){sc-=5} /* Unknown tiny coin = penalty */
   /* EARLY DETECTION: low change + high volume = accumulation before pump */
   if(d.c>=0.5&&d.c<3&&d.v>5e7){sc+=25;tags.push('🔍EARLY')}
   if(d.c>=0.5&&d.c<5&&d.v>1e8){sc+=20;tags.push('🔍STEALTH')}
@@ -171,12 +205,14 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   if(d.h&&d.l&&d.h!==d.l&&((d.p-d.l)/(d.h-d.l))*100<25&&d.v>1e7){sc+=10;tags.push('📉BOTTOM')}
   if(sc>=15)cands.push({s:s,p:d.p,c:d.c,v:d.v,score:sc,tags:tags,fr:fr?fr.rate:null,by:d.by,cb:CBP[s]})});
   return cands.sort(function(a,b){return b.score-a.score})}
-/* DEEP ANALYZE — 6 checks, parallel + Bybit fallback */
+/* DEEP ANALYZE — tier-aware: T1=6 checks, T2=4 checks, T3=volume only */
 async function deepAnalyze(cands){var results=[];var top=cands.slice(0,30);
   var klData={},obData={};
-  /* Parallel: Binance klines + OB */
-  var klProms=top.slice(0,25).map(function(c){return fj(BN+'/klines?symbol='+c.s+'USDT&interval=1h&limit=30').then(function(d){klData[c.s]=d}).catch(function(){})});
-  var obProms=top.slice(0,15).map(function(c){return fj(BN+'/depth?symbol='+c.s+'USDT&limit=10').then(function(d){obData[c.s]=d}).catch(function(){})});
+  /* Only fetch klines for T1+T2, OB for T1 only */
+  var t1t2=top.filter(function(c){return getCoinTier(c.s)<=2||c.score>=30});
+  var t1Only=top.filter(function(c){return getCoinTier(c.s)===1||c.score>=40});
+  var klProms=t1t2.slice(0,25).map(function(c){return fj(BN+'/klines?symbol='+c.s+'USDT&interval=1h&limit=30').then(function(d){klData[c.s]=d}).catch(function(){})});
+  var obProms=t1Only.slice(0,15).map(function(c){return fj(BN+'/depth?symbol='+c.s+'USDT&limit=10').then(function(d){obData[c.s]=d}).catch(function(){})});
   await Promise.all(klProms.concat(obProms));
   /* Bybit fallback: for coins without Binance klines */
   var byMissing=top.filter(function(c){return!klData[c.s]&&T[c.s]&&T[c.s].src==='BY'}).slice(0,10);
@@ -297,10 +333,115 @@ function mkSpark(s){var hist=sparkHist[s];var up=T[s]?(!isNaN(T[s].c)?T[s].c>=0:
   return hist.slice(-12).map(function(v,i,a){var h=Math.max(3,Math.round((v-mn)/rng*24+3));var op=0.3+i/a.length*0.7;return'<b style="height:'+h+'px;background:var(--'+(up?'up':'dn')+');opacity:'+op.toFixed(2)+'"></b>'}).join('')}
 function coinRow(s,d,i,sub){var up=d.c>=0;var bg=COL[s]||'#444';return'<div class="cr" onclick="openCoin(\''+s+'\')"><div class="cr-l">'+(i!==undefined?'<div class="cr-rk">'+i+'</div>':'')+'<div class="cr-ic" style="background:'+bg+'0a;color:'+bg+';border:1px solid '+bg+'22">'+s.slice(0,2)+'</div><div><div class="cr-n">'+s+'</div><div class="cr-sub">'+(sub||fmt(d.v))+'</div></div></div><div class="cr-spark">'+mkSpark(s)+'</div><div class="cr-r"><div class="cr-p">'+fP(d.p)+'</div><div class="cr-ch '+(up?'up':'dn')+'">'+(up?'+':'')+d.c.toFixed(1)+'%</div></div></div>'}
 function ultraCard(r){/* Dedup: only save prediction once per coin per hour */var predKey=r.s+'_'+new Date().getHours();if(!predictions.some(function(p){return p.sym===r.s&&Date.now()-p.time<3600000}))savePred(r.s,r.p,r.p*1.03,r.score);var src=[];if(T[r.s])src.push('Binance');if(r.by)src.push('Bybit');if(CBP[r.s])src.push('Coinbase');return'<div class="ultra" onclick="openCoin(\''+r.s+'\')"><div class="u-badge">⭐ '+(r.ultra?'🟢 CONFIRMED':'🟡 PROBABLE')+' — '+r.passed+'/'+r.total+' CHECKS</div><div style="display:flex;justify-content:space-between;align-items:flex-start"><div><div class="u-sym">'+r.s+'/USDT</div><div class="u-price"><span style="color:'+(r.c>=0?'var(--up)':'var(--dn)')+';font-weight:700">'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</span> '+fP(r.p)+'</div></div><div style="text-align:center"><div class="u-score-val">'+r.score+'</div><div class="u-score-lbl">SCORE</div></div></div><div style="margin:8px 0">'+timeBadge(r.detectedAt)+'</div><div class="u-conf">'+Object.entries(r.checks).map(function(e){return'<div class="u-conf-i '+(e[1]?'pass':'fail')+'">'+e[0]+' '+(e[1]?'✅':'❌')+'</div>'}).join('')+'</div><div class="u-tags">'+r.tags.slice(0,6).map(function(x){return'<span class="u-tag" style="background:var(--ud);color:var(--up)">'+x+'</span>'}).join('')+'</div><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div><div class="u-range" style="margin-top:8px"><div style="font-size:10px;font-weight:700;margin-bottom:4px">🎯 Target</div><div class="u-range-row"><span style="color:var(--up)">Conservative</span><span style="font-weight:700">'+fP(r.p*1.08)+'</span></div><div class="u-range-row"><span style="color:var(--neon)">Target</span><span style="font-weight:700">'+fP(r.p*1.15)+'</span></div><div class="u-range-row"><span style="color:var(--dn)">🛑 Stop</span><span style="font-weight:700;color:var(--dn)">'+fP(r.p*0.93)+'</span></div></div></div>'}
-/* ═══ 🐋 WHALE INTELLIGENCE ENGINE v2.0 — 5 Layers ═══ */
+/* ═══ 🐋 WHALE INTELLIGENCE ENGINE v3.0 — 5 Layers + 8 Techniques ═══ */
 var wCache={};var prevOBSnapshots={};var liqEvents=[];
+var cvdData={};var icebergData={};var whaleLearning={preds:JSON.parse(localStorage.getItem('nxwlrn')||'[]'),layerAcc:JSON.parse(localStorage.getItem('nxwlacc')||'{}')};
 function wGet(k){var c=wCache[k];if(c&&Date.now()-c.t<c.ttl)return c.d;return null}
 function wSet(k,d,ttl){wCache[k]={d:d,t:Date.now(),ttl:ttl||15000}}
+
+/* 🧠 TECHNIQUE 1: CVD — Cumulative Volume Delta */
+function updateCVD(sym,price,qty,isBuyerMaker){
+  if(!cvdData[sym])cvdData[sym]={cvd:0,hist:[],prices:[]};
+  var d=cvdData[sym];var val=price*qty;
+  d.cvd+=isBuyerMaker?-val:val;
+  var now=Date.now();var last=d.hist.length?d.hist[d.hist.length-1].t:0;
+  if(now-last>=30000){d.hist.push({cvd:d.cvd,t:now});d.prices.push({p:price,t:now});if(d.hist.length>60){d.hist.shift();d.prices.shift()}}}
+function analyzeCVD(sym){
+  var d=cvdData[sym];if(!d||d.hist.length<5)return{score:0,signal:'NO_DATA',divergence:'NONE'};
+  var recent=d.hist.slice(-10);var prices=d.prices.slice(-10);
+  var cvdTrend=recent[recent.length-1].cvd-recent[0].cvd;
+  var pStart=prices[0].p;var pEnd=prices[prices.length-1].p;
+  var pTrend=pStart>0?((pEnd-pStart)/pStart)*100:0;
+  var sc=0,sig='NEUTRAL',div='NONE';
+  if(cvdTrend>0&&pTrend<0.5){sc+=15;sig='WHALE_ACCUMULATION';div='BULLISH';if(cvdTrend>100000){sc+=8;sig='HEAVY_ACCUMULATION'}}
+  if(cvdTrend<0&&pTrend>0.5){sc-=10;sig='FAKE_PUMP';div='BEARISH'}
+  if(cvdTrend>0&&pTrend>0.3){sc+=8;sig='CONFIRMED_BUYING';div='CONFIRMED'}
+  return{score:sc,signal:sig,divergence:div,cvd:d.cvd,cvdTrend:cvdTrend>0?'RISING':'FALLING'}}
+
+/* 🧠 TECHNIQUE 2: Iceberg Order Detection */
+function updateIceberg(sym,price,qty,isBuyerMaker,time){
+  if(!icebergData[sym])icebergData[sym]=[];
+  icebergData[sym].push({p:price,q:qty,buy:!isBuyerMaker,t:time||Date.now(),v:price*qty});
+  var cutoff=Date.now()-180000;icebergData[sym]=icebergData[sym].filter(function(t){return t.t>cutoff})}
+function detectIceberg(sym){
+  var trades=icebergData[sym];if(!trades||trades.length<10)return{score:0,signal:'NO_ICEBERG'};
+  var levels={};trades.forEach(function(t){var k=Math.round(t.p*10000)/10000;if(!levels[k])levels[k]=[];levels[k].push(t)});
+  var sc=0,icebergs=[];
+  Object.entries(levels).forEach(function(e){var p=+e[0],lt=e[1];
+    if(lt.length>=8){var span=lt[lt.length-1].t-lt[0].t;
+      if(span<=120000){var vol=lt.reduce(function(s,t){return s+t.v},0);var buyPct=lt.filter(function(t){return t.buy}).length/lt.length;
+        var sizes=lt.map(function(t){return t.v});var avg=vol/lt.length;var variance=sizes.reduce(function(s,v){return s+Math.pow(v-avg,2)},0)/sizes.length;
+        var uniform=Math.sqrt(variance)/avg<0.5;sc+=uniform?12:6;
+        icebergs.push({price:p,count:lt.length,vol:vol,side:buyPct>0.7?'BUY':'SELL',uniform:uniform})}}});
+  return{score:Math.min(20,sc),icebergs:icebergs,signal:icebergs.length?icebergs[0].side==='BUY'?'ICEBERG_BUY':'ICEBERG_SELL':'NO_ICEBERG',count:icebergs.length}}
+
+/* 🧠 TECHNIQUE 3: Absorption Detection */
+function detectAbsorption(sym){
+  var trades=icebergData[sym];var d=T[sym];if(!trades||trades.length<20||!d)return{score:0,signal:'NO_DATA'};
+  var curP=d.p;var tol=curP*0.001;var recent=trades.filter(function(t){return Math.abs(t.p-curP)<=tol&&Date.now()-t.t<60000});
+  var volAtLevel=recent.reduce(function(s,t){return s+t.v},0);
+  var avgVol=trades.reduce(function(s,t){return s+t.v},0)/trades.length*recent.length;
+  var sc=0,sig='NO_ABSORPTION';
+  if(volAtLevel>avgVol*3&&Math.abs(d.c)<0.3){sc+=15;sig='ABSORPTION_DETECTED';
+    var buyVol=recent.filter(function(t){return t.buy}).reduce(function(s,t){return s+t.v},0);
+    if(buyVol>volAtLevel*0.6){sc+=8;sig='BULLISH_ABSORPTION'}
+    else if(buyVol<volAtLevel*0.4){sc-=5;sig='BEARISH_ABSORPTION'}}
+  return{score:sc,signal:sig,volRatio:avgVol>0?(volAtLevel/avgVol).toFixed(1)+'x':'0x'}}
+
+/* 🧠 TECHNIQUE 5: BTC Correlation Divergence */
+function detectBTCDivergence(sym){
+  var d=T[sym];var btc=T.BTC;if(!d||!btc||sym==='BTC')return{score:0,signal:'N/A'};
+  var sc=0,sig='CORRELATED';
+  if(Math.abs(d.c)>3&&Math.abs(btc.c)<0.5){sc+=10;sig=d.c>0?'WHALE_TARGETING_BUY':'WHALE_TARGETING_SELL'}
+  else if(d.c>2&&btc.c<-0.5){sc+=7;sig='STRONG_DIVERGENCE'}
+  else if(d.c<-2&&btc.c>0.5){sc-=5;sig='WHALE_DISTRIBUTING'}
+  return{score:sc,signal:sig,btcChg:btc.c.toFixed(1),symChg:d.c.toFixed(1)}}
+
+/* 🧠 TECHNIQUE 6: OI Delta */
+async function analyzeOIDelta(sym){
+  var ck=wGet('OID_'+sym);if(ck)return ck;
+  try{var h=await fj('https://fapi.binance.com/futures/data/openInterestHist?symbol='+sym+'USDT&period=1h&limit=4');
+    if(!h||h.length<2)return{score:0,signal:'NO_DATA'};
+    var prev= +h[h.length-2].sumOpenInterestValue;var curr= +h[h.length-1].sumOpenInterestValue;
+    var chg=prev>0?((curr-prev)/prev)*100:0;var fr=FR[sym]?FR[sym].rate:0;
+    var sc=0,sig='STABLE';
+    if(chg>10){sc+=10;sig='MASSIVE_OI_SURGE'}else if(chg>5){sc+=7;sig='OI_INCREASING'}else if(chg<-10){sc+=4;sig='OI_FLUSH'}
+    if(chg>3&&fr<-0.01){sc+=8;sig='WHALE_LONG_BUILDUP'}
+    var r={score:sc,signal:sig,oiChange:chg.toFixed(1)+'%'};wSet('OID_'+sym,r,60000);return r}catch(e){return{score:0,signal:'ERROR'}}}
+
+/* 🧠 TECHNIQUE 7: Taker Buy/Sell Ratio */
+async function analyzeTakerRatio(sym){
+  var ck=wGet('TKR_'+sym);if(ck)return ck;
+  try{var d=await fj('https://fapi.binance.com/futures/data/takerlongshortRatio?symbol='+sym+'USDT&period=5m&limit=6');
+    if(!d||!d.length)return{score:0,signal:'NO_DATA'};
+    var ratio= +d[d.length-1].buySellRatio;var avg=d.reduce(function(s,x){return s+ +x.buySellRatio},0)/d.length;
+    var sc=0,sig='BALANCED';
+    if(ratio>2.0){sc+=10;sig='EXTREME_BUY'}else if(ratio>1.5){sc+=7;sig='HEAVY_TAKER_BUY'}
+    else if(ratio<0.5){sc-=7;sig='HEAVY_TAKER_SELL'}else if(ratio<0.7){sc-=3;sig='TAKER_SELLING'}
+    if(ratio>avg*1.2&&ratio>1.0)sc+=3;
+    var r={score:sc,signal:sig,ratio:ratio.toFixed(2)};wSet('TKR_'+sym,r,30000);return r}catch(e){return{score:0,signal:'ERROR'}}}
+
+/* 🧠 TECHNIQUE 8: Time-of-Day Multiplier */
+function getTimeMultiplier(){
+  var h=new Date().getUTCHours();var day=new Date().getUTCDay();
+  var m=1.0,reason=lang==='ar'?'ساعات عادية':'Normal';
+  if(h>=2&&h<=6){m=1.5;reason=lang==='ar'?'سيولة منخفضة':'Low liquidity'}
+  if(h>=4&&h<=5){m=2.0;reason=lang==='ar'?'سيولة منخفضة جداً':'Very low liquidity'}
+  if(day===0||day===6){m*=1.3;reason+=(lang==='ar'?' + عطلة':' + Weekend')}
+  if(h>=13&&h<=16){m=0.85;reason=lang==='ar'?'ذروة (ضجيج عالي)':'Peak hours (noise)'}
+  return{mult:m,reason:reason}}
+
+/* 🧠 TECHNIQUE 9: Self-Learning */
+function wlRecordSignal(sym,conf,layers,price){
+  whaleLearning.preds.push({sym:sym,conf:conf,layers:Object.fromEntries(Object.entries(layers).map(function(e){return[e[0],{sc:e[1].score,sig:e[1].signal}]})),price:price,time:Date.now(),chk:false,hit:false});
+  if(whaleLearning.preds.length>300)whaleLearning.preds=whaleLearning.preds.slice(-300);
+  localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds))}
+function wlVerify(){
+  var ch=false;whaleLearning.preds.forEach(function(p){
+    if(!p.chk&&Date.now()-p.time>8*3600000){var cur=T[p.sym];if(cur){p.chk=true;p.hit=((cur.p-p.price)/p.price*100)>=2;ch=true;
+      Object.entries(p.layers).forEach(function(e){var k=e[0],l=e[1];if(l.sc>0){if(!whaleLearning.layerAcc[k])whaleLearning.layerAcc[k]={ok:0,t:0};whaleLearning.layerAcc[k].t++;if(p.hit)whaleLearning.layerAcc[k].ok++}})}}});
+  if(ch){localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds));localStorage.setItem('nxwlacc',JSON.stringify(whaleLearning.layerAcc))}}
+function wlGetStats(){var c=whaleLearning.preds.filter(function(p){return p.chk});var h=c.filter(function(p){return p.hit});return{total:c.length,hits:h.length,rate:c.length>0?Math.round(h.length/c.length*100):0}}
 
 /* LAYER 1: Order Book — walls, spoofing, imbalance (15%) */
 async function whaleL1(sym){
@@ -342,6 +483,11 @@ async function whaleL2(sym){
   var ck=wGet('L2_'+sym);if(ck)return ck;
   var trades=await fj(BN+'/trades?symbol='+sym+'USDT&limit=100');
   if(!trades||!trades.length)return{score:0,signal:'OFFLINE'};
+  /* Feed techniques with trade data */
+  trades.forEach(function(tr){
+    updateCVD(sym,+tr.price,+tr.qty,tr.isBuyerMaker);
+    updateIceberg(sym,+tr.price,+tr.qty,tr.isBuyerMaker,+tr.time);
+    updateVPIN(sym,+tr.price,+tr.qty,tr.isBuyerMaker)});
   var vol=T[sym]?T[sym].v:1e8;
   var thresh=vol>1e9?200000:vol>1e8?50000:vol>1e7?10000:3000;
   /* Cluster trades within 60s windows */
@@ -400,23 +546,37 @@ function whaleL5(sym){
     if(cbDiv>0.5){sc+=4;sigs.push('INSTITUTIONAL_BUYING')}}
   return{score:Math.max(0,sc),signals:sigs,signal:sigs[0]||'NO_DIVERGENCE'}}
 
-/* ═══ WHALE INTELLIGENCE ENGINE — combines 5 layers ═══ */
-var LAYER_WEIGHTS={L1:0.20,L2:0.30,L3:0.10,L4:0.15,L5:0.25};
+/* ═══ WHALE INTELLIGENCE ENGINE v3.0 — 5L + 8T ═══ */
+var LAYER_WEIGHTS={L1:0.18,L2:0.28,L3:0.10,L4:0.16,L5:0.28};
 async function whaleEngine(sym){
   var t0=Date.now();
-  var results=await Promise.allSettled([whaleL1(sym),whaleL2(sym),whaleL3(sym)]);
+  /* Layers 1-3 parallel + 6,7 async */
+  var results=await Promise.allSettled([whaleL1(sym),whaleL2(sym),whaleL3(sym),analyzeOIDelta(sym),analyzeTakerRatio(sym)]);
   var layers={
     ob:results[0].status==='fulfilled'?results[0].value:{score:0,signal:'OFFLINE'},
     trades:results[1].status==='fulfilled'?results[1].value:{score:0,signal:'OFFLINE'},
     liqs:results[2].status==='fulfilled'?results[2].value:{score:0,signal:'OFFLINE'},
     fr:whaleL4(sym),
     xex:whaleL5(sym)};
+  /* Add technique scores to layers */
+  var cvd=analyzeCVD(sym);var iceberg=detectIceberg(sym);var absorb=detectAbsorption(sym);
+  var btcDiv=detectBTCDivergence(sym);var vpin=calcVPIN(sym);
+  var oiDelta=results[3].status==='fulfilled'?results[3].value:{score:0,signal:'NO_DATA'};
+  var takerR=results[4].status==='fulfilled'?results[4].value:{score:0,signal:'NO_DATA'};
+  /* Merge technique scores into layers */
+  layers.ob.score+=absorb.score;layers.ob.absorption=absorb;
+  layers.trades.score+=cvd.score+iceberg.score+vpin.score;layers.trades.cvd=cvd;layers.trades.iceberg=iceberg;layers.trades.vpin=vpin;
+  layers.fr.score+=oiDelta.score+takerR.score;layers.fr.oiDelta=oiDelta;layers.fr.takerRatio=takerR;
+  layers.xex.score+=btcDiv.score;layers.xex.btcDiv=btcDiv;
+  /* Time multiplier */
+  var timeMult=getTimeMultiplier();
   /* Weighted confidence */
-  var maxPerLayer=20;var wScore=0;var active=0;
+  var maxPerLayer=25;var wScore=0;var active=0;
   var layerArr=[{k:'ob',w:LAYER_WEIGHTS.L1},{k:'trades',w:LAYER_WEIGHTS.L2},{k:'liqs',w:LAYER_WEIGHTS.L3},{k:'fr',w:LAYER_WEIGHTS.L4},{k:'xex',w:LAYER_WEIGHTS.L5}];
-  layerArr.forEach(function(l){var d=layers[l.k];if(d&&d.signal!=='OFFLINE'&&d.signal!=='NO_DATA'){wScore+=(d.score/maxPerLayer)*l.w*100;active++}});
-  /* Normalize */
+  layerArr.forEach(function(l){var d=layers[l.k];if(d&&d.signal!=='OFFLINE'&&d.signal!=='NO_DATA'){wScore+=(Math.max(0,d.score)/maxPerLayer)*l.w*100;active++}});
   if(active<5){var activeW=layerArr.filter(function(l){var d=layers[l.k];return d&&d.signal!=='OFFLINE'&&d.signal!=='NO_DATA'}).reduce(function(s,l){return s+l.w},0);if(activeW>0)wScore=wScore/activeW*0.9}
+  /* Apply time multiplier */
+  wScore*=timeMult.mult;
   var conf=Math.round(Math.max(0,Math.min(100,wScore)));
   var sig,str;
   if(conf>=80){sig='WHALE_ACCUMULATION_CONFIRMED';str='VERY_STRONG'}
@@ -424,17 +584,27 @@ async function whaleEngine(sym){
   else if(conf>=40){sig='POSSIBLE_WHALE_ACTIVITY';str='MODERATE'}
   else if(conf>=20){sig='MINOR_ACTIVITY';str='WEAK'}
   else{sig='NO_WHALE_ACTIVITY';str='NONE'}
-  /* Check bearish */
   var bearish=layerArr.filter(function(l){return layers[l.k].score<0}).length;
   if(bearish>=3){sig='WHALE_DISTRIBUTION';str='BEARISH'}
+  /* Build reasons */
   var reasons=[];
-  if(layers.trades.whaleBuys>=2)reasons.push(layers.trades.whaleBuys+' '+(lang==='ar'?'صفقات حوت':'whale buys')+' ($'+fmt(layers.trades.totalBuyVolume)+')');
-  if(layers.ob.nearImbalance>2)reasons.push('OB '+(lang==='ar'?'ضغط شراء':'buy pressure')+' '+layers.ob.nearImbalance.toFixed(1)+'x');
-  if(layers.fr.fundingRate<-0.01)reasons.push('FR '+(lang==='ar'?'سلبي':'negative')+' '+layers.fr.fundingRate.toFixed(4)+'%');
-  if(layers.xex.signals&&layers.xex.signals.includes('COINBASE_PREMIUM'))reasons.push(lang==='ar'?'Coinbase أعلى (مؤسسات)':'Coinbase premium');
-  if(layers.liqs.signal==='SHORT_SQUEEZE')reasons.push(lang==='ar'?'تصفية شورت':'Short squeeze');
-  if(layers.ob.spoofWarning)reasons.push(lang==='ar'?'⚠️ تلاعب محتمل':'⚠️ Possible spoofing');
-  return{symbol:sym,confidence:conf,signal:sig,strength:str,layers:layers,activeLayers:active,execTime:(Date.now()-t0)+'ms',reasons:reasons.slice(0,4),action:conf>=70?{type:'BUY',target:'+8% to +15%',stop:'-7%'}:conf<=20?{type:'AVOID'}:{type:'WATCH'}}}
+  if(cvd.divergence==='BULLISH')reasons.push('📊 CVD '+(lang==='ar'?'تجميع صامت — أقوى إشارة!':'Silent accumulation — strongest signal!'));
+  if(iceberg.count>0)reasons.push('🧊 '+(lang==='ar'?'أوامر مخفية ':'Iceberg ')+iceberg.count+' '+iceberg.signal);
+  if(absorb.signal==='BULLISH_ABSORPTION')reasons.push('🛡️ '+(lang==='ar'?'حوت يمتص البيع '+absorb.volRatio:'Whale absorbing sells '+absorb.volRatio));
+  if(layers.trades.whaleBuys>=2)reasons.push('💰 '+layers.trades.whaleBuys+' '+(lang==='ar'?'صفقات حوت':'whale buys')+' ($'+fmt(layers.trades.totalBuyVolume)+')');
+  if(layers.ob.nearImbalance>2)reasons.push('📗 OB '+(lang==='ar'?'ضغط شراء':'buy pressure')+' '+layers.ob.nearImbalance.toFixed(1)+'x');
+  if(oiDelta.signal==='WHALE_LONG_BUILDUP')reasons.push('📈 OI↑ + FR↓ = '+(lang==='ar'?'حوت يبني Long':'Whale building Long'));
+  if(takerR.score>5)reasons.push('⚡ Taker '+(lang==='ar'?'شراء عدواني':'aggressive buy')+' '+takerR.ratio+'x');
+  if(btcDiv.signal==='WHALE_TARGETING_BUY')reasons.push('🎯 '+(lang==='ar'?'حوت يستهدف — مستقل عن BTC':'Whale targeting — independent of BTC'));
+  if(layers.fr.fundingRate<-0.01)reasons.push('📊 FR '+(lang==='ar'?'سلبي':'negative')+' '+layers.fr.fundingRate.toFixed(4)+'%');
+  if(layers.xex.signals&&layers.xex.signals.includes('COINBASE_PREMIUM'))reasons.push('🏦 Coinbase '+(lang==='ar'?'أعلى (مؤسسات)':'premium'));
+  if(layers.liqs.signal==='SHORT_SQUEEZE')reasons.push('💥 '+(lang==='ar'?'تصفية شورت':'Short squeeze'));
+  if(vpin.score>5)reasons.push('☣️ VPIN '+(lang==='ar'?'سمية عالية — حركة قادمة':'High toxicity — move imminent')+' '+vpin.vpin);
+  if(layers.ob.spoofWarning)reasons.push('⚠️ '+(lang==='ar'?'تلاعب محتمل':'Possible spoofing'));
+  /* Self-learning: record + verify */
+  if(conf>=30)wlRecordSignal(sym,conf,layers,T[sym]?T[sym].p:0);wlVerify();
+  var wlStats=wlGetStats();
+  return{symbol:sym,confidence:conf,signal:sig,strength:str,layers:layers,activeLayers:active,execTime:(Date.now()-t0)+'ms',reasons:reasons.slice(0,5),timeMult:timeMult,techniques:{cvd:cvd,iceberg:iceberg,absorption:absorb,btcDiv:btcDiv,oiDelta:oiDelta,takerRatio:takerR},learning:wlStats,action:conf>=70?{type:'BUY',target:'+8% to +15%',stop:'-7%'}:conf<=20?{type:'AVOID'}:{type:'WATCH'}}}
 
 /* ═══ WHALE DETECTION — uses engine for top coins ═══ */
 async function detectWhaleWaves(candidates){
@@ -467,7 +637,7 @@ async function detectWhaleWaves(candidates){
       whaleWaves[c.s].engine={confidence:Math.round((l4.score+l5.score)*2),signal:'POSSIBLE_WHALE_ACTIVITY',strength:'WEAK',layers:{ob:{score:0,signal:'SKIP'},trades:{score:0,signal:'SKIP'},liqs:{score:0,signal:'SKIP'},fr:l4,xex:l5},activeLayers:2,reasons:[]}}});
   localStorage.setItem('nxww10',JSON.stringify(whaleWaves))}
 
-/* ═══ WHALE CARD v2.0 — with layer breakdown ═══ */
+/* ═══ WHALE CARD v3.0 — 5 Layers + 8 Techniques ═══ */
 function whaleCard(r){
   var wt=getSigTime(r.s,'whale');
   var ww=whaleWaves[r.s]||{waves:[],totalBuy:0,engine:null};
@@ -475,8 +645,6 @@ function whaleCard(r){
   var waveCount=waves.length;
   var totalBuy=waves.reduce(function(s,w){return s+w.amount},0)||r.v*0.05;
   var conf=eng?eng.confidence:0;
-  var sig=eng?eng.signal:'NO_DATA';
-  /* Strength badge */
   var str;
   if(conf>=80)str={t:lang==='ar'?'🔥 تجميع مؤكد':'🔥 Confirmed',c:'str-strong'};
   else if(conf>=60)str={t:lang==='ar'?'⚡ تجميع قوي':'⚡ Strong',c:'str-strong'};
@@ -484,22 +652,38 @@ function whaleCard(r){
   else str={t:lang==='ar'?'👀 مراقبة':'👀 Watch',c:'str-weak'};
   var src=[];if(T[r.s])src.push(T[r.s].src==='BY'?'Bybit':'Binance');if(T[r.s]&&T[r.s].by)src.push('Bybit');if(CBP[r.s])src.push('Coinbase');
   var whaleIc=conf>=80?'🐋🐋🐋':conf>=60?'🐋🐋':'🐋';
-  /* Layer bars */
+  /* Layer + Technique bars */
   var layerHTML='';
   if(eng&&eng.activeLayers>0){
-    var lNames={ob:{n:lang==='ar'?'دفتر الأوامر':'Order Book',ic:'📗'},trades:{n:lang==='ar'?'صفقات كبيرة':'Trade Flow',ic:'💰'},liqs:{n:lang==='ar'?'تصفيات':'Liquidations',ic:'💥'},fr:{n:'Funding Rate',ic:'📊'},xex:{n:lang==='ar'?'بين المنصات':'Cross-Exchange',ic:'🔄'}};
-    layerHTML='<div style="margin:8px 0;padding:8px;background:var(--bg2);border-radius:8px">';
-    layerHTML+='<div style="font-size:8px;font-weight:700;color:var(--t2);margin-bottom:6px">'+(lang==='ar'?'📊 تحليل 5 طبقات:':'📊 5-Layer Analysis:')+'</div>';
+    var lNames={ob:{n:lang==='ar'?'دفتر الأوامر':'Order Book',ic:'📗',col:'#00ff88'},trades:{n:lang==='ar'?'صفقات كبيرة':'Trade Flow',ic:'💰',col:'#ffd700'},liqs:{n:lang==='ar'?'تصفيات':'Liquidations',ic:'💥',col:'#ff3860'},fr:{n:'Funding + OI',ic:'📊',col:'#b07cff'},xex:{n:lang==='ar'?'بين المنصات + BTC':'X-Exchange + BTC',ic:'🔄',col:'#5b9cff'}};
+    layerHTML='<div style="margin:8px 0;padding:10px;background:var(--bg2);border-radius:10px">';
+    layerHTML+='<div style="font-size:10px;font-weight:800;color:var(--t1);margin-bottom:8px">'+(lang==='ar'?'📊 تحليل 5 طبقات + 8 تقنيات:':'📊 5 Layers + 8 Techniques:')+'</div>';
     ['ob','trades','liqs','fr','xex'].forEach(function(k){
       var l=eng.layers[k];if(!l)return;var off=l.signal==='OFFLINE'||l.signal==='SKIP'||l.signal==='NO_DATA';
-      var pct=off?0:Math.min(100,Math.max(0,l.score*3.3));
-      var col=off?'var(--t3)':pct>60?'var(--up)':pct>30?'var(--warn)':'var(--dn)';
-      var info=lNames[k];
-      layerHTML+='<div style="display:flex;align-items:center;gap:4px;margin-bottom:3px;font-size:8px">'
-        +'<span style="width:14px">'+info.ic+'</span>'
-        +'<span style="width:65px;color:var(--t2)">'+info.n+'</span>'
-        +'<div style="flex:1;height:4px;background:var(--bdr);border-radius:2px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+col+';border-radius:2px"></div></div>'
-        +'<span style="width:50px;text-align:left;color:'+col+';font-family:var(--fm);font-weight:700">'+(off?(lang==='ar'?'—':'—'):l.signal.replace(/_/g,' ').slice(0,12))+'</span></div>'});
+      var pct=off?0:Math.min(100,Math.max(0,l.score*2.5));
+      var info=lNames[k];var barCol=off?'var(--t3)':info.col;
+      layerHTML+='<div style="display:flex;align-items:center;gap:5px;margin-bottom:4px">'
+        +'<span style="font-size:12px;width:18px">'+info.ic+'</span>'
+        +'<span style="width:72px;font-size:9px;font-weight:700;color:var(--t1)">'+info.n+'</span>'
+        +'<div style="flex:1;height:6px;background:var(--bdr);border-radius:3px;overflow:hidden"><div style="width:'+pct+'%;height:100%;background:'+barCol+';border-radius:3px;transition:width .5s"></div></div>'
+        +'<span style="width:55px;text-align:left;font-size:8px;font-family:var(--fm);font-weight:800;color:'+barCol+'">'+(off?'—':l.signal.replace(/_/g,' ').slice(0,14))+'</span></div>'});
+    /* Technique badges */
+    if(eng.techniques){
+      var t=eng.techniques;var badges=[];
+      if(t.cvd&&t.cvd.divergence==='BULLISH')badges.push({t:'CVD ↑',c:'var(--up)',bg:'var(--ud)'});
+      if(t.cvd&&t.cvd.divergence==='BEARISH')badges.push({t:'CVD ↓',c:'var(--dn)',bg:'var(--dd)'});
+      if(t.iceberg&&t.iceberg.count>0)badges.push({t:'🧊 Iceberg ×'+t.iceberg.count,c:'var(--blue)',bg:'var(--bd)'});
+      if(t.absorption&&t.absorption.score>10)badges.push({t:'🛡️ Absorb '+t.absorption.volRatio,c:'var(--neon)',bg:'var(--nd)'});
+      if(t.btcDiv&&t.btcDiv.score>5)badges.push({t:'🎯 BTC div',c:'var(--purple)',bg:'var(--pd)'});
+      if(t.oiDelta&&t.oiDelta.score>5)badges.push({t:'📈 OI '+t.oiDelta.oiChange,c:'var(--ultra)',bg:'var(--ultd)'});
+      if(t.takerRatio&&t.takerRatio.score>5)badges.push({t:'⚡ Taker '+t.takerRatio.ratio+'x',c:'var(--up)',bg:'var(--ud)'});
+      if(t.vpin&&t.vpin.score>3)badges.push({t:'☣️ VPIN '+t.vpin.vpin,c:'var(--dn)',bg:'var(--dd)'});
+      if(badges.length){
+        layerHTML+='<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)">';
+        badges.forEach(function(b){layerHTML+='<span style="font-size:8px;font-weight:700;padding:2px 6px;border-radius:4px;background:'+b.bg+';color:'+b.c+'">'+b.t+'</span>'});
+        layerHTML+='</div>'}}
+    /* Time multiplier */
+    if(eng.timeMult&&eng.timeMult.mult!==1){layerHTML+='<div style="font-size:7px;color:var(--t3);margin-top:4px">🕐 '+eng.timeMult.reason+' (×'+eng.timeMult.mult.toFixed(1)+')</div>'}
     layerHTML+='</div>'}
   /* Wave details */
   var waveHTML='';
@@ -507,30 +691,32 @@ function whaleCard(r){
     waveHTML='<div style="margin:6px 0;border-top:1px solid var(--bdr);padding-top:6px">';
     waves.forEach(function(wave,i){
       var isNew=Date.now()-wave.time<120000;
-      waveHTML+='<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:8px'+(i<waves.length-1?';border-bottom:1px solid rgba(56,72,96,.15)':'')+'">'
-        +'<span style="color:var(--neon);font-weight:700">🐋</span>'
-        +'<span style="font-family:var(--fm);font-weight:700;color:var(--t0)">#'+(i+1)+'</span>'
-        +'<span style="font-family:var(--fm);font-weight:700;color:var(--neon);flex:1">'+fmt(wave.amount)+'</span>'
-        +'<span style="font-family:var(--fm);color:var(--t2)">'+fP(wave.price)+'</span>'
+      waveHTML+='<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:9px'+(i<waves.length-1?';border-bottom:1px solid rgba(56,72,96,.15)':'')+'">'
+        +'<span style="color:var(--neon);font-weight:700;font-size:11px">🐋</span>'
+        +'<span style="font-family:var(--fm);font-weight:800;color:var(--t0);font-size:10px">#'+(i+1)+'</span>'
+        +'<span style="font-family:var(--fm);font-weight:800;color:var(--neon);flex:1;font-size:10px">'+fmt(wave.amount)+'</span>'
+        +'<span style="font-family:var(--fm);color:var(--t2);font-size:9px">'+fP(wave.price)+'</span>'
         +'<span class="time-badge '+(isNew?'fresh':'')+'">⏱'+timeAgo(wave.time).text+'</span></div>'});
     waveHTML+='</div>'}
   /* Reasons */
   var reasonHTML='';
   if(eng&&eng.reasons&&eng.reasons.length){
-    reasonHTML='<div style="margin-top:6px;padding:6px;background:var(--bg2);border-radius:6px;font-size:8px;color:var(--t1)">';
-    eng.reasons.forEach(function(r){reasonHTML+='<div>✅ '+r+'</div>'});
-    if(eng.action&&eng.action.type==='BUY')reasonHTML+='<div style="margin-top:4px;font-weight:700;color:var(--up)">💡 '+(lang==='ar'?'توصية: شراء | 🎯 '+eng.action.target+' | 🛑 '+eng.action.stop:'Rec: BUY | 🎯 '+eng.action.target+' | 🛑 '+eng.action.stop)+'</div>';
+    reasonHTML='<div style="margin-top:6px;padding:8px;background:linear-gradient(135deg,rgba(0,255,136,.03),transparent);border:1px solid rgba(0,255,136,.1);border-radius:8px">';
+    eng.reasons.forEach(function(re){reasonHTML+='<div style="font-size:9px;color:var(--t0);margin-bottom:2px;font-weight:600">'+re+'</div>'});
+    if(eng.action&&eng.action.type==='BUY')reasonHTML+='<div style="margin-top:6px;padding:6px;background:var(--ud);border-radius:6px;text-align:center"><span style="font-size:11px;font-weight:800;color:var(--up)">💡 '+(lang==='ar'?'شراء قوي':'Strong Buy')+'</span><span style="font-size:9px;color:var(--t1);margin:0 8px">🎯 '+eng.action.target+'</span><span style="font-size:9px;color:var(--dn)">🛑 '+eng.action.stop+'</span></div>';
+    /* Learning stats */
+    if(eng.learning&&eng.learning.total>0)reasonHTML+='<div style="font-size:7px;color:var(--t3);margin-top:4px;text-align:center">🧬 '+(lang==='ar'?'نسبة تعلم':'Learning')+': '+eng.learning.rate+'% ('+eng.learning.hits+'/'+eng.learning.total+')</div>';
     reasonHTML+='</div>'}
   return'<div class="whale-card" onclick="openCoin(\''+r.s+'\')">'
-    +'<div class="whale-head"><div class="whale-sym">'+whaleIc+' '+r.s+'/USDT <span class="str-badge '+str.c+'">'+str.t+'</span></div><div style="display:flex;align-items:center;gap:4px">'+timeBadge(wt)+'<span style="font-family:var(--fm);font-size:9px;font-weight:800;padding:2px 6px;border-radius:6px;background:'+(conf>=70?'var(--ud)':conf>=40?'var(--wd)':'var(--bg2)')+';color:'+(conf>=70?'var(--up)':conf>=40?'var(--warn)':'var(--t3)')+'">'+conf+'%</span></div></div>'
-    +'<div class="whale-grid"><div class="whale-item"><div class="whale-item-v" style="color:var(--neon)">'+fmt(totalBuy)+'</div><div class="whale-item-l">'+(lang==='ar'?'إجمالي':'Total')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:var(--blue)">'+waveCount+'</div><div class="whale-item-l">'+(lang==='ar'?'موجات':'Waves')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:var(--up)">'+fP(r.p)+'</div><div class="whale-item-l">'+(lang==='ar'?'السعر':'Price')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:'+(r.c>=0?'var(--up)':'var(--dn)')+'">'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</div><div class="whale-item-l">24H</div></div></div>'
+    +'<div class="whale-head"><div class="whale-sym" style="font-size:15px">'+whaleIc+' '+r.s+'/USDT <span class="str-badge '+str.c+'">'+str.t+'</span></div><div style="display:flex;align-items:center;gap:4px">'+timeBadge(wt)+'<span style="font-family:var(--fm);font-size:11px;font-weight:800;padding:3px 8px;border-radius:8px;background:'+(conf>=70?'var(--ud)':conf>=40?'var(--wd)':'var(--bg2)')+';color:'+(conf>=70?'var(--up)':conf>=40?'var(--warn)':'var(--t3)')+'">'+conf+'%</span></div></div>'
+    +'<div class="whale-grid"><div class="whale-item"><div class="whale-item-v" style="color:var(--neon);font-size:14px">'+fmt(totalBuy)+'</div><div class="whale-item-l" style="font-size:9px">'+(lang==='ar'?'إجمالي':'Total')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:var(--blue);font-size:14px">'+waveCount+'</div><div class="whale-item-l" style="font-size:9px">'+(lang==='ar'?'موجات':'Waves')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:var(--up);font-size:14px">'+fP(r.p)+'</div><div class="whale-item-l" style="font-size:9px">'+(lang==='ar'?'السعر':'Price')+'</div></div><div class="whale-item"><div class="whale-item-v" style="color:'+(r.c>=0?'var(--up)':'var(--dn)')+';font-size:14px">'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</div><div class="whale-item-l" style="font-size:9px">24H</div></div></div>'
     +layerHTML+waveHTML+reasonHTML
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div>'+(eng?'<span style="font-family:var(--fm);font-size:7px;color:var(--t3)">⚡'+eng.execTime+' | '+eng.activeLayers+'/5</span>':'')+'</div></div>'}
-function scanItem(r){var sc=r.score>=60?'background:var(--ud);color:var(--up)':r.score>=40?'background:var(--wd);color:var(--warn)':'background:rgba(56,72,96,.3);color:var(--t2)';return'<div class="'+(r.ultra?'scan-r ultra-r':'scan-r')+'" onclick="openCoin(\''+r.s+'\')"><div class="scan-h"><div class="scan-sym">'+(r.ultra?'⭐':r.confirmed?'🟢':'💎')+' '+r.s+' '+timeBadge(r.detectedAt)+'</div><span class="scan-score" style="'+sc+'">'+r.score+' · '+r.passed+'/'+r.total+'✓</span></div><div class="scan-det"><span>💰 <b>'+fP(r.p)+'</b></span><span>'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</span><span>'+fmt(r.v)+'</span>'+(r.cb?'<span>CB:'+fP(r.cb)+'</span>':'')+'</div><div class="scan-checks">'+r.tags.slice(0,5).map(function(x){return'<span class="scan-chk chk-y">'+x+'</span>'}).join('')+'</div><div class="prw"><div class="prb" style="width:'+Math.min(100,r.score)+'%;background:'+(r.ultra?'linear-gradient(90deg,var(--ultra),var(--dn))':r.score>=50?'var(--up)':'var(--warn)')+'"></div></div></div>'}
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px;padding-top:6px;border-top:1px solid var(--bdr)"><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div>'+(eng?'<span style="font-family:var(--fm);font-size:8px;color:var(--t3)">⚡'+eng.execTime+' | '+eng.activeLayers+'/5 | v3.0</span>':'')+'</div></div>'}
+function scanItem(r){var sc=r.score>=60?'background:var(--ud);color:var(--up)':r.score>=40?'background:var(--wd);color:var(--warn)':'background:rgba(56,72,96,.3);color:var(--t2)';var tb=getTierBadge(r.s);return'<div class="'+(r.ultra?'scan-r ultra-r':'scan-r')+'" onclick="openCoin(\''+r.s+'\')"><div class="scan-h"><div class="scan-sym">'+(r.ultra?'⭐':r.confirmed?'🟢':'💎')+' '+r.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+' '+timeBadge(r.detectedAt)+'</div><span class="scan-score" style="'+sc+'">'+r.score+' · '+r.passed+'/'+r.total+'✓</span></div><div class="scan-det"><span>💰 <b>'+fP(r.p)+'</b></span><span>'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</span><span>'+fmt(r.v)+'</span>'+(r.cb?'<span>CB:'+fP(r.cb)+'</span>':'')+'</div><div class="scan-checks">'+r.tags.slice(0,5).map(function(x){return'<span class="scan-chk chk-y">'+x+'</span>'}).join('')+'</div><div class="prw"><div class="prb" style="width:'+Math.min(100,r.score)+'%;background:'+(r.ultra?'linear-gradient(90deg,var(--ultra),var(--dn))':r.score>=50?'var(--up)':'var(--warn)')+'"></div></div></div>'}
 function frRow(s,d){var cls=d.rate>0.05?'dn':d.rate<-0.01?'up':'warn';var w=Math.min(48,Math.abs(d.rate)*500);return'<div class="fr-row"><span class="fr-sym">'+s+'</span><div class="fr-bar"><div class="fr-mid"></div><div class="fr-fill" style="'+(d.rate>=0?'left':'right')+':50%;width:'+w+'%;background:var(--'+cls+')"></div></div><div><div class="fr-val" style="color:var(--'+cls+')">'+(d.rate>=0?'+':'')+d.rate.toFixed(4)+'%</div><div class="fr-sub-t">'+(d.rate>0.05?(lang==='ar'?'⚠️ خطر':'⚠️ Danger'):d.rate<-0.01?(lang==='ar'?'فرصة':'Opportunity'):(lang==='ar'?'طبيعي':'Normal'))+'</div></div></div>'}
 /* DASHBOARD */
 async function loadDash(){
-  await loadTk();initWS();await loadFutures();
+  await loadTk();initWS();await loadFutures();refreshTiers();checkVolSpikes();
   var fg=await fj('https://api.alternative.me/fng/?limit=1');if(fg&&fg.data){fgValue=+fg.data[0].value;document.getElementById('fgV').textContent=fgValue;document.getElementById('fgL').textContent=fg.data[0].value_classification;document.getElementById('pFG').textContent=fgValue}
   var gl=await fj(CG+'/global');if(gl&&gl.data){btcDom=gl.data.market_cap_percentage?gl.data.market_cap_percentage.btc:50;document.getElementById('btcD').textContent=btcDom.toFixed(1)+'%'}
   var h=calcHealth();var hc=h.score>=70?'up':h.score>=45?'warn':'dn';
@@ -573,7 +759,7 @@ async function loadDash(){
 }
 /* SCANNER PAGE — uses cache for instant switch */
 async function runScan(){if(cache.scan&&Date.now()-cache.scanTime<CACHE_TTL){renderScanResults(cache.scan);setTimeout(async function(){var c=quickScan();cache.scan=await deepAnalyze(c);cache.scanTime=Date.now();renderScanResults(cache.scan)},100);return}var c=quickScan();var r=await deepAnalyze(c);cache.scan=r;cache.scanTime=Date.now();renderScanResults(r)}
-function renderScanResults(results){var mode=(document.querySelector('#fltM .big-tab.act')||{dataset:{m:'ultra'}}).dataset.m;var f=results;if(mode==='ultra')f=results.filter(function(r){return r.ultra||r.confirmed});else if(mode==='brk')f=results.filter(function(r){return r.c>=3&&r.score>=40});else if(mode==='fr')f=results.filter(function(r){return r.fr!=null}).sort(function(a,b){return Math.abs(b.fr||0)-Math.abs(a.fr||0)});document.getElementById('scanI').textContent='📊 '+Object.keys(T).length+' '+(lang==='ar'?'عملة':'coins')+' → ✅ '+f.length;document.getElementById('scanR').innerHTML=f.length?f.slice(0,30).map(scanItem).join(''):'<div class="empty"><div class="empty-ic">📡</div><div class="empty-tx">'+t('no_data')+'</div></div>'}
+function renderScanResults(results){var mode=(document.querySelector('#fltM .big-tab.act')||{dataset:{m:'ultra'}}).dataset.m;var f=results;if(mode==='ultra')f=results.filter(function(r){return r.ultra||r.confirmed});else if(mode==='brk')f=results.filter(function(r){return r.c>=3&&r.score>=40});else if(mode==='fr')f=results.filter(function(r){return r.fr!=null}).sort(function(a,b){return Math.abs(b.fr||0)-Math.abs(a.fr||0)});var t1c=f.filter(function(r){return getCoinTier(r.s)===1}).length;var t2c=f.filter(function(r){return getCoinTier(r.s)===2}).length;document.getElementById('scanI').textContent='📊 '+Object.keys(T).length+' '+(lang==='ar'?'عملة':'coins')+' → ✅ '+f.length+' (🏆'+t1c+' 🥈'+t2c+')';document.getElementById('scanR').innerHTML=f.length?f.slice(0,30).map(scanItem).join(''):'<div class="empty"><div class="empty-ic">📡</div><div class="empty-tx">'+t('no_data')+'</div></div>'}
 /* WHALE PAGE */
 async function loadWhales(){var c=quickScan();var r=await deepAnalyze(c);cache.scan=r;cache.scanTime=Date.now();await detectWhaleWaves(r);renderWhaleResults(r)}
 function renderWhaleResults(results){var w=results.filter(function(x){return x.tags.some(function(t){return t.includes('ACC')||t.includes('STEALTH')||t.includes('EARLY')||t.includes('BOTTOM')})||(x.v>5e7&&Math.abs(x.c)<3)||(x.checks&&x.checks.ob&&x.v>1e7)||whaleWaves[x.s]}).slice(0,20);

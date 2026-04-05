@@ -364,6 +364,23 @@ canvas{width:100%!important;border-radius:4px}
 .top3-rank{width:24px;height:24px;border-radius:8px;display:grid;place-items:center;font-size:12px;font-weight:800;flex-shrink:0}
 .top3-conf{display:inline-block;padding:2px 8px;border-radius:10px;font-size:8px;font-family:var(--fm);font-weight:700}
 
+/* BIG NAV BUTTONS */
+.big-tabs{display:flex;flex-wrap:wrap;justify-content:center;gap:6px;margin-bottom:12px}
+.big-tab{flex:1;min-width:70px;max-width:120px;padding:10px 6px;border-radius:12px;border:1px solid var(--bdr);background:var(--glass);backdrop-filter:var(--gb);text-align:center;cursor:pointer;transition:all .2s;font-size:11px;font-weight:700}
+.big-tab:active{transform:scale(.95)}
+.big-tab .bt-ic{font-size:20px;margin-bottom:4px}
+.big-tab.act{border-width:2px}
+.big-tab.t-gold{color:#ffd700}.big-tab.t-gold.act{border-color:#ffd700;background:rgba(255,215,0,.08)}
+.big-tab.t-red{color:var(--dn)}.big-tab.t-red.act{border-color:var(--dn);background:var(--dd)}
+.big-tab.t-blue{color:var(--blue)}.big-tab.t-blue.act{border-color:var(--blue);background:var(--bd)}
+.big-tab.t-purple{color:var(--purple)}.big-tab.t-purple.act{border-color:var(--purple);background:var(--pd)}
+.big-tab.t-green{color:var(--up)}.big-tab.t-green.act{border-color:var(--up);background:var(--ud)}
+.big-tab.t-orange{color:var(--ultra)}.big-tab.t-orange.act{border-color:var(--ultra);background:var(--ultd)}
+/* WELCOME MARQUEE */
+.welcome-bar{overflow:hidden;padding:6px 0;border-bottom:1px solid var(--bdr);background:rgba(255,215,0,.03)}
+.welcome-txt{display:inline-block;white-space:nowrap;animation:marquee 20s linear infinite;font-family:var(--fd);font-size:11px;font-weight:600;color:#ffd700}
+@keyframes marquee{0%{transform:translateX(100%)}100%{transform:translateX(-100%)}}
+
 @media(max-width:520px){.grid-2{grid-template-columns:1fr}.mst{grid-template-columns:repeat(2,1fr)}.mh-factors{grid-template-columns:repeat(2,1fr)}.u-conf{grid-template-columns:repeat(4,1fr)}}
 @media(min-width:768px){.mst{grid-template-columns:repeat(4,1fr)}.hm{grid-template-columns:repeat(6,1fr)}.main{padding:10px 24px 92px}}
 @media(min-width:1024px){.sidebar{display:flex;flex-direction:column;gap:2px;padding-top:16px}.bnv{display:none}.main{padding:10px 24px 24px}.hm{grid-template-columns:repeat(8,1fr)}}
@@ -377,6 +394,7 @@ canvas{width:100%!important;border-radius:4px}
 </div></header>
 
 <div class="srch" style="position:relative"><div class="srch-b"><span style="color:var(--t3)">🔍</span><input id="sInp" oninput="onSrch(this.value)"></div><div class="srch-r" id="sRes"></div></div>
+<div class="welcome-bar"><div class="welcome-txt" id="welcomeTxt">🚀 أهلاً وسهلاً في عالم الكريبتو مع زيكو — Welcome to the world of crypto with Ziko 🚀</div></div>
 
 <div class="pls-bar">
 <div class="pls-i">🏥 <span id="pMH" style="font-weight:700;color:var(--neon)">--</span>/100</div>
@@ -405,22 +423,30 @@ canvas{width:100%!important;border-radius:4px}
 <div id="ultraL" style="display:none"></div>
 </div>
 
-<!-- 📡 SCANNER: All | ULTRA | Breakout | FR (no whale) -->
+<!-- 📡 SCANNER -->
 <div class="pg" id="pg-scan">
 <div class="sec"><span class="sec-t">📡 EARLY DETECTION SCANNER</span></div>
-<div class="muted" data-t="scan_desc">صيد مبكر — 6 فحوصات — 500+ عملة — Binance + Bybit + Coinbase</div>
-<div class="flt-row" id="fltM"><button class="flt-b act" data-m="all" onclick="sf(this)">⭐ <span data-t="all">الكل</span></button><button class="flt-b" data-m="ultra" onclick="sf(this)">⭐ ULTRA</button><button class="flt-b" data-m="brk" onclick="sf(this)">💥 <span data-t="breakout">على وشك الانفجار</span></button><button class="flt-b" data-m="fr" onclick="sf(this)">📊 FR</button></div>
+<div class="muted" data-t="scan_desc">صيد مبكر — 6 فحوصات — 800+ عملة — Binance + Bybit + Coinbase</div>
+<div class="big-tabs" id="fltM">
+<div class="big-tab t-gold act" data-m="ultra" onclick="sf(this)"><div class="bt-ic">🔥</div>ULTRA</div>
+<div class="big-tab t-red" data-m="brk" onclick="sf(this)"><div class="bt-ic">💥</div><span data-t="breakout">بداية صعود</span></div>
+<div class="big-tab t-blue" data-m="fr" onclick="sf(this)"><div class="bt-ic">📊</div>FR</div>
+<div class="big-tab t-purple" data-m="gem" onclick="sf(this)"><div class="bt-ic">💎</div><span data-t="gems">جواهر</span></div>
+</div>
 <div class="muted" id="scanI">📊 جاري المسح...</div>
 <div id="scanR"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>
+<div id="gemSection" style="display:none"><div class="muted">💎 صيد مبكر — عملات صغيرة بحجم غير عادي قبل الانفجار</div><div style="display:flex;gap:4px;margin-bottom:6px;font-size:8px;font-family:var(--fm)"><span style="color:var(--up)">🟢 مبكر = ادخل</span><span style="color:var(--warn)">🟡 فيه فرصة = حذر</span><span style="color:var(--dn)">🔴 متأخر = راقب</span></div><div id="gemL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div></div>
 <button class="rfr" onclick="runScan()">🔄 <span data-t="full_scan">مسح شامل</span></button>
 </div>
 
-<!-- 🐋 WHALE BUYING + LIQUIDITY + GEMS -->
+<!-- 🐋 WHALE BUYING + LIQUIDITY -->
 <div class="pg" id="pg-whale">
-<div class="tabs"><button class="tab act" onclick="whTab(0,this)">🐋 <span data-t="whales">شراء حيتان</span></button><button class="tab" onclick="whTab(1,this)">💧 <span data-t="liquidity">سيولة</span></button><button class="tab" onclick="whTab(2,this)">💎 <span data-t="gems">جواهر</span></button></div>
+<div class="big-tabs">
+<div class="big-tab t-green act" data-w="0" onclick="whTab(0,this)"><div class="bt-ic">🐋</div><span data-t="whales">شراء حيتان</span></div>
+<div class="big-tab t-blue" data-w="1" onclick="whTab(1,this)"><div class="bt-ic">💧</div><span data-t="liquidity">سيولة</span></div>
+</div>
 <div id="wh0"><div class="sts"><div class="st"><div class="st-l" data-t="total">إجمالي</div><div class="st-v" id="whT" style="color:var(--neon)">--</div></div><div class="st"><div class="st-l" data-t="buying">شراء</div><div class="st-v" id="whB" style="color:var(--up)">--</div></div><div class="st"><div class="st-l" data-t="selling">بيع</div><div class="st-v" id="whS" style="color:var(--dn)">--</div></div></div><div id="whAL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div><div class="sec"><span class="sec-t" data-t="sec_accuracy">📈 نسبة النجاح</span></div><div id="whAccCard"></div></div>
 <div id="wh1" style="display:none"><div id="liqL"></div><div class="sec"><span class="sec-t">📗 ORDER BOOK</span></div><div id="obS"></div></div>
-<div id="wh2" style="display:none"><div class="muted">💎 صيد مبكر — عملات صغيرة بحجم غير عادي قبل الانفجار</div><div style="display:flex;gap:4px;margin-bottom:6px;font-size:8px;font-family:var(--fm)"><span style="color:var(--up)">🟢 مبكر = ادخل</span><span style="color:var(--warn)">🟡 فيه فرصة = حذر</span><span style="color:var(--dn)">🔴 متأخر = راقب</span></div><div id="gemL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div></div>
 <button class="rfr" onclick="loadWhales()">🔄 <span data-t="refresh">تحديث</span></button>
 </div>
 
@@ -432,20 +458,21 @@ canvas{width:100%!important;border-radius:4px}
 <div class="mst"><div class="mst-i"><div class="mst-val" id="fgV" style="color:var(--warn)">--</div><div class="mst-lbl">😰 FEAR</div><div class="mst-sub" id="fgL">...</div></div><div class="mst-i"><div class="mst-val" id="btcD" style="color:var(--neon)">--</div><div class="mst-lbl">₿ BTC DOM</div><div class="mst-sub">Dominance</div></div><div class="mst-i"><div class="mst-val" id="brkC" style="color:var(--dn)">0</div><div class="mst-lbl">🔥 BREAKOUTS</div><div class="mst-sub">Active</div></div><div class="mst-i"><div class="mst-val" id="ulC" style="color:var(--ultra)">0</div><div class="mst-lbl">⭐ ULTRA</div><div class="mst-sub" data-t="confirmed">مؤكدة</div></div></div>
 <!-- Warnings -->
 <div id="warnBox"></div>
-<!-- Stablecoin Flow -->
+<!-- Stablecoin Flow — simplified -->
 <div class="cd" style="padding:14px;margin-bottom:12px">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-<div class="cd-t">💰 <span data-t="stable_flow">تدفق العملات المستقرة</span></div>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+<div class="cd-t">💰 <span data-t="stable_flow">حركة الأموال</span></div>
 <div id="sfSignal" style="font-size:9px;font-family:var(--fm);font-weight:700;padding:3px 8px;border-radius:6px">...</div>
 </div>
+<div style="text-align:center;margin-bottom:10px;font-size:12px;font-weight:700;color:var(--t1)"  data-t="sf_question">الناس تشتري كريبتو ولا تبيع؟</div>
+<div style="text-align:center;margin-bottom:8px"><div id="sfIndex" style="font-family:var(--fd);font-size:32px;font-weight:800">--</div><div id="sfIndexLbl" style="font-size:10px;font-family:var(--fm);margin-top:2px">...</div></div>
+<div style="height:10px;border-radius:5px;background:linear-gradient(90deg,var(--up),var(--up),var(--warn),var(--dn),var(--dn));position:relative;margin-bottom:8px"><div id="sfPt" style="position:absolute;top:-5px;width:20px;height:20px;background:var(--t0);border-radius:50%;border:2px solid var(--bg);transform:translateX(-50%);box-shadow:0 0 8px rgba(255,255,255,.3);transition:left .8s;left:50%"></div></div>
+<div style="display:flex;justify-content:space-between;font-size:8px;font-family:var(--fm);color:var(--t3);margin-bottom:8px"><span>🟢 <span data-t="sf_buy">شراء كريبتو</span></span><span data-t="sf_neutral">متوازن</span><span>🔴 <span data-t="sf_sell">بيع كريبتو</span></span></div>
 <div style="display:flex;gap:6px;margin-bottom:8px">
-<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)">USDT Vol</div><div id="sfUSDT" style="font-family:var(--fm);font-size:14px;font-weight:800;color:var(--t0)">--</div><div id="sfUSDTch" style="font-size:9px;font-family:var(--fm);font-weight:700">--</div></div>
-<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)">USDC Vol</div><div id="sfUSDC" style="font-family:var(--fm);font-size:14px;font-weight:800;color:var(--t0)">--</div><div id="sfUSDCch" style="font-size:9px;font-family:var(--fm);font-weight:700">--</div></div>
-<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)" data-t="sf_index">مؤشر التدفق</div><div id="sfIndex" style="font-family:var(--fd);font-size:20px;font-weight:800">--</div><div id="sfIndexLbl" style="font-size:8px;font-family:var(--fm)">...</div></div>
+<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)">USDT</div><div id="sfUSDT" style="font-family:var(--fm);font-size:13px;font-weight:800;color:var(--t0)">--</div><div id="sfUSDTch" style="font-size:9px;font-family:var(--fm);font-weight:700">--</div></div>
+<div style="flex:1;background:var(--bg2);border-radius:8px;padding:8px;text-align:center"><div style="font-size:8px;color:var(--t3);font-family:var(--fm)">USDC</div><div id="sfUSDC" style="font-family:var(--fm);font-size:13px;font-weight:800;color:var(--t0)">--</div><div id="sfUSDCch" style="font-size:9px;font-family:var(--fm);font-weight:700">--</div></div>
 </div>
-<div style="height:8px;border-radius:4px;background:linear-gradient(90deg,var(--up),var(--up),var(--warn),var(--dn),var(--dn));position:relative;margin-bottom:6px"><div id="sfPt" style="position:absolute;top:-4px;width:16px;height:16px;background:var(--t0);border-radius:50%;border:2px solid var(--bg);transform:translateX(-50%);box-shadow:0 0 8px rgba(255,255,255,.3);transition:left .8s;left:50%"></div></div>
-<div style="display:flex;justify-content:space-between;font-size:7px;font-family:var(--fm);color:var(--t3)"><span>🟢 <span data-t="sf_buy">شراء كريبتو</span></span><span data-t="sf_neutral">متوازن</span><span>🔴 <span data-t="sf_sell">بيع كريبتو</span></span></div>
-<div id="sfAdvice" style="margin-top:8px;padding:8px;background:var(--bg2);border-radius:8px;font-size:10px;text-align:center;font-weight:600">...</div>
+<div id="sfAdvice" style="padding:8px;background:var(--bg2);border-radius:8px;font-size:10px;text-align:center;font-weight:600">...</div>
 </div>
 <!-- Report inline -->
 <div class="sec"><span class="sec-t">📊 <span data-t="mkt_dir">اتجاه السوق</span></span></div>
@@ -453,9 +480,17 @@ canvas{width:100%!important;border-radius:4px}
 <button class="rfr" onclick="reportCache.time=0;loadReport()" style="background:var(--bd);color:var(--blue);border-color:rgba(91,156,255,.15)">🔄 <span data-t="refresh">تحديث التقرير</span></button>
 </div>
 
-<!-- 📊 INDICATORS + HEATMAP + WATCHLIST -->
+<!-- 📊 INDICATORS -->
 <div class="pg" id="pg-ind">
-<div class="tabs"><button class="tab act" onclick="indTab(0,this)">📊 FR Trend</button><button class="tab" onclick="indTab(1,this)">📈 OI</button><button class="tab" onclick="indTab(2,this)">🔗 Correlation</button><button class="tab" onclick="indTab(3,this)">🗺️ <span data-t="heatmap">خريطة</span></button><button class="tab" onclick="indTab(4,this)">👁 Watchlist</button></div>
+<div class="big-tabs">
+<div class="big-tab t-green act" onclick="indTab(0,this)"><div class="bt-ic">📊</div>FR</div>
+<div class="big-tab t-orange" onclick="indTab(1,this)"><div class="bt-ic">📈</div>OI</div>
+<div class="big-tab t-purple" onclick="indTab(2,this)"><div class="bt-ic">🔗</div><span data-t="correlation">ارتباط</span></div>
+</div>
+<div class="big-tabs">
+<div class="big-tab t-red" onclick="indTab(3,this)"><div class="bt-ic">🗺️</div><span data-t="heatmap">خريطة حرارية</span></div>
+<div class="big-tab t-blue" onclick="indTab(4,this)"><div class="bt-ic">👁</div>Watchlist</div>
+</div>
 <div id="ind0"><div id="frList"></div></div>
 <div id="ind1" style="display:none"><div id="oiList"></div></div>
 <div id="ind2" style="display:none"><div id="corGrid"></div></div>
@@ -466,7 +501,14 @@ canvas{width:100%!important;border-radius:4px}
 
 <!-- 👤 PROFILE -->
 <div class="pg" id="pg-me">
-<div class="tabs"><button class="tab act" onclick="pTab(0,this)">💼 <span data-t="portfolio">المحفظة</span></button><button class="tab" onclick="pTab(1,this)">⚖️ <span data-t="risk_calc">حاسبة المخاطر</span></button><button class="tab" onclick="pTab(2,this)">🔔 <span data-t="alerts">تنبيهات</span></button><button class="tab" onclick="pTab(3,this)">📜 سجل</button></div>
+<div class="big-tabs">
+<div class="big-tab t-green act" onclick="pTab(0,this)"><div class="bt-ic">💼</div><span data-t="portfolio">المحفظة</span></div>
+<div class="big-tab t-orange" onclick="pTab(1,this)"><div class="bt-ic">⚖️</div><span data-t="risk_calc">حاسبة المخاطر</span></div>
+</div>
+<div class="big-tabs">
+<div class="big-tab t-blue" onclick="pTab(2,this)"><div class="bt-ic">🔔</div><span data-t="alerts">تنبيهات</span></div>
+<div class="big-tab t-purple" onclick="pTab(3,this)"><div class="bt-ic">📜</div>سجل</div>
+</div>
 <div id="p0"><div class="cd"><div class="port-tot"><div class="port-val" id="pVal">$0</div><div class="port-ch" id="pCh" style="color:var(--t3)" data-t="add_coins">أضف عملات</div></div></div><div id="pList"></div><button class="add-btn" onclick="openMo('addMo')">➕ <span data-t="add_coin">إضافة عملة</span></button></div>
 <div id="p1" style="display:none"><div class="cd"><div class="cd-t" style="margin-bottom:10px">⚖️ <span data-t="risk_calc">حاسبة المخاطر</span></div><div class="rc-label">💰 <span data-t="capital">رأس المال</span> ($)</div><input class="rc-inp" id="rcCap" type="number" placeholder="10000" oninput="calcRisk()"><div class="rc-label">📊 <span data-t="risk_pct">المخاطرة</span> (%)</div><input class="rc-inp" id="rcRisk" type="number" placeholder="2" value="2" oninput="calcRisk()"><div class="rc-label">💵 <span data-t="entry_price">سعر الدخول</span></div><input class="rc-inp" id="rcEntry" type="number" placeholder="67000" oninput="calcRisk()"><div class="rc-label">🛑 Stop Loss</div><input class="rc-inp" id="rcSL" type="number" placeholder="65000" oninput="calcRisk()"><div class="rc-label">🎯 Take Profit</div><input class="rc-inp" id="rcTP" type="number" placeholder="72000" oninput="calcRisk()"><div class="rc-result" id="rcRes"><div style="text-align:center;color:var(--t3);padding:12px;font-size:11px" data-t="enter_data">ادخل البيانات</div></div></div></div>
 <div id="p2" style="display:none">

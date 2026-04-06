@@ -350,6 +350,24 @@ canvas{width:100%!important;border-radius:4px}
 .coin-card-body{display:flex;align-items:flex-end;justify-content:space-between;position:relative;z-index:1}
 .coin-card-info{font-size:9px;font-family:var(--fm);color:var(--t2);line-height:1.7;flex-shrink:0}
 .coin-card-price{font-family:var(--fm);font-size:22px;font-weight:800;color:var(--t0);letter-spacing:-0.5px}
+.cc-row1{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.cc-row2{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.cc-tf{display:flex;justify-content:space-between;font-family:var(--fm);font-size:9px;font-weight:700;margin-bottom:6px;padding:4px 6px;background:var(--bg2);border-radius:6px}
+.cc-indicators{display:flex;justify-content:space-between;font-family:var(--fm);font-size:9px;font-weight:700;margin-bottom:6px}
+.cc-ls{margin-bottom:6px}
+.cc-ls-bar{display:flex;height:6px;border-radius:3px;overflow:hidden;background:var(--bg2)}
+.cc-ls-labels{display:flex;justify-content:space-between;font-family:var(--fm);font-size:8px;margin-top:2px}
+.cc-details{display:flex;flex-wrap:wrap;gap:6px;font-family:var(--fm);font-size:8px;color:var(--t2);margin-bottom:6px}
+.cc-sr{display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:8px;margin-bottom:6px;padding:3px 6px;background:var(--bg2);border-radius:4px}
+.cc-summary{font-size:10px;font-weight:700;padding:6px 8px;background:var(--bg2);border-radius:8px;margin-bottom:6px;line-height:1.4}
+.cc-exchanges{display:flex;gap:8px;font-family:var(--fm);font-size:8px;color:var(--t3)}
+@keyframes pulse-buy{0%,100%{box-shadow:0 0 0 0 rgba(0,255,136,0);border-color:var(--bdr)}50%{box-shadow:0 0 18px 3px rgba(0,255,136,.2);border-color:rgba(0,255,136,.4)}}
+@keyframes pulse-sell{0%,100%{box-shadow:0 0 0 0 rgba(255,56,96,0);border-color:var(--bdr)}50%{box-shadow:0 0 18px 3px rgba(255,56,96,.2);border-color:rgba(255,56,96,.4)}}
+@keyframes pulse-strong{0%,100%{box-shadow:0 0 0 0 rgba(0,255,136,0)}50%{box-shadow:0 0 25px 6px rgba(0,255,136,.3)}}
+.coin-card.pulse-buy{animation:pulse-buy 2s ease-in-out infinite}
+.coin-card.pulse-sell{animation:pulse-sell 2s ease-in-out infinite}
+.coin-card.pulse-strong{animation:pulse-strong 1.5s ease-in-out infinite}
+@media(prefers-reduced-motion:reduce){.coin-card[class*="pulse"]{animation:none}}
 .coin-card-spark{display:flex;align-items:flex-end;gap:1.5px;height:28px;margin-top:8px}
 .coin-card-spark b{width:3px;border-radius:2px;min-height:2px;transition:height .3s}
 .spark{display:flex;align-items:flex-end;gap:1px;height:16px}

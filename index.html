@@ -444,18 +444,16 @@ canvas{width:100%!important;border-radius:4px}
 
 <!-- 📡 SCANNER -->
 <div class="pg" id="pg-scan">
-<div class="sec"><span class="sec-t">📡 EARLY DETECTION SCANNER</span></div>
-<div class="muted" data-t="scan_desc">صيد مبكر — 6 فحوصات — 800+ عملة — Binance + Bybit + Coinbase</div>
-<div class="big-tabs" id="fltM">
-<div class="big-tab t-gold act" data-m="ultra" onclick="sf(this)"><div class="bt-ic">🔥</div>ULTRA</div>
-<div class="big-tab t-red" data-m="brk" onclick="sf(this)"><div class="bt-ic">💥</div><span data-t="breakout">بداية صعود</span></div>
-<div class="big-tab t-blue" data-m="fr" onclick="sf(this)"><div class="bt-ic">📊</div>FR</div>
-<div class="big-tab t-purple" data-m="gem" onclick="sf(this)"><div class="bt-ic">💎</div><span data-t="gems">جواهر</span></div>
+<div class="sec"><span class="sec-t">📡 NEXUS SCANNER PRO</span></div>
+<div class="big-tabs">
+<div class="big-tab t-red act" onclick="scanTab(0,this)"><div class="bt-ic">🔥</div><span>Trending</span></div>
+<div class="big-tab t-gold" onclick="scanTab(1,this)"><div class="bt-ic">📊</div><span>Trading</span></div>
+<div class="big-tab t-purple" onclick="scanTab(2,this)"><div class="bt-ic">💎</div><span>Small Caps</span></div>
 </div>
-<div class="muted" id="scanI">📊 جاري المسح...</div>
-<div id="scanR"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>
-<div id="gemSection" style="display:none"><div class="muted">💎 صيد مبكر — عملات صغيرة بحجم غير عادي قبل الانفجار</div><div style="display:flex;gap:4px;margin-bottom:6px;font-size:8px;font-family:var(--fm)"><span style="color:var(--up)">🟢 مبكر = ادخل</span><span style="color:var(--warn)">🟡 فيه فرصة = حذر</span><span style="color:var(--dn)">🔴 متأخر = راقب</span></div><div id="gemL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div></div>
-<button class="rfr" onclick="runScan()">🔄 <span data-t="full_scan">مسح شامل</span></button>
+<div id="scanTrend"><div id="trendList"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div></div>
+<div id="scanTrade" style="display:none"><div style="display:flex;gap:4px;margin-bottom:8px"><button class="chart-tf act" onclick="filterTrade('all',this)">All</button><button class="chart-tf" onclick="filterTrade('fast',this)">⚡</button><button class="chart-tf" onclick="filterTrade('daily',this)">📊</button></div><div class="muted" id="scanI">📊</div><div id="tradeList"></div></div>
+<div id="scanSmall" style="display:none"><div style="padding:6px 8px;background:var(--wd);border-radius:8px;margin-bottom:8px;font-size:9px;font-weight:700;color:var(--warn)">⚠️ High profit + High risk — max 5% of capital</div><div style="display:flex;gap:4px;margin-bottom:8px"><button class="chart-tf act" onclick="filterSmall('all',this)">All</button><button class="chart-tf" onclick="filterSmall('early',this)">🟢</button><button class="chart-tf" onclick="filterSmall('still',this)">🟡</button><button class="chart-tf" onclick="filterSmall('late',this)">🔴</button></div><div id="smallList"></div></div>
+<button class="rfr" onclick="scanTab(curScanTab,document.querySelector('#pg-scan .big-tab.act'))">🔄 <span data-t="full_scan">مسح شامل</span></button>
 </div>
 
 <!-- 🐋 WHALE BUYING + LIQUIDITY -->

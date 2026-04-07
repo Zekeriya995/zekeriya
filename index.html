@@ -140,6 +140,38 @@ body::before{content:'';position:fixed;top:-30%;right:-20%;width:70%;height:70%;
 
 /* SCANNER */
 .scan-r{background:var(--glass);backdrop-filter:var(--gb);border:1px solid var(--bdr);border-radius:12px;padding:10px;margin-bottom:5px;cursor:pointer}
+.scan-card{background:var(--glass);backdrop-filter:var(--gb);border:1px solid var(--bdr);border-radius:14px;margin-bottom:10px;overflow:hidden;position:relative;cursor:pointer;transition:transform .15s}
+.scan-card:active{transform:scale(.97)}
+.scan-card-bar{height:3px}
+.scan-card-body{padding:12px 14px}
+.sc-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.sc-badge{padding:4px 10px;border-radius:8px;font-size:12px;font-weight:800;font-family:var(--fm)}
+.sc-time{display:inline-flex;align-items:center;gap:3px;font-size:9px;font-family:var(--fm);padding:2px 8px;border-radius:5px;background:rgba(91,156,255,.08);color:var(--blue)}
+.sc-time.fresh{background:rgba(0,255,136,.08);color:var(--up)}
+.sc-trade{background:var(--bg2);border-radius:10px;padding:10px 12px;margin:8px 0}
+.sc-trade-row{display:flex;justify-content:space-between;align-items:center;font-family:var(--fm);font-size:12px}
+.sc-trade-row+.sc-trade-row{margin-top:6px;padding-top:6px;border-top:1px solid rgba(56,72,96,.15)}
+.sc-reason{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--t1);padding:3px 0}
+.sc-bar-wrap{display:flex;align-items:center;gap:8px;margin-top:8px}
+.sc-bar{flex:1;height:6px;background:var(--bg2);border-radius:3px;overflow:hidden}
+.sc-bar-fill{height:100%;border-radius:3px;transition:width .5s}
+.sc-bar-num{font-family:var(--fm);font-size:10px;color:var(--t2);min-width:22px}
+.sc-actions{display:flex;gap:6px;margin-top:8px}
+.sc-btn{padding:6px 10px;border-radius:8px;font-size:10px;font-weight:700;border:1px solid var(--bdr);color:var(--neon);background:transparent;cursor:pointer}
+.sc-btn:active{transform:scale(.95)}
+.sc-verdict{border-radius:10px;padding:8px 12px;margin:6px 0;text-align:center}
+.sc-verdict-t{font-size:12px;font-weight:800}
+.sc-verdict-s{font-size:9px;color:var(--t1)}
+.sc-quick3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:4px;margin:6px 0}
+.sc-quick3-item{padding:6px;background:var(--bg2);border-radius:8px;text-align:center}
+.sc-quick3-val{font-family:var(--fm);font-size:13px;font-weight:800}
+.sc-quick3-lbl{font-size:8px;color:var(--t3)}
+.sc-info{font-size:10px;color:var(--t3);display:flex;justify-content:space-between;margin-bottom:8px}
+.sc-warn{background:rgba(255,56,96,.06);border:1px solid rgba(255,56,96,.12);border-radius:10px;padding:10px;margin-bottom:10px;font-size:10px;color:var(--dn);font-weight:700;text-align:center}
+.sc-coin-grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin:8px 0}
+.sc-coin-chip{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg2);border-radius:8px;cursor:pointer}
+.sc-coin-chip:active{background:rgba(30,40,60,.5)}
+.sc-declining{opacity:.55}
 .scan-r.ultra-r{border-color:rgba(255,122,26,.15);background:linear-gradient(135deg,rgba(255,122,26,.04),transparent)}
 .scan-h{display:flex;justify-content:space-between;align-items:center;margin-bottom:4px}
 .scan-sym{font-weight:800;font-family:var(--fd);font-size:13px}
@@ -446,13 +478,13 @@ canvas{width:100%!important;border-radius:4px}
 <div class="pg" id="pg-scan">
 <div class="sec"><span class="sec-t">📡 NEXUS SCANNER PRO</span></div>
 <div class="big-tabs">
-<div class="big-tab t-red act" onclick="scanTab(0,this)"><div class="bt-ic">🔥</div><span>Trending</span></div>
-<div class="big-tab t-gold" onclick="scanTab(1,this)"><div class="bt-ic">📊</div><span>Trading</span></div>
-<div class="big-tab t-purple" onclick="scanTab(2,this)"><div class="bt-ic">💎</div><span>Small Caps</span></div>
+<div class="big-tab t-gold act" onclick="scanTab(0,this)"><div class="bt-ic">📊</div><span data-t="scan_trade">صفقات مضاربة</span></div>
+<div class="big-tab t-red" onclick="scanTab(1,this)"><div class="bt-ic">🔥</div><span data-t="scan_trend">ترند القطاعات</span></div>
+<div class="big-tab t-purple" onclick="scanTab(2,this)"><div class="bt-ic">💎</div><span data-t="scan_gems">صيد الجواهر</span></div>
 </div>
-<div id="scanTrend"><div id="trendList"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div></div>
-<div id="scanTrade" style="display:none"><div style="display:flex;gap:4px;margin-bottom:8px"><button class="chart-tf act" onclick="filterTrade('all',this)">All</button><button class="chart-tf" onclick="filterTrade('fast',this)">⚡</button><button class="chart-tf" onclick="filterTrade('daily',this)">📊</button></div><div class="muted" id="scanI">📊</div><div id="tradeList"></div></div>
-<div id="scanSmall" style="display:none"><div style="padding:6px 8px;background:var(--wd);border-radius:8px;margin-bottom:8px;font-size:9px;font-weight:700;color:var(--warn)">⚠️ High profit + High risk — max 5% of capital</div><div style="display:flex;gap:4px;margin-bottom:8px"><button class="chart-tf act" onclick="filterSmall('all',this)">All</button><button class="chart-tf" onclick="filterSmall('early',this)">🟢</button><button class="chart-tf" onclick="filterSmall('still',this)">🟡</button><button class="chart-tf" onclick="filterSmall('late',this)">🔴</button></div><div id="smallList"></div></div>
+<div id="scanTrade"><div style="display:flex;gap:4px;margin-bottom:8px"><button class="chart-tf act" onclick="filterTrade('all',this)" data-t="scan_all">الكل</button><button class="chart-tf" onclick="filterTrade('fast',this)"><span data-t="scan_fast">⚡ سريع</span></button><button class="chart-tf" onclick="filterTrade('daily',this)"><span data-t="scan_daily">📊 يومي</span></button></div><div class="sc-info" id="scanI">📊</div><div id="tradeList"></div></div>
+<div id="scanTrend" style="display:none"><div class="sc-info" id="trendInfo"></div><div id="trendList"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div></div>
+<div id="scanSmall" style="display:none"><div class="sc-warn" data-t="scan_warn_small">⚠️ ربح عالي + مخاطرة عالية — لا تدخل أكثر من 5% من رأس مالك!</div><div style="display:flex;gap:4px;margin-bottom:8px"><button class="chart-tf act" onclick="filterSmall('all',this)" data-t="scan_all">الكل</button><button class="chart-tf" onclick="filterSmall('early',this)"><span data-t="scan_early">🟢 مبكر</span></button><button class="chart-tf" onclick="filterSmall('still',this)"><span data-t="scan_still">🟡 فرصة</span></button><button class="chart-tf" onclick="filterSmall('late',this)"><span data-t="scan_late">🔴 متأخر</span></button></div><div class="sc-info" id="smallInfo"></div><div id="smallList"></div></div>
 <button class="rfr" onclick="scanTab(curScanTab,document.querySelector('#pg-scan .big-tab.act'))">🔄 <span data-t="full_scan">مسح شامل</span></button>
 </div>
 

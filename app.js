@@ -1340,7 +1340,7 @@ var MKT_TPL_EN={
 
 function mktTab(idx,btn){curMktTab=idx;document.querySelectorAll('#mktTabs>.mkt-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');document.getElementById('mktDaily').style.display=idx===0?'block':'none';document.getElementById('mktComp').style.display=idx===1?'block':'none';if(idx===0)loadDaily();if(idx===1)loadComp()}
 
-function getFreshness(ct){var a=Date.now()-ct;if(a<1800000)return{cls:'ok',txt:lang==='ar'?'بيانات طازجة':'Fresh data'};if(a<10800000)return{cls:'aging',txt:lang==='ar'?'بيانات جيدة':'Good data'};return{cls:'stale',txt:lang==='ar'?'بيانات قديمة — حدّث!':'Stale — Refresh!'}}
+function getFreshness(ct,ttl){var a=Date.now()-ct;var pct=ttl?a/ttl:a/3600000;if(pct<0.5)return{cls:'ok',txt:lang==='ar'?'بيانات طازجة':'Fresh data'};if(pct<0.9)return{cls:'aging',txt:lang==='ar'?'بيانات جيدة':'Good data'};return{cls:'stale',txt:lang==='ar'?'بيانات قديمة — حدّث!':'Stale — Refresh!'}}
 
 function getUpcomingEvents(){var evs=[];var now=new Date();var in7=new Date(now.getTime()+7*86400000);
   FOMC_DATES.forEach(function(d){var dt=new Date(d);if(dt>=now&&dt<=in7){var dy=Math.ceil((dt-now)/86400000);evs.push({ic:'🏦',txt:lang==='ar'?'اجتماع Fed — '+(dy===0?'اليوم!':dy===1?'غداً':'بعد '+dy+' أيام'):'FOMC — '+(dy===0?'Today!':'in '+dy+'d'),impact:'high',warn:lang==='ar'?'توقع تذبذب عالي':'Expect volatility'})}});
@@ -1426,7 +1426,7 @@ async function analyzeCoinRpt(sym){
   else if(divRSI1d==='bearish')warning=lang==='ar'?'⚠️ RSI Divergence على اليومي':'⚠️ RSI Div on Daily';
   else if(volT<0.7)warning=lang==='ar'?'حجم ضعيف':'Low volume';
   /* Scenarios */
-  var bullP=Math.min(80,Math.max(10,50+ts*5+(wConf>=50?5:0)+(bullTFs>=3?5:0)));var bearP=Math.min(40,Math.max(5,50-ts*5));var neutP=100-bullP-bearP;
+  var bullP=Math.min(80,Math.max(10,50+ts*4+(wConf>=50?5:0)+(bullTFs>=3?5:0)));var bearP=Math.min(35,Math.max(5,100-bullP-15));var neutP=100-bullP-bearP;
   var bullCond=lang==='ar'?'اختراق '+fP(resist)+' بحجم':'Break '+fP(resist)+' with volume';
   var bearCond=lang==='ar'?'كسر '+fP(supp)+' بإغلاق':'Close below '+fP(supp);
   var bullInv=lang==='ar'?'يُلغى لو كسر '+fP(supp):'Invalidated below '+fP(supp);
@@ -1437,7 +1437,7 @@ async function analyzeCoinRpt(sym){
   addSc(lang==='ar'?'الاتجاه':'Trend',ts>=4?2:ts>=2?1.5:ts>=0?1:0);
   addSc(lang==='ar'?'الحيتان':'Whales',wConf>=60?2:wConf>=40?1:0);
   addSc('RSI',rsi>=30&&rsi<=55?1:0.5);addSc('FR',fr&&fr.rate<0?1:fr&&fr.rate>0.05?0:0.5);
-  addSc('OI',OI[sym]?1:0.5);addSc(lang==='ar'?'حجم':'Vol',volT>1.3?0.5:0);
+  addSc('OI',OI[sym]?(ch4h>0&&ts>0?1:0.5):0);addSc(lang==='ar'?'حجم':'Vol',volT>1.3?0.5:0);
   addSc('MACD',macd.h>0?0.5:0);addSc(lang==='ar'?'توافق':'TF',bullTFs>=3?1:bullTFs>=2?0.5:0);
   addSc(lang==='ar'?'هيكل':'Struct',struct==='HH/HL'?1:struct==='LH/LL'?0:0.5);
   var rec,recIc;if(ts>=4){rec=lang==='ar'?'💰 شراء قوي — وقف '+fP(f618D):'💰 Strong Buy — Stop '+fP(f618D);recIc='💰'}else if(ts>=2){rec=lang==='ar'?'📈 شراء — دخول تدريجي':'📈 Buy — Scale in';recIc='📈'}else if(ts<=-4){rec=lang==='ar'?'⛔ تجنب — هبوط قوي':'⛔ Avoid';recIc='⛔'}else if(ts<=-2){rec=lang==='ar'?'⚠️ حذر — انتظر':'⚠️ Caution — Wait';recIc='⚠️'}else{rec=lang==='ar'?'⏳ انتظار — محايد':'⏳ Wait';recIc='⏳'}
@@ -1457,7 +1457,7 @@ async function loadDaily(){
   var btc=coins[0];if(!btc){document.getElementById('mktDaily').innerHTML='<div class="empty"><div class="empty-ic">📊</div><div class="empty-tx">'+t('no_data')+'</div></div>';return}
   var hlth=calcHealth();var hCol=hlth.score>=70?'var(--up)':hlth.score>=45?'var(--warn)':'var(--dn)';var evs=getUpcomingEvents();var warns=getWarnings();
   var xml='';
-  var frsh=getFreshness(Date.now());
+  var frsh=getFreshness(dailyCache.t||Date.now(),DAILY_TTL);
   xml+='<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' — '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
   /* Hero */
   xml+='<div class="mkt-dir-hero" style="background:'+(btc.ts>=2?'rgba(0,255,136,.04)':btc.ts<=-2?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)')+';border:1px solid '+(btc.ts>=2?'rgba(0,255,136,.08)':btc.ts<=-2?'rgba(255,56,96,.08)':'rgba(255,184,0,.08)')+'">'
@@ -1526,7 +1526,7 @@ async function loadComp(){
   var btc=coins[0];if(!btc){document.getElementById('mktComp').innerHTML='<div class="empty"><div class="empty-ic">📊</div><div class="empty-tx">'+t('no_data')+'</div></div>';return}
   var hlth=calcHealth();var hCol=hlth.score>=70?'var(--up)':hlth.score>=45?'var(--warn)':'var(--dn)';var evs=getUpcomingEvents();var warns=getWarnings();
   var html='';
-  var frsh=getFreshness(Date.now());
+  var frsh=getFreshness(compCache.t||Date.now(),COMP_TTL);
   html+='<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' — '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
   /* Risk Score */
   html+='<div class="mkt-risk" style="background:'+(hlth.score>=70?'rgba(0,255,136,.04)':hlth.score>=45?'rgba(255,184,0,.04)':'rgba(255,56,96,.04)')+'">'
@@ -1553,7 +1553,7 @@ async function loadComp(){
     html+='<div class="mkt-story">'+buildStory(c.sym,c)+'</div>';
     /* L2: Multi-TF */
     var tfIc=function(d){return d==='up'?'<span style="color:var(--up)">▲</span>':d==='down'?'<span style="color:var(--dn)">▼</span>':'<span style="color:var(--warn)">—</span>'};
-    html+='<div class="mkt-tf-grid"><div class="mkt-tf">'+tfIc(c.tf.w)+'<div class="mkt-tf-l">W</div></div><div class="mkt-tf">'+tfIc(c.tf.d)+'<div class="mkt-tf-l">D</div></div><div class="mkt-tf">'+tfIc(c.tf.h4)+'<div class="mkt-tf-l">4H</div></div><div class="mkt-tf">'+tfIc(c.tf.h1)+'<div class="mkt-tf-l">1H</div></div></div>'
+    html+='<div class="mkt-tf-grid"><div class="mkt-tf">'+tfIc(c.tf.w)+'<div class="mkt-tf-l">7D</div></div><div class="mkt-tf">'+tfIc(c.tf.d)+'<div class="mkt-tf-l">D</div></div><div class="mkt-tf">'+tfIc(c.tf.h4)+'<div class="mkt-tf-l">4H</div></div><div class="mkt-tf">'+tfIc(c.tf.h1)+'<div class="mkt-tf-l">1H</div></div></div>'
       +'<div class="mkt-conf" style="background:'+(c.bullTFs>=3?'rgba(0,255,136,.04)':c.bullTFs<=1?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)')+';color:'+(c.bullTFs>=3?'var(--up)':c.bullTFs<=1?'var(--dn)':'var(--warn)')+'">'+(lang==='ar'?'توافق: ':'Confluence: ')+c.bullTFs+'/4 '+(c.bullTFs>=3?(lang==='ar'?'صعودي':'Bullish'):(lang==='ar'?'مختلط':'Mixed'))+'</div>';
     /* L3: Structure */
     var stCol=c.struct==='HH/HL'?'var(--up)':c.struct==='LH/LL'?'var(--dn)':'var(--warn)';

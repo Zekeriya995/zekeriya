@@ -40,6 +40,693 @@ let sigHist={};try{sigHist=JSON.parse(localStorage.getItem('nxsig10')||'{}')}cat
 let notifiedSet={};try{notifiedSet=JSON.parse(localStorage.getItem('nxnot10')||'{}')}catch(e){};
 let lang=localStorage.getItem('nxlang')||'ar';
 let fgValue=50,btcDom=50;
+/* ═══ 🤖 PLATFORM MONITOR — PART A ═══ */
+var MONITOR_VERSION = 1;
+var DEFAULT_WEIGHTS = {trend:2, whales:2, rsi:1, fr:1, oi:1, vol:0.5, macd:0.5, confluence:1, structure:1};
+
+var monitorState = null;
+try { monitorState = JSON.parse(localStorage.getItem('nxMonitor')); } catch(e) { monitorState = null; }
+if (!monitorState || monitorState.v !== MONITOR_VERSION) {
+  monitorState = {
+    v: MONITOR_VERSION,
+    weights: JSON.parse(JSON.stringify(DEFAULT_WEIGHTS)),
+    factorStats: {
+      trend:  {wins:0, losses:0, total:0, winRate:0},
+      whales: {wins:0, losses:0, total:0, winRate:0},
+      rsi:    {wins:0, losses:0, total:0, winRate:0},
+      fr:     {wins:0, losses:0, total:0, winRate:0},
+      oi:     {wins:0, losses:0, total:0, winRate:0},
+      vol:    {wins:0, losses:0, total:0, winRate:0},
+      macd:   {wins:0, losses:0, total:0, winRate:0},
+      confluence:{wins:0, losses:0, total:0, winRate:0},
+      structure: {wins:0, losses:0, total:0, winRate:0}
+    },
+    confCalib: {},
+    hourStats: {},
+    coinStats: {},
+    coinBlacklist: [],
+    failPatterns: [],
+    minConf: 55,
+    lastTune: 0,
+    perf: {
+      totalTrades: 0,
+      totalWins: 0,
+      totalLosses: 0,
+      overallRate: 0,
+      bestFactor: '',
+      worstFactor: '',
+      bestHour: -1,
+      worstHour: -1,
+      bestCoin: '',
+      worstCoin: '',
+      lastUpdate: 0
+    }
+  };
+}
+
+var factorLog = [];
+try { factorLog = JSON.parse(localStorage.getItem('nxFactorLog') || '[]'); } catch(e) { factorLog = []; }
+
+function saveMonitor() {
+  try { localStorage.setItem('nxMonitor', JSON.stringify(monitorState)); } catch(e) {}
+}
+function saveFactorLog() {
+  if (factorLog.length > 500) factorLog = factorLog.slice(-500);
+  try { localStorage.setItem('nxFactorLog', JSON.stringify(factorLog)); } catch(e) {}
+}
+
+/* Takes a snapshot of which factors are active at trade entry */
+function captureFactorSnapshot(sym) {
+  var d = T[sym]; if (!d) return null;
+  var fr = FR[sym];
+  var ls = LS[sym];
+  var oi = OI[sym];
+  var ww = whaleWaves[sym];
+  var wConf = ww && ww.engine ? ww.engine.confidence : 0;
+  var cvd = analyzeCVD(sym);
+
+  var snapshot = {
+    sym: sym,
+    time: Date.now(),
+    hour: new Date().getUTCHours(),
+    price: d.p,
+    change24h: d.c,
+    factors: {
+      trend:      d.c > 0,
+      whales:     wConf >= 40,
+      rsi:        true,
+      fr:         fr ? fr.rate < 0 : false,
+      oi:         oi ? oi > 0 : false,
+      vol:        d.v > 5e7,
+      macd:       true,
+      confluence: true,
+      structure:  true
+    },
+    raw: {
+      frRate: fr ? fr.rate : 0,
+      lsRatio: ls ? ls.ratio : 1,
+      wConf: wConf,
+      cvdSignal: cvd ? cvd.divergence : 'NONE',
+      fgValue: fgValue,
+      btcChange: T.BTC ? T.BTC.c : 0,
+      volume: d.v,
+      change: d.c
+    }
+  };
+  return snapshot;
+}
+
+/* Process trade outcome — called from closeTrade hook */
+function processTradeOutcome(trade) {
+  if (!trade || !trade.factorSnapshot) return;
+  var isWin = trade.finalPnl >= 2;
+  var isPartial = trade.finalPnl >= 0.5 && trade.finalPnl < 2;
+  var isLoss = trade.finalPnl < 0.5;
+  var outcome = isWin ? 'win' : isPartial ? 'partial' : 'loss';
+
+  var snap = trade.factorSnapshot;
+  var factorKeys = Object.keys(monitorState.factorStats);
+  factorKeys.forEach(function(key) {
+    if (snap.factors[key]) {
+      var fs = monitorState.factorStats[key];
+      fs.total++;
+      if (isWin || isPartial) fs.wins++;
+      else fs.losses++;
+      fs.winRate = fs.total > 0 ? Math.round((fs.wins / fs.total) * 100) : 0;
+    }
+  });
+
+  var confBucket = Math.floor(trade.confAtEntry / 10) * 10;
+  var bucketKey = confBucket + '-' + (confBucket + 10);
+  if (!monitorState.confCalib[bucketKey]) {
+    monitorState.confCalib[bucketKey] = {wins: 0, total: 0, realRate: 0};
+  }
+  var cb = monitorState.confCalib[bucketKey];
+  cb.total++;
+  if (isWin || isPartial) cb.wins++;
+  cb.realRate = cb.total > 0 ? Math.round((cb.wins / cb.total) * 100) : 0;
+
+  var hour = String(snap.hour);
+  if (!monitorState.hourStats[hour]) {
+    monitorState.hourStats[hour] = {wins: 0, total: 0, rate: 0};
+  }
+  var hs = monitorState.hourStats[hour];
+  hs.total++;
+  if (isWin || isPartial) hs.wins++;
+  hs.rate = hs.total > 0 ? Math.round((hs.wins / hs.total) * 100) : 0;
+
+  var coinKey = trade.sym;
+  if (!monitorState.coinStats[coinKey]) {
+    monitorState.coinStats[coinKey] = {wins: 0, total: 0, rate: 0};
+  }
+  var cs = monitorState.coinStats[coinKey];
+  cs.total++;
+  if (isWin || isPartial) cs.wins++;
+  cs.rate = cs.total > 0 ? Math.round((cs.wins / cs.total) * 100) : 0;
+
+  var bl = monitorState.coinBlacklist;
+  if (cs.total >= 5 && cs.rate < 40 && bl.indexOf(coinKey) === -1) {
+    bl.push(coinKey);
+  }
+  if (cs.rate >= 50 && bl.indexOf(coinKey) !== -1) {
+    bl.splice(bl.indexOf(coinKey), 1);
+  }
+
+  factorLog.push({
+    sym: trade.sym,
+    type: trade.type,
+    pnl: trade.finalPnl,
+    outcome: outcome,
+    conf: trade.confAtEntry,
+    hour: snap.hour,
+    duration: trade.duration || 0,
+    raw: snap.raw,
+    factors: snap.factors,
+    time: Date.now()
+  });
+
+  monitorState.perf.totalTrades++;
+  if (isWin || isPartial) monitorState.perf.totalWins++;
+  else monitorState.perf.totalLosses++;
+  monitorState.perf.overallRate = monitorState.perf.totalTrades > 0
+    ? Math.round((monitorState.perf.totalWins / monitorState.perf.totalTrades) * 100) : 0;
+  monitorState.perf.lastUpdate = Date.now();
+
+  saveMonitor();
+  saveFactorLog();
+}
+
+/* Detect failure patterns from factor log */
+function detectFailPatterns() {
+  if (factorLog.length < 10) return;
+
+  var patterns = [];
+  var conditions = [
+    {key: 'frHigh',    test: function(r) { return r.frRate > 0.05; },    label: 'FR > 0.05%'},
+    {key: 'frVHigh',   test: function(r) { return r.frRate > 0.08; },    label: 'FR > 0.08%'},
+    {key: 'lsHigh',    test: function(r) { return r.lsRatio > 1.5; },    label: 'L/S > 1.5'},
+    {key: 'lsVHigh',   test: function(r) { return r.lsRatio > 2.0; },    label: 'L/S > 2.0'},
+    {key: 'noWhale',   test: function(r) { return r.wConf < 20; },       label: 'No whales'},
+    {key: 'cvdBear',   test: function(r) { return r.cvdSignal === 'BEARISH'; }, label: 'CVD Bearish'},
+    {key: 'fear',      test: function(r) { return r.fgValue < 25; },     label: 'Fear < 25'},
+    {key: 'greed',     test: function(r) { return r.fgValue > 75; },     label: 'Greed > 75'},
+    {key: 'btcDn',     test: function(r) { return r.btcChange < -3; },   label: 'BTC < -3%'},
+    {key: 'lowVol',    test: function(r) { return r.volume < 1e7; },     label: 'Vol < $10M'},
+    {key: 'bigPump',   test: function(r) { return r.change > 15; },      label: 'Pump > 15%'}
+  ];
+
+  conditions.forEach(function(cond) {
+    var matching = factorLog.filter(function(l) { return cond.test(l.raw); });
+    if (matching.length >= 3) {
+      var fails = matching.filter(function(l) { return l.outcome === 'loss'; }).length;
+      var failRate = Math.round((fails / matching.length) * 100);
+      if (failRate >= 60) {
+        patterns.push({
+          conditions: [cond.label],
+          failRate: failRate,
+          sampleSize: matching.length,
+          label: cond.label + ' \u2192 ' + failRate + '% ' + (lang === 'ar' ? 'فشل' : 'fail')
+        });
+      }
+    }
+  });
+
+  for (var i = 0; i < conditions.length; i++) {
+    for (var j = i + 1; j < conditions.length; j++) {
+      var c1 = conditions[i], c2 = conditions[j];
+      var matching = factorLog.filter(function(l) { return c1.test(l.raw) && c2.test(l.raw); });
+      if (matching.length >= 3) {
+        var fails = matching.filter(function(l) { return l.outcome === 'loss'; }).length;
+        var failRate = Math.round((fails / matching.length) * 100);
+        if (failRate >= 65) {
+          patterns.push({
+            conditions: [c1.label, c2.label],
+            failRate: failRate,
+            sampleSize: matching.length,
+            label: c1.label + ' + ' + c2.label + ' \u2192 ' + failRate + '% ' + (lang === 'ar' ? 'فشل' : 'fail')
+          });
+        }
+      }
+    }
+  }
+
+  patterns.sort(function(a, b) { return b.failRate - a.failRate; });
+  monitorState.failPatterns = patterns.slice(0, 10);
+  saveMonitor();
+  return patterns;
+}
+
+/* Weekly auto-tune: adjust weights based on factor performance */
+function autoTuneWeights() {
+  var fs = monitorState.factorStats;
+  var w = monitorState.weights;
+  var def = DEFAULT_WEIGHTS;
+
+  var factorKeys = Object.keys(def);
+  var perfMap = {};
+  var hasData = false;
+  factorKeys.forEach(function(key) {
+    var stat = fs[key];
+    if (stat && stat.total >= 5) {
+      perfMap[key] = stat.winRate;
+      hasData = true;
+    }
+  });
+
+  if (!hasData) return;
+
+  var bestKey = '', bestRate = 0, worstKey = '', worstRate = 100;
+  factorKeys.forEach(function(key) {
+    if (perfMap[key] !== undefined) {
+      if (perfMap[key] > bestRate) { bestRate = perfMap[key]; bestKey = key; }
+      if (perfMap[key] < worstRate) { worstRate = perfMap[key]; worstKey = key; }
+    }
+  });
+
+  factorKeys.forEach(function(key) {
+    var defW = def[key];
+    var minW = defW * 0.5;
+    var maxW = defW * 2.0;
+
+    if (perfMap[key] !== undefined) {
+      var rate = perfMap[key];
+      if (rate >= 70) {
+        w[key] = Math.min(maxW, w[key] * 1.15);
+      } else if (rate >= 55) {
+        w[key] = w[key] + (defW - w[key]) * 0.1;
+      } else if (rate < 45) {
+        w[key] = Math.max(minW, w[key] * 0.85);
+      }
+      w[key] = Math.round(w[key] * 100) / 100;
+    }
+  });
+
+  var overallRate = monitorState.perf.overallRate;
+  if (overallRate < 55 && monitorState.minConf < 70) {
+    monitorState.minConf = Math.min(70, monitorState.minConf + 3);
+  } else if (overallRate > 75 && monitorState.minConf > 50) {
+    monitorState.minConf = Math.max(50, monitorState.minConf - 2);
+  }
+
+  monitorState.perf.bestFactor = bestKey;
+  monitorState.perf.worstFactor = worstKey;
+
+  var bestH = -1, bestHR = 0, worstH = -1, worstHR = 100;
+  Object.keys(monitorState.hourStats).forEach(function(h) {
+    var hs = monitorState.hourStats[h];
+    if (hs.total >= 3) {
+      if (hs.rate > bestHR) { bestHR = hs.rate; bestH = +h; }
+      if (hs.rate < worstHR) { worstHR = hs.rate; worstH = +h; }
+    }
+  });
+  monitorState.perf.bestHour = bestH;
+  monitorState.perf.worstHour = worstH;
+
+  var bestC = '', bestCR = 0, worstC = '', worstCR = 100;
+  Object.keys(monitorState.coinStats).forEach(function(c) {
+    var cs = monitorState.coinStats[c];
+    if (cs.total >= 3) {
+      if (cs.rate > bestCR) { bestCR = cs.rate; bestC = c; }
+      if (cs.rate < worstCR) { worstCR = cs.rate; worstC = c; }
+    }
+  });
+  monitorState.perf.bestCoin = bestC;
+  monitorState.perf.worstCoin = worstC;
+
+  detectFailPatterns();
+
+  monitorState.lastTune = Date.now();
+  saveMonitor();
+
+  addVLog('🧠', (lang === 'ar'
+    ? 'تعلّم ذاتي: أوزان عُدّلت — أفضل: ' + bestKey + ' (' + bestRate + '%) — أضعف: ' + worstKey + ' (' + worstRate + '%)'
+    : 'Auto-tune: weights adjusted — Best: ' + bestKey + ' (' + bestRate + '%) — Worst: ' + worstKey + ' (' + worstRate + '%)'));
+
+  return {best: bestKey, bestRate: bestRate, worst: worstKey, worstRate: worstRate};
+}
+
+/* Calibrate displayed confidence based on actual outcomes */
+function getCalibratedConf(rawConf) {
+  var bucket = Math.floor(rawConf / 10) * 10;
+  var key = bucket + '-' + (bucket + 10);
+  var cb = monitorState.confCalib[key];
+  if (cb && cb.total >= 5) {
+    return cb.realRate;
+  }
+  return rawConf;
+}
+
+/* Check if a signal matches any known failure pattern */
+function matchesFailPattern(raw) {
+  if (!monitorState.failPatterns || !monitorState.failPatterns.length) return null;
+
+  var tests = {
+    'FR > 0.05%':   raw.frRate > 0.05,
+    'FR > 0.08%':   raw.frRate > 0.08,
+    'L/S > 1.5':    raw.lsRatio > 1.5,
+    'L/S > 2.0':    raw.lsRatio > 2.0,
+    'CVD Bearish':   raw.cvdSignal === 'BEARISH',
+    'Fear < 25':     raw.fgValue < 25,
+    'Greed > 75':    raw.fgValue > 75,
+    'BTC < -3%':     raw.btcChange < -3,
+    'Vol < $10M':    raw.volume < 1e7,
+    'Pump > 15%':    raw.change > 15
+  };
+  tests['No whales'] = raw.wConf < 20;
+
+  for (var i = 0; i < monitorState.failPatterns.length; i++) {
+    var pat = monitorState.failPatterns[i];
+    var allMatch = true;
+    for (var j = 0; j < pat.conditions.length; j++) {
+      if (!tests[pat.conditions[j]]) { allMatch = false; break; }
+    }
+    if (allMatch) return pat;
+  }
+  return null;
+}
+
+/* Check if coin is blacklisted */
+function isCoinBlacklisted(sym) {
+  return monitorState.coinBlacklist.indexOf(sym) !== -1;
+}
+
+/* Get performance summary for a specific coin */
+function getCoinPerf(sym) {
+  return monitorState.coinStats[sym] || {wins: 0, total: 0, rate: 0};
+}
+
+/* Get performance summary for current hour */
+function getHourPerf() {
+  var h = String(new Date().getUTCHours());
+  return monitorState.hourStats[h] || {wins: 0, total: 0, rate: 0};
+}
+
+/* ═══ 🛡️ PLATFORM MONITOR — PART B ═══ */
+
+/* Detects dangerous market conditions */
+function detectMarketDanger() {
+  var reasons = [];
+  var score = 0;
+
+  var btcChg = T.BTC ? T.BTC.c : 0;
+  if (btcChg < -5) { score += 3; reasons.push(lang === 'ar' ? 'BTC هابط ' + btcChg.toFixed(1) + '%' : 'BTC down ' + btcChg.toFixed(1) + '%'); }
+  else if (btcChg < -3) { score += 1; reasons.push(lang === 'ar' ? 'BTC يتراجع ' + btcChg.toFixed(1) + '%' : 'BTC declining ' + btcChg.toFixed(1) + '%'); }
+
+  if (fgValue < 15) { score += 3; reasons.push(lang === 'ar' ? 'ذعر شديد FG=' + fgValue : 'Extreme fear FG=' + fgValue); }
+  else if (fgValue < 25) { score += 1; reasons.push(lang === 'ar' ? 'خوف FG=' + fgValue : 'Fear FG=' + fgValue); }
+
+  var allCoins = Object.values(T);
+  var redPct = allCoins.length > 0 ? Math.round(allCoins.filter(function(x) { return x.c < 0; }).length / allCoins.length * 100) : 0;
+  if (redPct > 80) { score += 2; reasons.push(lang === 'ar' ? redPct + '% عملات حمراء' : redPct + '% coins red'); }
+
+  var frKeys = Object.keys(FR);
+  var avgFR = frKeys.length > 0 ? Object.values(FR).reduce(function(s, x) { return s + x.rate; }, 0) / frKeys.length : 0;
+  if (avgFR > 0.08) { score += 2; reasons.push(lang === 'ar' ? 'FR عالي جداً ' + avgFR.toFixed(3) + '%' : 'Very high FR ' + avgFR.toFixed(3) + '%'); }
+
+  var level = score >= 4 ? 'danger' : score >= 2 ? 'caution' : 'safe';
+  return { dangerous: score >= 4, level: level, score: score, reasons: reasons, redPct: redPct, btcChg: btcChg };
+}
+
+/* Signal Quality Gate — 5 checks before each signal */
+function signalQualityGate(sym, type, score) {
+  var results = [];
+  var pass = true;
+
+  var d = T[sym];
+  var g1 = d && d.p > 0;
+  results.push({name: lang === 'ar' ? 'سعر حقيقي' : 'Real price', pass: g1});
+  if (!g1) pass = false;
+
+  var minVol = TIER1.has(sym) ? 500000 : 1000000;
+  var g2 = d && d.v >= minVol;
+  results.push({name: lang === 'ar' ? 'حجم كافي' : 'Volume OK', pass: g2, detail: d ? fmt(d.v) : '$0'});
+  if (!g2) pass = false;
+
+  var mkt = detectMarketDanger();
+  var g3 = !mkt.dangerous;
+  results.push({name: lang === 'ar' ? 'السوق آمن' : 'Market safe', pass: g3, detail: mkt.level});
+  if (!g3 && type !== 'whale') pass = false;
+
+  var g4 = !isCoinBlacklisted(sym);
+  results.push({name: lang === 'ar' ? 'عملة غير محظورة' : 'Not blacklisted', pass: g4});
+  if (!g4) pass = false;
+
+  var snap = captureFactorSnapshot(sym);
+  var failPat = snap ? matchesFailPattern(snap.raw) : null;
+  var g5 = !failPat;
+  results.push({name: lang === 'ar' ? 'لا نمط فشل' : 'No fail pattern', pass: g5, detail: failPat ? failPat.label : ''});
+  if (!g5 && failPat && failPat.failRate >= 70) pass = false;
+
+  try {
+    addVLog(pass ? '✅' : '🚫',
+      (pass ? '' : '⛔ ') + sym + ' ' + type + ' — Gate: ' + results.filter(function(r) { return r.pass; }).length + '/5 ' +
+      (pass ? (lang === 'ar' ? 'مرّ' : 'PASS') : (lang === 'ar' ? 'مرفوض: ' + results.filter(function(r) { return !r.pass; }).map(function(r) { return r.name; }).join(', ') : 'BLOCKED: ' + results.filter(function(r) { return !r.pass; }).map(function(r) { return r.name; }).join(', ')))
+    );
+  } catch(e) {}
+
+  return { pass: pass, results: results, marketDanger: mkt, failPattern: failPat };
+}
+
+/* Weekly auto-improve — comprehensive */
+function runAutoImprove() {
+  if (!monitorState || monitorState.perf.totalTrades < 10) return null;
+
+  var report = {
+    time: Date.now(),
+    before: {
+      weights: JSON.parse(JSON.stringify(monitorState.weights)),
+      minConf: monitorState.minConf,
+      blacklist: monitorState.coinBlacklist.slice(),
+      overallRate: monitorState.perf.overallRate
+    },
+    changes: []
+  };
+
+  var tuneResult = autoTuneWeights();
+  if (tuneResult) {
+    report.changes.push(lang === 'ar'
+      ? 'أوزان: أفضل ' + tuneResult.best + ' (' + tuneResult.bestRate + '%) — أضعف ' + tuneResult.worst + ' (' + tuneResult.worstRate + '%)'
+      : 'Weights: Best ' + tuneResult.best + ' (' + tuneResult.bestRate + '%) — Worst ' + tuneResult.worst + ' (' + tuneResult.worstRate + '%)');
+  }
+
+  var patterns = detectFailPatterns();
+  if (patterns && patterns.length > 0) {
+    report.changes.push(lang === 'ar'
+      ? 'أنماط فشل: ' + patterns.length + ' نمط مكتشف — أخطر: ' + patterns[0].label
+      : 'Fail patterns: ' + patterns.length + ' found — Worst: ' + patterns[0].label);
+  }
+
+  var removedFromBL = [];
+  var addedToBL = [];
+  Object.keys(monitorState.coinStats).forEach(function(coin) {
+    var cs = monitorState.coinStats[coin];
+    var inBL = monitorState.coinBlacklist.indexOf(coin) !== -1;
+    if (cs.total >= 5 && cs.rate < 40 && !inBL) {
+      monitorState.coinBlacklist.push(coin);
+      addedToBL.push(coin);
+    }
+    if (cs.total >= 5 && cs.rate >= 50 && inBL) {
+      monitorState.coinBlacklist.splice(monitorState.coinBlacklist.indexOf(coin), 1);
+      removedFromBL.push(coin);
+    }
+  });
+  if (addedToBL.length) report.changes.push((lang === 'ar' ? 'حُظرت: ' : 'Blacklisted: ') + addedToBL.join(', '));
+  if (removedFromBL.length) report.changes.push((lang === 'ar' ? 'رُفع الحظر: ' : 'Unblocked: ') + removedFromBL.join(', '));
+
+  var oldConf = monitorState.minConf;
+  if (monitorState.perf.overallRate < 50) {
+    monitorState.minConf = Math.min(75, monitorState.minConf + 5);
+  } else if (monitorState.perf.overallRate < 60) {
+    monitorState.minConf = Math.min(70, monitorState.minConf + 2);
+  } else if (monitorState.perf.overallRate > 75) {
+    monitorState.minConf = Math.max(45, monitorState.minConf - 3);
+  }
+  if (oldConf !== monitorState.minConf) {
+    report.changes.push((lang === 'ar' ? 'حد الثقة: ' : 'Min confidence: ') + oldConf + '% \u2192 ' + monitorState.minConf + '%');
+  }
+
+  report.after = {
+    weights: JSON.parse(JSON.stringify(monitorState.weights)),
+    minConf: monitorState.minConf,
+    blacklist: monitorState.coinBlacklist.slice(),
+    overallRate: monitorState.perf.overallRate
+  };
+
+  try { localStorage.setItem('nxWeeklyReport', JSON.stringify(report)); } catch(e) {}
+  monitorState.lastTune = Date.now();
+  saveMonitor();
+
+  addVLog('🧠', (lang === 'ar'
+    ? 'تحسين أسبوعي: ' + report.changes.length + ' تعديل — النسبة: ' + monitorState.perf.overallRate + '%'
+    : 'Weekly improve: ' + report.changes.length + ' changes — Rate: ' + monitorState.perf.overallRate + '%'));
+
+  return report;
+}
+
+/* ═══ ADMIN PANEL RENDERER ═══ */
+var adminTapCount = 0;
+var adminTapTimer = null;
+
+function openAdminPanel() {
+  adminTapCount++;
+  if (adminTapTimer) clearTimeout(adminTapTimer);
+  adminTapTimer = setTimeout(function() { adminTapCount = 0; }, 800);
+  if (adminTapCount >= 3) {
+    adminTapCount = 0;
+    document.querySelectorAll('.pg').forEach(function(p) { p.classList.remove('act'); p.style.display = ''; });
+    document.querySelectorAll('.bb').forEach(function(b) { b.classList.remove('act'); });
+    var el = document.getElementById('pg-admin');
+    if (el) { el.classList.add('act'); }
+    renderAdminPanel();
+    window.scrollTo({top: 0});
+  }
+}
+
+function renderAdminPanel() {
+  if (!monitorState) return;
+  var ms = monitorState;
+  var ar = lang === 'ar';
+
+  var sumEl = document.getElementById('adminSummary'); if (!sumEl) return;
+  var mkt = detectMarketDanger();
+  var conn = getConnQuality();
+  var mktCol = mkt.level === 'safe' ? 'var(--up)' : mkt.level === 'caution' ? 'var(--warn)' : 'var(--dn)';
+  var mktIc = mkt.level === 'safe' ? '🟢' : mkt.level === 'caution' ? '🟡' : '🔴';
+  var rateCol = ms.perf.overallRate >= 65 ? 'var(--up)' : ms.perf.overallRate >= 50 ? 'var(--warn)' : 'var(--dn)';
+
+  sumEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px">'
+    + '<div class="cd" style="padding:10px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:' + rateCol + '">' + ms.perf.overallRate + '%</div><div style="font-size:9px;color:var(--t2)">' + (ar ? 'نسبة النجاح' : 'Success Rate') + '</div><div style="font-size:8px;font-family:var(--fm);color:var(--t3)">' + ms.perf.totalWins + '/' + ms.perf.totalTrades + '</div></div>'
+    + '<div class="cd" style="padding:10px;text-align:center"><div style="font-size:20px">' + mktIc + '</div><div style="font-size:9px;color:var(--t2)">' + (ar ? 'حالة السوق' : 'Market') + '</div><div style="font-size:8px;color:' + mktCol + '">' + mkt.level + '</div></div>'
+    + '<div class="cd" style="padding:10px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:var(--neon)">' + conn + '</div><div style="font-size:9px;color:var(--t2)">' + (ar ? 'جودة الاتصال' : 'Connection') + '</div><div style="font-size:8px;color:var(--t3)">/100</div></div>'
+    + '<div class="cd" style="padding:10px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:var(--warn)">' + ms.minConf + '%</div><div style="font-size:9px;color:var(--t2)">' + (ar ? 'حد أدنى ثقة' : 'Min Confidence') + '</div><div style="font-size:8px;color:var(--t3)">' + (ar ? 'تعديل تلقائي' : 'Auto-adjusted') + '</div></div>'
+    + '</div>';
+
+  var facEl = document.getElementById('adminFactors'); if (facEl) {
+    var facH = '';
+    var keys = Object.keys(ms.factorStats);
+    keys.sort(function(a, b) { return (ms.factorStats[b].winRate || 0) - (ms.factorStats[a].winRate || 0); });
+    keys.forEach(function(key) {
+      var f = ms.factorStats[key];
+      var wr = f.winRate || 0;
+      var wCol = wr >= 70 ? 'var(--up)' : wr >= 50 ? 'var(--warn)' : 'var(--dn)';
+      var wt = ms.weights[key] || 0;
+      var defW = DEFAULT_WEIGHTS[key] || 0;
+      var wtChg = defW > 0 ? Math.round((wt / defW - 1) * 100) : 0;
+      var wtCol = wtChg > 0 ? 'var(--up)' : wtChg < 0 ? 'var(--dn)' : 'var(--t3)';
+      facH += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--bdr);font-size:10px">'
+        + '<span style="font-weight:700;min-width:60px">' + key + '</span>'
+        + '<span style="font-family:var(--fm);font-weight:700;color:' + wCol + '">' + wr + '%</span>'
+        + '<span style="font-family:var(--fm);font-size:8px;color:var(--t3)">' + f.wins + 'W / ' + f.total + 'T</span>'
+        + '<span style="font-family:var(--fm);font-size:8px;color:' + wtCol + '">' + (wtChg >= 0 ? '+' : '') + wtChg + '%</span>'
+        + '</div>';
+    });
+    facEl.innerHTML = facH || '<div style="color:var(--t3);font-size:10px;text-align:center;padding:8px">' + (ar ? 'لا بيانات بعد' : 'No data yet') + '</div>';
+  }
+
+  var confEl = document.getElementById('adminConf'); if (confEl) {
+    var confH = '';
+    var buckets = Object.keys(ms.confCalib).sort();
+    buckets.forEach(function(b) {
+      var c = ms.confCalib[b];
+      var col = c.realRate >= 65 ? 'var(--up)' : c.realRate >= 45 ? 'var(--warn)' : 'var(--dn)';
+      confH += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:10px">'
+        + '<span style="color:var(--t2)">' + (ar ? 'ثقة ' : 'Conf ') + b + '%</span>'
+        + '<span style="font-family:var(--fm);font-weight:700;color:' + col + '">' + (ar ? 'فعلياً ' : 'Actual ') + c.realRate + '%</span>'
+        + '<span style="font-size:8px;color:var(--t3)">(' + c.wins + '/' + c.total + ')</span></div>';
+    });
+    confEl.innerHTML = confH || '<div style="color:var(--t3);font-size:10px;text-align:center;padding:8px">' + (ar ? 'تحتاج 5+ صفقات لكل شريحة' : 'Need 5+ trades per bucket') + '</div>';
+  }
+
+  var timeEl = document.getElementById('adminTime'); if (timeEl) {
+    var timeH = '<div style="display:flex;flex-wrap:wrap;gap:3px">';
+    for (var h = 0; h < 24; h++) {
+      var hs = ms.hourStats[String(h)];
+      var rate = hs ? hs.rate : -1;
+      var bg = rate < 0 ? 'var(--bg2)' : rate >= 65 ? 'rgba(0,255,136,.15)' : rate >= 45 ? 'rgba(255,184,0,.15)' : 'rgba(255,56,96,.15)';
+      var col = rate < 0 ? 'var(--t3)' : rate >= 65 ? 'var(--up)' : rate >= 45 ? 'var(--warn)' : 'var(--dn)';
+      timeH += '<div style="width:28px;padding:4px 2px;background:' + bg + ';border-radius:4px;text-align:center;font-size:7px">'
+        + '<div style="color:var(--t3)">' + String(h).padStart(2, '0') + '</div>'
+        + '<div style="font-weight:700;color:' + col + ';font-family:var(--fm)">' + (rate >= 0 ? rate + '%' : '--') + '</div></div>';
+    }
+    timeH += '</div>';
+    if (ms.perf.bestHour >= 0) {
+      timeH += '<div style="font-size:9px;margin-top:6px;color:var(--t2)">' + (ar ? 'أفضل ساعة: ' : 'Best hour: ') + '<b style="color:var(--up)">' + ms.perf.bestHour + ':00 UTC</b>'
+        + (ms.perf.worstHour >= 0 ? ' — ' + (ar ? 'أضعف: ' : 'Worst: ') + '<b style="color:var(--dn)">' + ms.perf.worstHour + ':00 UTC</b>' : '') + '</div>';
+    }
+    timeEl.innerHTML = timeH;
+  }
+
+  var coinEl = document.getElementById('adminCoins'); if (coinEl) {
+    var coinH = '';
+    var coinKeys = Object.keys(ms.coinStats);
+    coinKeys.sort(function(a, b) { return (ms.coinStats[b].rate || 0) - (ms.coinStats[a].rate || 0); });
+    coinKeys.forEach(function(coin) {
+      var cs = ms.coinStats[coin];
+      var col = cs.rate >= 65 ? 'var(--up)' : cs.rate >= 45 ? 'var(--warn)' : 'var(--dn)';
+      var isBL = ms.coinBlacklist.indexOf(coin) !== -1;
+      coinH += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--bdr);font-size:10px">'
+        + '<span style="font-weight:700">' + coin + (isBL ? ' 🚫' : '') + '</span>'
+        + '<span style="font-family:var(--fm);font-weight:700;color:' + col + '">' + cs.rate + '%</span>'
+        + '<span style="font-size:8px;color:var(--t3)">' + cs.wins + '/' + cs.total + '</span></div>';
+    });
+    coinEl.innerHTML = coinH || '<div style="color:var(--t3);font-size:10px;text-align:center;padding:8px">--</div>';
+  }
+
+  var patEl = document.getElementById('adminPatterns'); if (patEl) {
+    var patH = '';
+    (ms.failPatterns || []).forEach(function(p) {
+      patH += '<div style="padding:6px;background:rgba(255,56,96,.04);border:1px solid rgba(255,56,96,.06);border-radius:6px;margin-bottom:4px;font-size:10px">'
+        + '<div style="font-weight:700;color:var(--dn)">' + p.label + '</div>'
+        + '<div style="font-size:8px;color:var(--t3)">' + (ar ? 'عيّنات: ' : 'Samples: ') + p.sampleSize + '</div></div>';
+    });
+    patEl.innerHTML = patH || '<div style="color:var(--t3);font-size:10px;text-align:center;padding:8px">' + (ar ? 'لم تُكتشف أنماط فشل' : 'No patterns detected') + '</div>';
+  }
+
+  var wtEl = document.getElementById('adminWeights'); if (wtEl) {
+    var wtH = '<div style="display:flex;flex-wrap:wrap;gap:4px">';
+    Object.keys(ms.weights).forEach(function(key) {
+      var w = ms.weights[key];
+      var d = DEFAULT_WEIGHTS[key];
+      var chg = d > 0 ? Math.round((w / d - 1) * 100) : 0;
+      var col = chg > 0 ? 'var(--up)' : chg < 0 ? 'var(--dn)' : 'var(--t2)';
+      wtH += '<div style="padding:4px 8px;background:var(--bg2);border-radius:6px;text-align:center;font-size:9px">'
+        + '<div style="font-weight:700">' + key + '</div>'
+        + '<div style="font-family:var(--fm);color:' + col + '">' + w.toFixed(2) + '</div>'
+        + '<div style="font-size:7px;color:var(--t3)">' + (chg >= 0 ? '+' : '') + chg + '%</div></div>';
+    });
+    wtH += '</div>';
+    wtEl.innerHTML = wtH;
+  }
+
+  var hlEl = document.getElementById('adminHealth'); if (hlEl) {
+    var wsOk = ws && ws.readyState === 1;
+    var tkAge = Date.now() - lastDataTime;
+    var total = connMetrics.apiOk + connMetrics.apiFail;
+    var apiRate = total > 0 ? Math.round(connMetrics.apiOk / total * 100) : 0;
+    hlEl.innerHTML = '<div style="font-size:10px">'
+      + '<div style="padding:3px 0">WebSocket: <b style="color:' + (wsOk ? 'var(--up)' : 'var(--dn)') + '">' + (wsOk ? '✅' : '❌') + '</b></div>'
+      + '<div style="padding:3px 0">' + (ar ? 'عمر البيانات: ' : 'Data age: ') + '<b>' + Math.round(tkAge / 1000) + 's</b></div>'
+      + '<div style="padding:3px 0">API: <b style="color:' + (apiRate >= 90 ? 'var(--up)' : 'var(--warn)') + '">' + apiRate + '% (' + connMetrics.apiOk + '/' + total + ')</b></div>'
+      + '<div style="padding:3px 0">' + (ar ? 'عملات: ' : 'Coins: ') + '<b>' + Object.keys(T).length + '</b></div>'
+      + '<div style="padding:3px 0">FR: <b>' + Object.keys(FR).length + '</b> | OI: <b>' + Object.keys(OI).length + '</b></div>'
+      + '</div>';
+  }
+
+  var wkEl = document.getElementById('adminWeekly'); if (wkEl) {
+    var wkR = null;
+    try { wkR = JSON.parse(localStorage.getItem('nxWeeklyReport')); } catch(e) {}
+    if (wkR && wkR.changes) {
+      var wkH = '<div style="font-size:10px">';
+      wkH += '<div style="color:var(--t3);font-size:8px;margin-bottom:4px">' + new Date(wkR.time).toLocaleString() + '</div>';
+      wkR.changes.forEach(function(c) { wkH += '<div style="padding:3px 0;border-bottom:1px solid var(--bdr)">\u2022 ' + c + '</div>'; });
+      wkH += '</div>';
+      wkEl.innerHTML = wkH;
+    } else {
+      wkEl.innerHTML = '<div style="color:var(--t3);font-size:10px;text-align:center;padding:8px">' + (ar ? 'لم يُجرَ تحسين بعد' : 'No improvement yet') + '</div>';
+    }
+  }
+}
+/* ═══ END MONITOR ═══ */
 /* CACHE */
 let cache={scan:null,scanTime:0,whale:null,whaleTime:0,fr:null,frTime:0};
 const CACHE_TTL=60000;
@@ -114,7 +801,10 @@ function tgNotify(sym,type,data){
   if(msg)sendTG(msg)}
 /* ON-SCREEN POPUP NOTIFICATION */
 function showPopup(icon,title,body){var el=document.getElementById('notifPopup');document.getElementById('npIcon').textContent=icon;document.getElementById('npTitle').textContent=title;document.getElementById('npBody').textContent=body;document.getElementById('npTime').textContent='🆕';el.style.top='12px';setTimeout(function(){el.style.top='-80px'},4000)}
-function notify(sym,type,score,extra){var k=sym+'_'+type+'_'+new Date().getHours();if(notifiedSet[k])return;notifiedSet[k]=true;localStorage.setItem('nxnot10',JSON.stringify(notifiedSet));playSound(type);
+function notify(sym,type,score,extra){var k=sym+'_'+type+'_'+new Date().getHours();if(notifiedSet[k])return;
+  /* === QUALITY GATE === */
+  try{var gate=signalQualityGate(sym,type,score);if(!gate.pass){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){}return}}catch(e){}
+  notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){}playSound(type);
   if(type==='ultra'){showPopup('⭐',sym+' — ULTRA Signal!','Score: '+score+' | '+(lang==='ar'?'ادخل الآن!':'Enter now!'));addNotifHist('⭐',sym,'ULTRA','Score: '+score);tgNotify(sym,'ultra',extra||{score:score});if(T[sym])openTrade(sym,T[sym].p,'ultra',score,extra)}
   else if(type==='whale'){showPopup('🐋',sym+' — '+(lang==='ar'?'تجميع حيتان!':'Whale detected!'),(lang==='ar'?'نشاط غير عادي':'Unusual activity'));addNotifHist('🐋',sym,lang==='ar'?'حوت':'Whale',fP(T[sym]?T[sym].p:0));tgNotify(sym,'whale',{});if(T[sym])openTrade(sym,T[sym].p,'whale',score)}
   else if(type==='gem'){showPopup('💎',sym+' — '+(lang==='ar'?'جوهرة مكتشفة!':'Gem found!'),(lang==='ar'?'عملة صغيرة بحركة قوية':'Small cap with strong move'));addNotifHist('💎',sym,lang==='ar'?'جوهرة':'Gem','+'+(T[sym]?T[sym].c.toFixed(1):0)+'%');tgNotify(sym,'gem',{});if(T[sym])openTrade(sym,T[sym].p,'gem',score)}}
@@ -459,6 +1149,9 @@ function openTrade(sym,price,type,score,extra){
     t1Hit:false,trailingStop:null,
     marketAtEntry:{btc:T.BTC?T.BTC.c:0,fg:fgValue},
     snapshots:[]};
+  // === MONITOR HOOK: Capture factor snapshot at entry ===
+  trade.factorSnapshot = captureFactorSnapshot(sym);
+  trade.confAtEntry = score;
   activeTrades.push(trade);saveTrades();return trade}
 
 function saveTrades(){if(activeTrades.length>200)activeTrades=activeTrades.slice(-200);localStorage.setItem('nxTrades',JSON.stringify(activeTrades))}
@@ -467,6 +1160,8 @@ function closeTrade(trade,exitPrice,reason){
   trade.status='CLOSED';trade.exitPrice=exitPrice;trade.exitTime=Date.now();trade.exitReason=reason;
   trade.finalPnl=((exitPrice-trade.entry)/trade.entry*100);trade.duration=Date.now()-trade.entryTime;
   saveTrades();
+  // === MONITOR HOOK: Process outcome ===
+  try { processTradeOutcome(trade); } catch(e) {}
   /* Notification */
   var ic=trade.finalPnl>=0?'✅':'❌';var pnlStr=(trade.finalPnl>=0?'+':'')+trade.finalPnl.toFixed(1)+'%';
   var durH=Math.floor(trade.duration/3600000);var durM=Math.floor((trade.duration%3600000)/60000);
@@ -1090,8 +1785,8 @@ async function loadDash(){
   var bk=Object.values(T).filter(function(x){return x.c>=8}).length;var bkE=document.getElementById('brkC');if(bkE)bkE.textContent=bk;var pBE=document.getElementById('pBrk');if(pBE)pBE.textContent=bk;
   var cands=quickScan();var results=await deepAnalyze(cands);cache.scan=results;cache.scanTime=Date.now();detectWhaleWaves(results);
   var ultras=results.filter(function(r){return r.ultra});var conf=results.filter(function(r){return r.confirmed});
-  var ultraLE=document.getElementById('ultraL');if(ultraLE)ultraLE.innerHTML=ultras.length?ultras.slice(0,3).map(ultraCard).join(''):conf.length?conf.slice(0,2).map(ultraCard).join(''):'<div class="muted">'+t('no_ultra')+'</div>';
-  var ulCE=document.getElementById('ulC');if(ulCE)ulCE.textContent=ultras.length||conf.length;var pUlE=document.getElementById('pUl');if(pUlE)pUlE.textContent=ultras.length||conf.length;var notifBE=document.getElementById('notifB');if(notifBE)notifBE.dataset.c=(ultras.length||conf.length).toString();
+  document.getElementById('ultraL').innerHTML=ultras.length?ultras.slice(0,3).map(ultraCard).join(''):conf.length?conf.slice(0,2).map(ultraCard).join(''):'<div class="muted">'+t('no_ultra')+'</div>';
+  document.getElementById('ulC').textContent=ultras.length||conf.length;document.getElementById('pUl').textContent=ultras.length||conf.length;document.getElementById('notifB').dataset.c=(ultras.length||conf.length).toString();
   /* ⚖️ L/S Intelligence v2.0 */
   await loadTakerVol();
   renderDashLS();
@@ -1340,7 +2035,7 @@ var MKT_TPL_EN={
 
 function mktTab(idx,btn){curMktTab=idx;document.querySelectorAll('#mktTabs>.mkt-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');document.getElementById('mktDaily').style.display=idx===0?'block':'none';document.getElementById('mktComp').style.display=idx===1?'block':'none';if(idx===0)loadDaily();if(idx===1)loadComp()}
 
-function getFreshness(ct,ttl){var a=Date.now()-ct;var pct=ttl?a/ttl:a/3600000;if(pct<0.5)return{cls:'ok',txt:lang==='ar'?'بيانات طازجة':'Fresh data'};if(pct<0.9)return{cls:'aging',txt:lang==='ar'?'بيانات جيدة':'Good data'};return{cls:'stale',txt:lang==='ar'?'بيانات قديمة — حدّث!':'Stale — Refresh!'}}
+function getFreshness(ct){var a=Date.now()-ct;if(a<1800000)return{cls:'ok',txt:lang==='ar'?'بيانات طازجة':'Fresh data'};if(a<10800000)return{cls:'aging',txt:lang==='ar'?'بيانات جيدة':'Good data'};return{cls:'stale',txt:lang==='ar'?'بيانات قديمة — حدّث!':'Stale — Refresh!'}}
 
 function getUpcomingEvents(){var evs=[];var now=new Date();var in7=new Date(now.getTime()+7*86400000);
   FOMC_DATES.forEach(function(d){var dt=new Date(d);if(dt>=now&&dt<=in7){var dy=Math.ceil((dt-now)/86400000);evs.push({ic:'🏦',txt:lang==='ar'?'اجتماع Fed — '+(dy===0?'اليوم!':dy===1?'غداً':'بعد '+dy+' أيام'):'FOMC — '+(dy===0?'Today!':'in '+dy+'d'),impact:'high',warn:lang==='ar'?'توقع تذبذب عالي':'Expect volatility'})}});
@@ -1426,20 +2121,24 @@ async function analyzeCoinRpt(sym){
   else if(divRSI1d==='bearish')warning=lang==='ar'?'⚠️ RSI Divergence على اليومي':'⚠️ RSI Div on Daily';
   else if(volT<0.7)warning=lang==='ar'?'حجم ضعيف':'Low volume';
   /* Scenarios */
-  var bullP=Math.min(80,Math.max(10,50+ts*4+(wConf>=50?5:0)+(bullTFs>=3?5:0)));var bearP=Math.min(35,Math.max(5,100-bullP-15));var neutP=100-bullP-bearP;
+  var bullP=Math.min(80,Math.max(10,50+ts*5+(wConf>=50?5:0)+(bullTFs>=3?5:0)));var bearP=Math.min(40,Math.max(5,50-ts*5));var neutP=100-bullP-bearP;
   var bullCond=lang==='ar'?'اختراق '+fP(resist)+' بحجم':'Break '+fP(resist)+' with volume';
   var bearCond=lang==='ar'?'كسر '+fP(supp)+' بإغلاق':'Close below '+fP(supp);
   var bullInv=lang==='ar'?'يُلغى لو كسر '+fP(supp):'Invalidated below '+fP(supp);
   var bearInv=lang==='ar'?'يُلغى لو اخترق '+fP(resist):'Invalidated above '+fP(resist);
   var riskPct=ts>=4?5:ts>=2?3:ts<=-2?0:1;
-  /* Score (9 factors) */
-  var sc=0,scB=[];var addSc=function(n,v){scB.push({n:n,v:v});sc+=v};
-  addSc(lang==='ar'?'الاتجاه':'Trend',ts>=4?2:ts>=2?1.5:ts>=0?1:0);
-  addSc(lang==='ar'?'الحيتان':'Whales',wConf>=60?2:wConf>=40?1:0);
-  addSc('RSI',rsi>=30&&rsi<=55?1:0.5);addSc('FR',fr&&fr.rate<0?1:fr&&fr.rate>0.05?0:0.5);
-  addSc('OI',OI[sym]?(ch4h>0&&ts>0?1:0.5):0);addSc(lang==='ar'?'حجم':'Vol',volT>1.3?0.5:0);
-  addSc('MACD',macd.h>0?0.5:0);addSc(lang==='ar'?'توافق':'TF',bullTFs>=3?1:bullTFs>=2?0.5:0);
-  addSc(lang==='ar'?'هيكل':'Struct',struct==='HH/HL'?1:struct==='LH/LL'?0:0.5);
+  /* Score (9 factors — dynamic weights) */
+  var W=monitorState?monitorState.weights:DEFAULT_WEIGHTS;
+  var sc=0,scB=[];var addSc=function(n,v,k){var wt=W[k]||1;var adj=v*(wt/(DEFAULT_WEIGHTS[k]||1));scB.push({n:n,v:+adj.toFixed(2),k:k,raw:v,wt:+wt.toFixed(2)});sc+=adj};
+  addSc(lang==='ar'?'الاتجاه':'Trend',ts>=4?2:ts>=2?1.5:ts>=0?1:0,'trend');
+  addSc(lang==='ar'?'الحيتان':'Whales',wConf>=60?2:wConf>=40?1:0,'whales');
+  addSc('RSI',rsi>=30&&rsi<=55?1:0.5,'rsi');
+  addSc('FR',fr&&fr.rate<0?1:fr&&fr.rate>0.05?0:0.5,'fr');
+  addSc('OI',OI[sym]?1:0.5,'oi');
+  addSc(lang==='ar'?'حجم':'Vol',volT>1.3?0.5:0,'vol');
+  addSc('MACD',macd.h>0?0.5:0,'macd');
+  addSc(lang==='ar'?'توافق':'TF',bullTFs>=3?1:bullTFs>=2?0.5:0,'confluence');
+  addSc(lang==='ar'?'هيكل':'Struct',struct==='HH/HL'?1:struct==='LH/LL'?0:0.5,'structure');
   var rec,recIc;if(ts>=4){rec=lang==='ar'?'💰 شراء قوي — وقف '+fP(f618D):'💰 Strong Buy — Stop '+fP(f618D);recIc='💰'}else if(ts>=2){rec=lang==='ar'?'📈 شراء — دخول تدريجي':'📈 Buy — Scale in';recIc='📈'}else if(ts<=-4){rec=lang==='ar'?'⛔ تجنب — هبوط قوي':'⛔ Avoid';recIc='⛔'}else if(ts<=-2){rec=lang==='ar'?'⚠️ حذر — انتظر':'⚠️ Caution — Wait';recIc='⚠️'}else{rec=lang==='ar'?'⏳ انتظار — محايد':'⏳ Wait';recIc='⏳'}
   /* Liquidation zones */
   var liqZones=[];if(typeof liqEvents!=='undefined'&&liqEvents&&liqEvents.length){var sL=liqEvents.filter(function(e){return e.s===sym||e.s===sym+'USDT'});
@@ -1457,7 +2156,7 @@ async function loadDaily(){
   var btc=coins[0];if(!btc){document.getElementById('mktDaily').innerHTML='<div class="empty"><div class="empty-ic">📊</div><div class="empty-tx">'+t('no_data')+'</div></div>';return}
   var hlth=calcHealth();var hCol=hlth.score>=70?'var(--up)':hlth.score>=45?'var(--warn)':'var(--dn)';var evs=getUpcomingEvents();var warns=getWarnings();
   var xml='';
-  var frsh=getFreshness(dailyCache.t||Date.now(),DAILY_TTL);
+  var frsh=getFreshness(Date.now());
   xml+='<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' — '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
   /* Hero */
   xml+='<div class="mkt-dir-hero" style="background:'+(btc.ts>=2?'rgba(0,255,136,.04)':btc.ts<=-2?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)')+';border:1px solid '+(btc.ts>=2?'rgba(0,255,136,.08)':btc.ts<=-2?'rgba(255,56,96,.08)':'rgba(255,184,0,.08)')+'">'
@@ -1526,7 +2225,7 @@ async function loadComp(){
   var btc=coins[0];if(!btc){document.getElementById('mktComp').innerHTML='<div class="empty"><div class="empty-ic">📊</div><div class="empty-tx">'+t('no_data')+'</div></div>';return}
   var hlth=calcHealth();var hCol=hlth.score>=70?'var(--up)':hlth.score>=45?'var(--warn)':'var(--dn)';var evs=getUpcomingEvents();var warns=getWarnings();
   var html='';
-  var frsh=getFreshness(compCache.t||Date.now(),COMP_TTL);
+  var frsh=getFreshness(Date.now());
   html+='<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' — '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
   /* Risk Score */
   html+='<div class="mkt-risk" style="background:'+(hlth.score>=70?'rgba(0,255,136,.04)':hlth.score>=45?'rgba(255,184,0,.04)':'rgba(255,56,96,.04)')+'">'
@@ -1553,7 +2252,7 @@ async function loadComp(){
     html+='<div class="mkt-story">'+buildStory(c.sym,c)+'</div>';
     /* L2: Multi-TF */
     var tfIc=function(d){return d==='up'?'<span style="color:var(--up)">▲</span>':d==='down'?'<span style="color:var(--dn)">▼</span>':'<span style="color:var(--warn)">—</span>'};
-    html+='<div class="mkt-tf-grid"><div class="mkt-tf">'+tfIc(c.tf.w)+'<div class="mkt-tf-l">7D</div></div><div class="mkt-tf">'+tfIc(c.tf.d)+'<div class="mkt-tf-l">D</div></div><div class="mkt-tf">'+tfIc(c.tf.h4)+'<div class="mkt-tf-l">4H</div></div><div class="mkt-tf">'+tfIc(c.tf.h1)+'<div class="mkt-tf-l">1H</div></div></div>'
+    html+='<div class="mkt-tf-grid"><div class="mkt-tf">'+tfIc(c.tf.w)+'<div class="mkt-tf-l">W</div></div><div class="mkt-tf">'+tfIc(c.tf.d)+'<div class="mkt-tf-l">D</div></div><div class="mkt-tf">'+tfIc(c.tf.h4)+'<div class="mkt-tf-l">4H</div></div><div class="mkt-tf">'+tfIc(c.tf.h1)+'<div class="mkt-tf-l">1H</div></div></div>'
       +'<div class="mkt-conf" style="background:'+(c.bullTFs>=3?'rgba(0,255,136,.04)':c.bullTFs<=1?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)')+';color:'+(c.bullTFs>=3?'var(--up)':c.bullTFs<=1?'var(--dn)':'var(--warn)')+'">'+(lang==='ar'?'توافق: ':'Confluence: ')+c.bullTFs+'/4 '+(c.bullTFs>=3?(lang==='ar'?'صعودي':'Bullish'):(lang==='ar'?'مختلط':'Mixed'))+'</div>';
     /* L3: Structure */
     var stCol=c.struct==='HH/HL'?'var(--up)':c.struct==='LH/LL'?'var(--dn)':'var(--warn)';
@@ -2001,5 +2700,21 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   setInterval(monitorTrades,10000);
   setInterval(function(){try{notifiedSet={};localStorage.setItem('nxnot10','{}')}catch(e){}},3600000);
   setTimeout(function(){runValidator()},10000);
-  setInterval(function(){runValidator()},90000)}
+  setInterval(function(){runValidator()},90000);
+  // === MONITOR: Weekly auto-tune / auto-improve check ===
+  try {
+    var weekMs = 7 * 24 * 3600000;
+    if (monitorState && Date.now() - monitorState.lastTune > weekMs) {
+      if (monitorState.perf.totalTrades >= 10) {
+        runAutoImprove(); // comprehensive (includes autoTuneWeights + blacklist + minConf + report)
+      } else {
+        autoTuneWeights(); // lightweight (weights only, needs 5+ per factor)
+      }
+    }
+  } catch(e) {}
+  // === MONITOR: Run pattern detection every 6 hours ===
+  setInterval(function() {
+    try { detectFailPatterns(); } catch(e) {}
+  }, 6 * 3600000);
+}
 init();

@@ -564,168 +564,9 @@ function runAutoImprove() {
 }
 
 /* ═══ ADMIN PANEL RENDERER ═══ */
-var adminTapCount = 0;
-var adminTapTimer = null;
-
-function openAdminPanel() {
-  adminTapCount++;
-  if (adminTapTimer) clearTimeout(adminTapTimer);
-  adminTapTimer = setTimeout(function() { adminTapCount = 0; }, 800);
-  if (adminTapCount >= 3) {
-    adminTapCount = 0;
-    document.querySelectorAll('.pg').forEach(function(p) { p.classList.remove('act'); p.style.display = ''; });
-    document.querySelectorAll('.bb').forEach(function(b) { b.classList.remove('act'); });
-    var el = document.getElementById('pg-admin');
-    if (el) { el.classList.add('act'); }
-    renderAdminPanel();
-    window.scrollTo({top: 0});
-  }
-}
-
-function renderAdminPanel() {
-  if (!monitorState) return;
-  var ms = monitorState;
-  var ar = lang === 'ar';
-
-  var sumEl = document.getElementById('adminSummary'); if (!sumEl) return;
-  var mkt = detectMarketDanger();
-  var conn = getConnQuality();
-  var mktCol = mkt.level === 'safe' ? 'var(--up)' : mkt.level === 'caution' ? 'var(--warn)' : 'var(--dn)';
-  var mktIc = mkt.level === 'safe' ? '🟢' : mkt.level === 'caution' ? '🟡' : '🔴';
-  var rateCol = ms.perf.overallRate >= 65 ? 'var(--up)' : ms.perf.overallRate >= 50 ? 'var(--warn)' : 'var(--dn)';
-
-  sumEl.innerHTML = '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px">'
-    + '<div class="cd" style="padding:10px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:' + rateCol + '">' + ms.perf.overallRate + '%</div><div style="font-size:9px;color:var(--t2)">' + (ar ? 'نسبة النجاح' : 'Success Rate') + '</div><div style="font-size:8px;font-family:var(--fm);color:var(--t3)">' + ms.perf.totalWins + '/' + ms.perf.totalTrades + '</div></div>'
-    + '<div class="cd" style="padding:10px;text-align:center"><div style="font-size:20px">' + mktIc + '</div><div style="font-size:9px;color:var(--t2)">' + (ar ? 'حالة السوق' : 'Market') + '</div><div style="font-size:8px;color:' + mktCol + '">' + mkt.level + '</div></div>'
-    + '<div class="cd" style="padding:10px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:var(--neon)">' + conn + '</div><div style="font-size:9px;color:var(--t2)">' + (ar ? 'جودة الاتصال' : 'Connection') + '</div><div style="font-size:8px;color:var(--t3)">/100</div></div>'
-    + '<div class="cd" style="padding:10px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:var(--warn)">' + ms.minConf + '%</div><div style="font-size:9px;color:var(--t2)">' + (ar ? 'حد أدنى ثقة' : 'Min Confidence') + '</div><div style="font-size:8px;color:var(--t3)">' + (ar ? 'تعديل تلقائي' : 'Auto-adjusted') + '</div></div>'
-    + '</div>';
-
-  var facEl = document.getElementById('adminFactors'); if (facEl) {
-    var facH = '';
-    var keys = Object.keys(ms.factorStats);
-    keys.sort(function(a, b) { return (ms.factorStats[b].winRate || 0) - (ms.factorStats[a].winRate || 0); });
-    keys.forEach(function(key) {
-      var f = ms.factorStats[key];
-      var wr = f.winRate || 0;
-      var wCol = wr >= 70 ? 'var(--up)' : wr >= 50 ? 'var(--warn)' : 'var(--dn)';
-      var wt = ms.weights[key] || 0;
-      var defW = DEFAULT_WEIGHTS[key] || 0;
-      var wtChg = defW > 0 ? Math.round((wt / defW - 1) * 100) : 0;
-      var wtCol = wtChg > 0 ? 'var(--up)' : wtChg < 0 ? 'var(--dn)' : 'var(--t3)';
-      facH += '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--bdr);font-size:10px">'
-        + '<span style="font-weight:700;min-width:60px">' + key + '</span>'
-        + '<span style="font-family:var(--fm);font-weight:700;color:' + wCol + '">' + wr + '%</span>'
-        + '<span style="font-family:var(--fm);font-size:8px;color:var(--t3)">' + f.wins + 'W / ' + f.total + 'T</span>'
-        + '<span style="font-family:var(--fm);font-size:8px;color:' + wtCol + '">' + (wtChg >= 0 ? '+' : '') + wtChg + '%</span>'
-        + '</div>';
-    });
-    facEl.innerHTML = facH || '<div style="color:var(--t3);font-size:10px;text-align:center;padding:8px">' + (ar ? 'لا بيانات بعد' : 'No data yet') + '</div>';
-  }
-
-  var confEl = document.getElementById('adminConf'); if (confEl) {
-    var confH = '';
-    var buckets = Object.keys(ms.confCalib).sort();
-    buckets.forEach(function(b) {
-      var c = ms.confCalib[b];
-      var col = c.realRate >= 65 ? 'var(--up)' : c.realRate >= 45 ? 'var(--warn)' : 'var(--dn)';
-      confH += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;font-size:10px">'
-        + '<span style="color:var(--t2)">' + (ar ? 'ثقة ' : 'Conf ') + b + '%</span>'
-        + '<span style="font-family:var(--fm);font-weight:700;color:' + col + '">' + (ar ? 'فعلياً ' : 'Actual ') + c.realRate + '%</span>'
-        + '<span style="font-size:8px;color:var(--t3)">(' + c.wins + '/' + c.total + ')</span></div>';
-    });
-    confEl.innerHTML = confH || '<div style="color:var(--t3);font-size:10px;text-align:center;padding:8px">' + (ar ? 'تحتاج 5+ صفقات لكل شريحة' : 'Need 5+ trades per bucket') + '</div>';
-  }
-
-  var timeEl = document.getElementById('adminTime'); if (timeEl) {
-    var timeH = '<div style="display:flex;flex-wrap:wrap;gap:3px">';
-    for (var h = 0; h < 24; h++) {
-      var hs = ms.hourStats[String(h)];
-      var rate = hs ? hs.rate : -1;
-      var bg = rate < 0 ? 'var(--bg2)' : rate >= 65 ? 'rgba(0,255,136,.15)' : rate >= 45 ? 'rgba(255,184,0,.15)' : 'rgba(255,56,96,.15)';
-      var col = rate < 0 ? 'var(--t3)' : rate >= 65 ? 'var(--up)' : rate >= 45 ? 'var(--warn)' : 'var(--dn)';
-      timeH += '<div style="width:28px;padding:4px 2px;background:' + bg + ';border-radius:4px;text-align:center;font-size:7px">'
-        + '<div style="color:var(--t3)">' + String(h).padStart(2, '0') + '</div>'
-        + '<div style="font-weight:700;color:' + col + ';font-family:var(--fm)">' + (rate >= 0 ? rate + '%' : '--') + '</div></div>';
-    }
-    timeH += '</div>';
-    if (ms.perf.bestHour >= 0) {
-      timeH += '<div style="font-size:9px;margin-top:6px;color:var(--t2)">' + (ar ? 'أفضل ساعة: ' : 'Best hour: ') + '<b style="color:var(--up)">' + ms.perf.bestHour + ':00 UTC</b>'
-        + (ms.perf.worstHour >= 0 ? ' — ' + (ar ? 'أضعف: ' : 'Worst: ') + '<b style="color:var(--dn)">' + ms.perf.worstHour + ':00 UTC</b>' : '') + '</div>';
-    }
-    timeEl.innerHTML = timeH;
-  }
-
-  var coinEl = document.getElementById('adminCoins'); if (coinEl) {
-    var coinH = '';
-    var coinKeys = Object.keys(ms.coinStats);
-    coinKeys.sort(function(a, b) { return (ms.coinStats[b].rate || 0) - (ms.coinStats[a].rate || 0); });
-    coinKeys.forEach(function(coin) {
-      var cs = ms.coinStats[coin];
-      var col = cs.rate >= 65 ? 'var(--up)' : cs.rate >= 45 ? 'var(--warn)' : 'var(--dn)';
-      var isBL = ms.coinBlacklist.indexOf(coin) !== -1;
-      coinH += '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--bdr);font-size:10px">'
-        + '<span style="font-weight:700">' + coin + (isBL ? ' 🚫' : '') + '</span>'
-        + '<span style="font-family:var(--fm);font-weight:700;color:' + col + '">' + cs.rate + '%</span>'
-        + '<span style="font-size:8px;color:var(--t3)">' + cs.wins + '/' + cs.total + '</span></div>';
-    });
-    coinEl.innerHTML = coinH || '<div style="color:var(--t3);font-size:10px;text-align:center;padding:8px">--</div>';
-  }
-
-  var patEl = document.getElementById('adminPatterns'); if (patEl) {
-    var patH = '';
-    (ms.failPatterns || []).forEach(function(p) {
-      patH += '<div style="padding:6px;background:rgba(255,56,96,.04);border:1px solid rgba(255,56,96,.06);border-radius:6px;margin-bottom:4px;font-size:10px">'
-        + '<div style="font-weight:700;color:var(--dn)">' + p.label + '</div>'
-        + '<div style="font-size:8px;color:var(--t3)">' + (ar ? 'عيّنات: ' : 'Samples: ') + p.sampleSize + '</div></div>';
-    });
-    patEl.innerHTML = patH || '<div style="color:var(--t3);font-size:10px;text-align:center;padding:8px">' + (ar ? 'لم تُكتشف أنماط فشل' : 'No patterns detected') + '</div>';
-  }
-
-  var wtEl = document.getElementById('adminWeights'); if (wtEl) {
-    var wtH = '<div style="display:flex;flex-wrap:wrap;gap:4px">';
-    Object.keys(ms.weights).forEach(function(key) {
-      var w = ms.weights[key];
-      var d = DEFAULT_WEIGHTS[key];
-      var chg = d > 0 ? Math.round((w / d - 1) * 100) : 0;
-      var col = chg > 0 ? 'var(--up)' : chg < 0 ? 'var(--dn)' : 'var(--t2)';
-      wtH += '<div style="padding:4px 8px;background:var(--bg2);border-radius:6px;text-align:center;font-size:9px">'
-        + '<div style="font-weight:700">' + key + '</div>'
-        + '<div style="font-family:var(--fm);color:' + col + '">' + w.toFixed(2) + '</div>'
-        + '<div style="font-size:7px;color:var(--t3)">' + (chg >= 0 ? '+' : '') + chg + '%</div></div>';
-    });
-    wtH += '</div>';
-    wtEl.innerHTML = wtH;
-  }
-
-  var hlEl = document.getElementById('adminHealth'); if (hlEl) {
-    var wsOk = ws && ws.readyState === 1;
-    var tkAge = Date.now() - lastDataTime;
-    var total = connMetrics.apiOk + connMetrics.apiFail;
-    var apiRate = total > 0 ? Math.round(connMetrics.apiOk / total * 100) : 0;
-    hlEl.innerHTML = '<div style="font-size:10px">'
-      + '<div style="padding:3px 0">WebSocket: <b style="color:' + (wsOk ? 'var(--up)' : 'var(--dn)') + '">' + (wsOk ? '✅' : '❌') + '</b></div>'
-      + '<div style="padding:3px 0">' + (ar ? 'عمر البيانات: ' : 'Data age: ') + '<b>' + Math.round(tkAge / 1000) + 's</b></div>'
-      + '<div style="padding:3px 0">API: <b style="color:' + (apiRate >= 90 ? 'var(--up)' : 'var(--warn)') + '">' + apiRate + '% (' + connMetrics.apiOk + '/' + total + ')</b></div>'
-      + '<div style="padding:3px 0">' + (ar ? 'عملات: ' : 'Coins: ') + '<b>' + Object.keys(T).length + '</b></div>'
-      + '<div style="padding:3px 0">FR: <b>' + Object.keys(FR).length + '</b> | OI: <b>' + Object.keys(OI).length + '</b></div>'
-      + '</div>';
-  }
-
-  var wkEl = document.getElementById('adminWeekly'); if (wkEl) {
-    var wkR = null;
-    try { wkR = JSON.parse(localStorage.getItem('nxWeeklyReport')); } catch(e) {}
-    if (wkR && wkR.changes) {
-      var wkH = '<div style="font-size:10px">';
-      wkH += '<div style="color:var(--t3);font-size:8px;margin-bottom:4px">' + new Date(wkR.time).toLocaleString() + '</div>';
-      wkR.changes.forEach(function(c) { wkH += '<div style="padding:3px 0;border-bottom:1px solid var(--bdr)">\u2022 ' + c + '</div>'; });
-      wkH += '</div>';
-      wkEl.innerHTML = wkH;
-    } else {
-      wkEl.innerHTML = '<div style="color:var(--t3);font-size:10px;text-align:center;padding:8px">' + (ar ? 'لم يُجرَ تحسين بعد' : 'No improvement yet') + '</div>';
-    }
-  }
-}
+var adminTapCount=0;var adminTapTimer=null;
+function openAdminPanel(){}
+function renderAdminPanel(){try{renderMonPanel()}catch(e){}}
 /* ═══ END MONITOR ═══ */
 /* CACHE */
 let cache={scan:null,scanTime:0,whale:null,whaleTime:0,fr:null,frTime:0};
@@ -1918,83 +1759,78 @@ function renderAlerts(){
 /* 🤖 MONITOR */
 function renderMonPanel(){
   var el=document.getElementById('monPanel');if(!el)return;
-  var ar=lang==='ar';
+  var ar=lang==='ar';var h='';
   var q=getConnQuality();var qCol=q>=80?'var(--up)':q>=50?'var(--warn)':'var(--dn)';
+  var qLabel=q>=80?(ar?'ممتاز':'Excellent'):q>=50?(ar?'مقبول':'OK'):(ar?'ضعيف':'Poor');
   var wsOk=ws&&ws.readyState===1;
+  var wsAggOk=typeof wsAgg!=='undefined'&&wsAgg&&wsAgg.readyState===1;
+  var wsLiqOk=typeof wsLiq!=='undefined'&&wsLiq&&wsLiq.readyState===1;
+  var wsDepOk=typeof wsDepth!=='undefined'&&wsDepth&&wsDepth.readyState===1;
+  var wsCount=(wsOk?1:0)+(wsAggOk?1:0)+(wsLiqOk?1:0)+(wsDepOk?1:0);
   var total=connMetrics.apiOk+connMetrics.apiFail;var apiRate=total>0?Math.round(connMetrics.apiOk/total*100):0;
-  var ms=monitorState||{perf:{overallRate:0,totalTrades:0,totalWins:0,bestHour:-1,worstHour:-1},factorStats:{},confCalib:{},hourStats:{},coinStats:{},coinBlacklist:[],weights:{},minConf:55};
+  var ms=monitorState||{perf:{overallRate:0,totalTrades:0,totalWins:0,totalLosses:0,bestHour:-1,worstHour:-1},factorStats:{},confCalib:{},hourStats:{},coinStats:{},coinBlacklist:[],weights:{},minConf:55,failPatterns:[]};
   var perf=ms.perf;var perfCol=perf.overallRate>=65?'var(--up)':perf.overallRate>=50?'var(--warn)':'var(--dn)';
-  var mkt;try{mkt=detectMarketDanger()}catch(e){mkt={level:'safe'}}
-  var mktCol=mkt.level==='safe'?'var(--up)':mkt.level==='caution'?'var(--warn)':'var(--dn)';
+  var mkt;try{mkt=detectMarketDanger()}catch(e){mkt={level:'safe',dangerous:false,reasons:[]}}
   var mktIc=mkt.level==='safe'?'🟢':mkt.level==='caution'?'🟡':'🔴';
-  var h='';
-  /* Summary 4 cards */
+  var mktCol=mkt.level==='safe'?'var(--up)':mkt.level==='caution'?'var(--warn)':'var(--dn)';
+  h+='<div style="text-align:center;padding:16px;background:var(--glass);border:1.5px solid rgba(56,72,96,.1);border-radius:16px;margin-bottom:12px">';
+  h+='<div style="font-family:var(--fm);font-size:48px;font-weight:800;color:'+qCol+';line-height:1">'+q+'%</div>';
+  h+='<div style="font-size:13px;font-weight:700;color:'+qCol+';margin-top:4px">'+(ar?'صحة المنصة — '+qLabel:'Platform Health — '+qLabel)+'</div>';
+  h+='<div style="height:6px;background:rgba(56,72,96,.15);border-radius:3px;margin:10px 0 0;overflow:hidden"><div style="height:100%;width:'+q+'%;border-radius:3px;background:'+qCol+'"></div></div></div>';
   h+='<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:12px">';
-  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:22px;font-weight:800;color:'+qCol+'">'+q+'%</div><div style="font-size:10px;color:var(--t2);margin-top:2px">'+(ar?'جودة الاتصال':'Connection')+'</div></div>';
-  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:22px;font-weight:800;color:'+perfCol+'">'+perf.overallRate+'%</div><div style="font-size:10px;color:var(--t2);margin-top:2px">'+(ar?'نسبة النجاح':'Success')+'</div><div style="font-size:9px;color:var(--t3)">'+perf.totalWins+'/'+perf.totalTrades+'</div></div>';
-  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-size:22px">'+mktIc+'</div><div style="font-size:10px;color:var(--t2);margin-top:2px">'+(ar?'حالة السوق':'Market')+'</div><div style="font-size:9px;color:'+mktCol+'">'+mkt.level+'</div></div>';
-  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:22px;font-weight:800;color:'+(wsOk?'var(--up)':'var(--dn)')+'">'+(wsOk?'✅':'❌')+'</div><div style="font-size:10px;color:var(--t2);margin-top:2px">WebSocket</div></div></div>';
-  /* API Details */
-  h+='<div class="cd" style="padding:10px;margin-bottom:12px;font-size:11px">';
-  h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--t2)">API</span><span style="font-family:var(--fm);font-weight:700;color:'+(apiRate>=90?'var(--up)':'var(--warn)')+'">'+apiRate+'% ('+connMetrics.apiOk+'/'+total+')</span></div>';
+  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:'+(apiRate>=90?'var(--up)':'var(--warn)')+'">'+apiRate+'%</div><div style="font-size:10px;color:var(--t2)">API</div><div style="font-size:8px;color:var(--t3)">'+connMetrics.apiOk+'/'+total+'</div></div>';
+  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:'+(wsCount>=3?'var(--up)':wsCount>=2?'var(--warn)':'var(--dn)')+'">'+wsCount+'/4</div><div style="font-size:10px;color:var(--t2)">WebSocket</div></div>';
+  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-size:20px">'+mktIc+'</div><div style="font-size:10px;color:var(--t2)">'+(ar?'حالة السوق':'Market')+'</div><div style="font-size:9px;color:'+mktCol+'">'+mkt.level+'</div></div>';
+  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:'+perfCol+'">'+perf.overallRate+'%</div><div style="font-size:10px;color:var(--t2)">'+(ar?'نسبة النجاح':'Win Rate')+'</div><div style="font-size:8px;color:var(--t3)">'+perf.totalWins+'/'+perf.totalTrades+'</div></div></div>';
+  var diagOk=0;
+  h+='<div style="font-weight:800;font-size:13px;color:var(--t1);margin:14px 0 8px">🩺 '+(ar?'تشخيص لحظي':'Live Diagnosis')+'</div>';
+  function dR(ic,nm,det,st,ok){diagOk+=ok?1:0;var bdr=ok?'rgba(0,255,136,.08)':st==='واقف'||st==='Stopped'?'rgba(255,56,96,.1)':'rgba(255,184,0,.08)';var sCol=ok?'var(--up)':st==='واقف'||st==='Stopped'?'var(--dn)':'var(--warn)';var sBg=ok?'rgba(0,255,136,.1)':st==='واقف'||st==='Stopped'?'rgba(255,56,96,.1)':'rgba(255,184,0,.1)';return'<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--glass);border:1px solid '+bdr+';border-radius:10px;margin-bottom:4px"><span style="font-size:16px;min-width:24px;text-align:center">'+ic+'</span><div style="flex:1"><div style="font-size:11px;font-weight:700;color:var(--t0)">'+nm+'</div><div style="font-size:9px;color:var(--t3)">'+det+'</div></div><span style="font-size:9px;font-weight:700;padding:3px 8px;border-radius:5px;background:'+sBg+';color:'+sCol+'">'+st+'</span></div>';}
+  var tkC=Object.keys(T).length;h+=dR('📊',ar?'بيانات الأسعار':'Prices',tkC+' '+(ar?'عملة':'coins'),tkC>100?(ar?'سليم':'OK'):(ar?'ضعيف':'Low'),tkC>100);
+  h+=dR('💰','Funding Rate',Object.keys(FR).length+' '+(ar?'عملة':'coins'),Object.keys(FR).length>10?(ar?'سليم':'OK'):(ar?'ناقص':'Low'),Object.keys(FR).length>10);
+  h+=dR('📈','Open Interest',Object.keys(OI).length+' '+(ar?'عملة':'coins'),Object.keys(OI).length>3?(ar?'سليم':'OK'):(ar?'ناقص':'Low'),Object.keys(OI).length>3);
+  var liqC=liqEvents?liqEvents.filter(function(e){return e.time&&Date.now()-e.time<3600000}).length:0;
+  h+=dR('💥',ar?'تصفيات':'Liquidations',liqC+' '+(ar?'آخر ساعة':'last hr'),liqC>0?(ar?'سليم':'OK'):(ar?'بطيء':'Slow'),liqC>0);
+  var whC=Object.keys(whaleWaves).filter(function(s){return whaleWaves[s]&&whaleWaves[s].waves&&whaleWaves[s].waves.length}).length;
+  h+=dR('🐋',ar?'حيتان':'Whales',whC+' '+(ar?'نشطة':'active'),whC>0?(ar?'سليم':'OK'):(ar?'لا نشاط':'None'),whC>0);
+  var depC=Object.keys(depthSnapshots).filter(function(s){return depthSnapshots[s]&&depthSnapshots[s].bids&&depthSnapshots[s].bids.length}).length;
+  h+=dR('📕','Order Book',depC+' '+(ar?'عملة':'coins'),depC>0?(ar?'سليم':'OK'):(ar?'واقف':'Stopped'),depC>0);
+  var tkDC=Object.keys(takerData).filter(function(s){return takerData[s]}).length;
+  h+=dR('⚡','Taker',tkDC+' '+(ar?'عملة':'coins'),tkDC>5?(ar?'سليم':'OK'):(ar?'ناقص':'Low'),tkDC>5);
+  h+='<div style="font-weight:800;font-size:13px;color:var(--t1);margin:14px 0 8px">📱 '+(ar?'صحة الأقسام':'Sections')+' <span style="font-size:9px;padding:2px 8px;border-radius:5px;background:rgba(0,255,136,.1);color:var(--up)">'+diagOk+'/7</span></div>';
+  function sR(ic,nm,det,pct){var col=pct>=90?'var(--up)':pct>=60?'var(--warn)':'var(--dn)';return'<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--glass);border:1px solid '+(pct>=90?'rgba(0,255,136,.08)':'rgba(255,184,0,.08)')+';border-radius:10px;margin-bottom:4px"><span style="font-size:14px;min-width:22px;text-align:center">'+ic+'</span><div style="flex:1"><div style="font-size:11px;font-weight:700;color:var(--t0)">'+nm+'</div><div style="font-size:9px;color:var(--t3)">'+det+'</div></div><span style="font-family:var(--fm);font-size:11px;font-weight:700;color:'+col+'">'+pct+'%</span></div>';}
+  h+=sR('🏠',ar?'الرئيسية':'Home','topCoins+QA+Top3+L/S',tkC>0?100:0);
+  h+=sR('📡',ar?'السكانر':'Scanner','quickScan+deepAnalyze',tkC>0?100:50);
+  h+=sR('🐋',ar?'الحيتان':'Whales','waves+sells+gems',whC>0?100:60);
+  h+=sR('📈',ar?'حركة السوق':'Market','BTC+ETH 12 sec',tkC>0?100:0);
+  var indPct=Math.round(((Object.keys(FR).length>0?1:0)+(Object.keys(OI).length>0?1:0)+(liqC>0?1:0)+(whC>0?1:0)+(tkDC>0?1:0)+(depC>0?1:0))*100/7);
+  h+=sR('📊',ar?'المؤشرات':'Indicators','7 cards',indPct);
+  h+=sR('👤',ar?'حسابي':'Profile','5 tabs',100);
+  h+='<div style="font-weight:800;font-size:13px;color:var(--t1);margin:14px 0 8px">🔧 '+(ar?'حالة الاتصالات':'Connections')+'</div>';
+  h+='<div class="cd" style="padding:10px;font-size:11px">';
+  h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr)"><span>Ticker WS</span><span style="color:'+(wsOk?'var(--up)':'var(--dn)')+'">'+(wsOk?'✅ '+ar?'شغّال':'Active':'❌')+'</span></div>';
+  h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr)"><span>AggTrade WS</span><span style="color:'+(wsAggOk?'var(--up)':'var(--dn)')+'">'+(wsAggOk?'✅':'❌')+'</span></div>';
+  h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr)"><span>Liquidation WS</span><span style="color:'+(wsLiqOk?'var(--up)':'var(--dn)')+'">'+(wsLiqOk?'✅':'❌')+'</span></div>';
+  h+='<div style="display:flex;justify-content:space-between;padding:5px 0"><span>Depth WS</span><span style="color:'+(wsDepOk?'var(--up)':'var(--dn)')+'">'+(wsDepOk?'✅':'❌')+'</span></div></div>';
+  h+='<div style="font-weight:800;font-size:13px;color:var(--t1);margin:14px 0 8px">⚖️ '+(ar?'أوزان العوامل':'Factor Weights')+'</div><div class="cd" style="padding:10px">';
+  var fK=Object.keys(ms.factorStats);fK.sort(function(a,b){return(ms.factorStats[b].winRate||0)-(ms.factorStats[a].winRate||0)});
+  if(fK.length){fK.forEach(function(k){var f=ms.factorStats[k];var wr=f.winRate||0;var wC=wr>=70?'var(--up)':wr>=50?'var(--warn)':'var(--dn)';h+='<div style="display:flex;align-items:center;padding:5px 0;border-bottom:1px solid var(--bdr);font-size:11px"><span style="font-weight:700;min-width:55px">'+k+'</span><div style="flex:1;height:5px;background:rgba(56,72,96,.1);border-radius:3px;margin:0 8px;overflow:hidden"><div style="height:100%;width:'+Math.min(100,wr)+'%;border-radius:3px;background:'+wC+'"></div></div><span style="font-family:var(--fm);font-weight:700;color:'+wC+';min-width:35px;text-align:left">'+wr+'%</span><span style="font-family:var(--fm);font-size:9px;color:var(--t3);min-width:40px">'+f.wins+'W/'+f.total+'T</span></div>';});}else{h+='<div style="color:var(--t3);font-size:11px;text-align:center;padding:8px">'+(ar?'تحتاج صفقات':'Need trades')+'</div>';}
+  h+='</div>';
+  h+='<div style="font-weight:800;font-size:13px;color:var(--t1);margin:14px 0 8px">🎯 '+(ar?'معايرة الثقة':'Confidence')+'</div><div class="cd" style="padding:10px">';
+  var bk=Object.keys(ms.confCalib).sort();
+  if(bk.length){bk.forEach(function(b){var c=ms.confCalib[b];var cl=c.realRate>=65?'var(--up)':c.realRate>=45?'var(--warn)':'var(--dn)';h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr);font-size:11px"><span style="color:var(--t2)">'+(ar?'ثقة ':'Conf ')+b+'%</span><span style="font-family:var(--fm);font-weight:700;color:'+cl+'">'+c.realRate+'%</span><span style="font-size:9px;color:var(--t3)">('+c.wins+'/'+c.total+')</span></div>';});}else{h+='<div style="color:var(--t3);font-size:11px;text-align:center;padding:8px">'+(ar?'تحتاج 5+ صفقات':'Need 5+ trades')+'</div>';}
+  h+='</div>';
+  h+='<div style="font-weight:800;font-size:13px;color:var(--t1);margin:14px 0 8px">🕐 '+(ar?'الساعات':'Hours')+'</div><div class="cd" style="padding:10px"><div style="display:flex;flex-wrap:wrap;gap:2px">';
+  for(var hr=0;hr<24;hr++){var hs=ms.hourStats[String(hr)];var rate=hs?hs.rate:-1;var bg=rate<0?'var(--bg2)':rate>=65?'rgba(0,255,136,.15)':rate>=45?'rgba(255,184,0,.15)':'rgba(255,56,96,.15)';var cl=rate<0?'var(--t3)':rate>=65?'var(--up)':rate>=45?'var(--warn)':'var(--dn)';h+='<div style="width:26px;padding:3px 1px;background:'+bg+';border-radius:4px;text-align:center"><div style="font-size:7px;color:var(--t3)">'+String(hr).padStart(2,'0')+'</div><div style="font-size:8px;font-weight:700;font-family:var(--fm);color:'+cl+'">'+(rate>=0?rate+'%':'--')+'</div></div>';}
+  h+='</div>';if(perf.bestHour>=0)h+='<div style="font-size:10px;margin-top:6px;color:var(--t2)">🏆 '+(ar?'أفضل: ':'Best: ')+'<b style="color:var(--up)">'+perf.bestHour+':00</b>'+(perf.worstHour>=0?' — '+(ar?'أسوأ: ':'Worst: ')+'<b style="color:var(--dn)">'+perf.worstHour+':00</b>':'')+'</div>';h+='</div>';
+  var coins=Object.entries(ms.coinStats).sort(function(a,b){return(b[1].rate||0)-(a[1].rate||0)});
+  if(coins.length){h+='<div style="font-weight:800;font-size:13px;color:var(--t1);margin:14px 0 8px">🪙 '+(ar?'أداء العملات':'Coins')+'</div><div class="cd" style="padding:10px">';coins.forEach(function(e){var s=e[0],c=e[1];var cl=c.rate>=65?'var(--up)':c.rate>=45?'var(--warn)':'var(--dn)';h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr);font-size:11px"><span style="font-weight:700">'+s+'</span><span style="font-family:var(--fm);font-weight:700;color:'+cl+'">'+c.rate+'%</span><span style="font-size:9px;color:var(--t3)">'+c.wins+'/'+c.total+'</span></div>';});h+='</div>';}
+  if(ms.failPatterns&&ms.failPatterns.length){h+='<div style="font-weight:800;font-size:13px;color:var(--t1);margin:14px 0 8px">⚠️ '+(ar?'أنماط فشل':'Fail Patterns')+'</div><div class="cd" style="padding:10px">';ms.failPatterns.slice(0,5).forEach(function(p){h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr);font-size:11px"><span>'+p.label+'</span><span style="font-family:var(--fm);font-weight:700;color:var(--dn)">'+p.failRate+'%</span></div>';});h+='</div>';}
+  h+='<div style="font-weight:800;font-size:13px;color:var(--t1);margin:14px 0 8px">🚫 '+(ar?'محظورة':'Blacklist')+'</div>';
+  if(ms.coinBlacklist&&ms.coinBlacklist.length){h+='<div style="display:flex;gap:4px;flex-wrap:wrap">';ms.coinBlacklist.forEach(function(s){h+='<span style="padding:5px 12px;background:var(--dd);border:1px solid rgba(255,56,96,.1);border-radius:8px;font-size:11px;font-weight:700;color:var(--dn)">'+s+'</span>';});h+='</div>';}else{h+='<div style="padding:6px;text-align:center;font-size:11px;color:var(--up)">✅ '+(ar?'لا محظورة':'All clean')+'</div>';}
+  h+='<div style="font-weight:800;font-size:13px;color:var(--t1);margin:14px 0 8px">🏥 '+(ar?'النظام':'System')+'</div><div class="cd" style="padding:10px;font-size:11px">';
   h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--t2)">'+(ar?'عملات':'Coins')+'</span><span style="font-family:var(--fm);font-weight:700;color:var(--neon)">'+Object.keys(T).length+'</span></div>';
-  h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--t2)">FR / OI</span><span style="font-family:var(--fm);font-weight:700">'+Object.keys(FR).length+' / '+Object.keys(OI).length+'</span></div>';
-  h+='<div style="display:flex;justify-content:space-between;padding:5px 0"><span style="color:var(--t2)">'+(ar?'حد أدنى ثقة':'Min Confidence')+'</span><span style="font-family:var(--fm);font-weight:700;color:var(--warn)">'+ms.minConf+'%</span></div></div>';
-  /* Factor Weights */
-  h+='<div style="font-weight:800;font-size:13px;color:var(--t0);margin:10px 0 6px">⚖️ '+(ar?'أوزان العوامل':'Factor Weights')+'</div>';
-  h+='<div class="cd" style="padding:10px;margin-bottom:12px">';
-  var keys=Object.keys(ms.factorStats);
-  keys.sort(function(a,b){return(ms.factorStats[b].winRate||0)-(ms.factorStats[a].winRate||0)});
-  if(keys.length){
-    keys.forEach(function(key){
-      var f=ms.factorStats[key];var wr=f.winRate||0;
-      var wCol=wr>=70?'var(--up)':wr>=50?'var(--warn)':'var(--dn)';
-      var wt=ms.weights[key]||0;var defW=(typeof DEFAULT_WEIGHTS!=='undefined'&&DEFAULT_WEIGHTS[key])?DEFAULT_WEIGHTS[key]:1;
-      var wtChg=defW>0?Math.round((wt/defW-1)*100):0;
-      var wtCol=wtChg>0?'var(--up)':wtChg<0?'var(--dn)':'var(--t3)';
-      h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--bdr);font-size:11px">';
-      h+='<span style="font-weight:700;min-width:55px">'+key+'</span>';
-      h+='<span style="font-family:var(--fm);font-weight:700;color:'+wCol+'">'+wr+'%</span>';
-      h+='<span style="font-family:var(--fm);font-size:9px;color:var(--t3)">'+f.wins+'W/'+f.total+'T</span>';
-      h+='<span style="font-family:var(--fm);font-size:9px;color:'+wtCol+'">'+(wtChg>=0?'+':'')+wtChg+'%</span></div>';
-    });
-  }else{h+='<div style="color:var(--t3);font-size:11px;text-align:center;padding:8px">'+(ar?'لا بيانات بعد — تحتاج صفقات':'No data yet — need trades')+'</div>';}
-  h+='</div>';
-  /* Confidence Calibration */
-  h+='<div style="font-weight:800;font-size:13px;color:var(--t0);margin:10px 0 6px">📊 '+(ar?'معايرة الثقة':'Confidence Calibration')+'</div>';
-  h+='<div class="cd" style="padding:10px;margin-bottom:12px">';
-  var buckets=Object.keys(ms.confCalib).sort();
-  if(buckets.length){
-    buckets.forEach(function(b){
-      var c=ms.confCalib[b];var col=c.realRate>=65?'var(--up)':c.realRate>=45?'var(--warn)':'var(--dn)';
-      h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;font-size:11px;border-bottom:1px solid var(--bdr)">';
-      h+='<span style="color:var(--t2)">'+(ar?'ثقة ':'Conf ')+b+'%</span>';
-      h+='<span style="font-family:var(--fm);font-weight:700;color:'+col+'">'+(ar?'فعلياً ':'Actual ')+c.realRate+'%</span>';
-      h+='<span style="font-size:9px;color:var(--t3)">('+c.wins+'/'+c.total+')</span></div>';
-    });
-  }else{h+='<div style="color:var(--t3);font-size:11px;text-align:center;padding:8px">'+(ar?'تحتاج 5+ صفقات':'Need 5+ trades')+'</div>';}
-  h+='</div>';
-  /* Hour Stats */
-  h+='<div style="font-weight:800;font-size:13px;color:var(--t0);margin:10px 0 6px">🕐 '+(ar?'تحليل الساعات':'Hour Analysis')+'</div>';
-  h+='<div class="cd" style="padding:10px;margin-bottom:12px"><div style="display:flex;flex-wrap:wrap;gap:3px">';
-  for(var hr=0;hr<24;hr++){
-    var hs=ms.hourStats[String(hr)];var rate=hs?hs.rate:-1;
-    var bg=rate<0?'var(--bg2)':rate>=65?'rgba(0,255,136,.15)':rate>=45?'rgba(255,184,0,.15)':'rgba(255,56,96,.15)';
-    var col=rate<0?'var(--t3)':rate>=65?'var(--up)':rate>=45?'var(--warn)':'var(--dn)';
-    h+='<div style="width:28px;padding:4px 2px;background:'+bg+';border-radius:4px;text-align:center;font-size:7px"><div style="color:var(--t3)">'+String(hr).padStart(2,'0')+'</div><div style="font-weight:700;color:'+col+';font-family:var(--fm)">'+(rate>=0?rate+'%':'--')+'</div></div>';
-  }
-  h+='</div>';
-  if(perf.bestHour>=0){h+='<div style="font-size:10px;margin-top:6px;color:var(--t2)">'+(ar?'أفضل ساعة: ':'Best: ')+'<b style="color:var(--up)">'+perf.bestHour+':00</b>'+(perf.worstHour>=0?' — '+(ar?'أضعف: ':'Worst: ')+'<b style="color:var(--dn)">'+perf.worstHour+':00</b>':'')+'</div>';}
-  h+='</div>';
-  /* Coin Blacklist */
-  h+='<div style="font-weight:800;font-size:13px;color:var(--t0);margin:10px 0 6px">🚫 '+(ar?'العملات المحظورة':'Blacklisted Coins')+'</div>';
-  h+='<div class="cd" style="padding:10px;margin-bottom:12px">';
-  if(ms.coinBlacklist&&ms.coinBlacklist.length){
-    h+='<div style="display:flex;flex-wrap:wrap;gap:4px">';
-    ms.coinBlacklist.forEach(function(s){h+='<span style="padding:4px 10px;background:var(--dd);color:var(--dn);border-radius:6px;font-size:11px;font-weight:700">'+s+'</span>';});
-    h+='</div>';
-  }else{h+='<div style="color:var(--up);font-size:11px;text-align:center;padding:6px">✅ '+(ar?'لا عملات محظورة — كل شي نظيف':'No blacklisted coins — all clean')+'</div>';}
-  h+='</div>';
+  h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--t2)">FR/OI/LS</span><span style="font-family:var(--fm);font-weight:700">'+Object.keys(FR).length+'/'+Object.keys(OI).length+'/'+Object.keys(LS).length+'</span></div>';
+  h+='<div style="display:flex;justify-content:space-between;padding:5px 0"><span style="color:var(--t2)">'+(ar?'حد ثقة':'Min Conf')+'</span><span style="font-family:var(--fm);font-weight:700;color:var(--warn)">'+ms.minConf+'%</span></div></div>';
   el.innerHTML=h;
 }
 /* DASHBOARD */

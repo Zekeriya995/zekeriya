@@ -1774,11 +1774,18 @@ function openQA(page){
   document.querySelectorAll('.pg').forEach(function(p){p.classList.remove('act')});
   document.querySelectorAll('.bb').forEach(function(b){b.classList.remove('act')});
   var el=document.getElementById('pg-'+page);
-  if(el){el.classList.add('act')}
-  if(page==='heatmap')renderHeatmap();
-  if(page==='favs')renderFavs();
-  if(page==='alerts')renderAlerts();
-  if(page==='monitor')renderMonPanel();
+  if(!el)return;
+  el.classList.add('act');
+  el.style.display='block';
+  try{
+    if(page==='heatmap')renderHeatmap();
+    else if(page==='favs')renderFavs();
+    else if(page==='alerts')renderAlerts();
+    else if(page==='monitor')renderMonPanel();
+  }catch(e){
+    var cont=el.querySelector('[id]');
+    if(cont)cont.innerHTML='<div style="text-align:center;padding:20px;color:var(--t3);font-size:11px">⚠️ '+(lang==='ar'?'خطأ — حاول لاحقاً':'Error — try later')+'</div>';
+  }
   window.scrollTo({top:0});
 }
 function updateQACards(){

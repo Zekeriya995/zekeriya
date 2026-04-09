@@ -557,12 +557,12 @@ canvas{width:100%!important;border-radius:4px}
 <div class="srch" style="position:relative"><div class="srch-b"><span style="color:var(--t3)">🔍</span><input id="sInp" oninput="onSrch(this.value)"></div><div class="srch-r" id="sRes"></div></div>
 <div class="welcome-bar"><div class="welcome-txt" id="welcomeTxt">🚀 أهلاً وسهلاً في عالم الكريبتو مع زيكو — Welcome to the world of crypto with Ziko 🚀</div></div>
 
-<div class="pls-bar">
-<div class="pls-i">🏥 <span id="pMH" style="font-weight:700;color:var(--neon)">--</span>/100</div>
-<div class="pls-i">😰 <span id="pFG" style="font-weight:700;color:var(--warn)">--</span></div>
-<div class="pls-i">🔥 <span id="pBrk" style="font-weight:700;color:var(--dn)">0</span></div>
-<div class="pls-i">⭐ <span id="pUl" style="font-weight:700;color:var(--ultra)">0</span></div>
-<div class="pls-i">FR <span id="pFR" style="font-weight:700;color:var(--warn)">--</span></div>
+<!-- 🆕 Quick Access Cards — fixed at top -->
+<div class="qa-row" id="qaCards" style="padding:7px 12px">
+<div class="qa-card" onclick="openQA('heatmap')"><div class="qa-ic">🗺️</div><div class="qa-nm" data-t="qa_heatmap">خريطة حرارية</div><div class="qa-val" id="qaHM" style="color:var(--up)">--</div></div>
+<div class="qa-card" onclick="openQA('favs')"><div class="qa-ic">⭐</div><div class="qa-nm" data-t="qa_favs">المفضلات</div><div class="qa-val" id="qaFav" style="color:var(--warn)">0</div></div>
+<div class="qa-card" onclick="openQA('alerts')"><div class="qa-ic">🔔</div><div class="qa-nm" data-t="qa_alerts">تنبيهات</div><div class="qa-val" id="qaAlerts" style="color:var(--dn)">0</div></div>
+<div class="qa-card" onclick="openQA('monitor')"><div class="qa-ic">🤖</div><div class="qa-nm" data-t="qa_monitor">مراقب البيانات</div><div class="qa-val" id="qaMon" style="color:var(--neon)">--</div></div>
 </div>
 
 <div class="tkr"><div class="tkr-s" id="tkrEl">⏳</div></div>
@@ -572,13 +572,6 @@ canvas{width:100%!important;border-radius:4px}
 <!-- 🏠 HOME -->
 <div class="pg act" id="pg-dash">
 <div id="topCoins"></div>
-<!-- 🆕 Quick Access Cards -->
-<div class="qa-row" id="qaCards">
-<div class="qa-card" onclick="openQA('heatmap')"><div class="qa-ic">🗺️</div><div class="qa-nm" data-t="qa_heatmap">خريطة حرارية</div><div class="qa-val" id="qaHM" style="color:var(--up)">--</div></div>
-<div class="qa-card" onclick="openQA('favs')"><div class="qa-ic">⭐</div><div class="qa-nm" data-t="qa_favs">المفضلات</div><div class="qa-val" id="qaFav" style="color:var(--warn)">0</div></div>
-<div class="qa-card" onclick="openQA('alerts')"><div class="qa-ic">🔔</div><div class="qa-nm" data-t="qa_alerts">تنبيهات</div><div class="qa-val" id="qaAlerts" style="color:var(--dn)">0</div></div>
-<div class="qa-card" onclick="openQA('monitor')"><div class="qa-ic">🤖</div><div class="qa-nm" data-t="qa_monitor">مراقب البيانات</div><div class="qa-val" id="qaMon" style="color:var(--neon)">--</div></div>
-</div>
 <!-- 🎯 Top 3 -->
 <div style="display:flex;align-items:center;gap:8px;margin:14px 0 8px"><span style="font-size:20px">🎯</span><span style="font-family:var(--fd);font-weight:800;font-size:16px;color:#ffd700;text-shadow:0 0 12px rgba(255,215,0,.3)" data-t="top3">أفضل 3 فرص الآن</span></div>
 <div id="top3List"><div class="muted" data-t="scanning">جاري المسح...</div></div>
@@ -593,18 +586,18 @@ canvas{width:100%!important;border-radius:4px}
 
 <!-- 🗺️ HEATMAP PAGE -->
 <div class="pg" id="pg-heatmap">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-<span style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">🗺️ <span data-t="qa_heatmap">خريطة حرارية</span></span>
-<button class="rfr" onclick="sp('dash')" style="margin:0;width:auto;padding:6px 12px;font-size:9px">🔙</button>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+<span style="font-family:var(--fd);font-weight:800;font-size:16px;color:var(--t0)">🗺️ <span data-t="qa_heatmap">خريطة حرارية</span></span>
+<button onclick="sp('dash')" style="display:flex;align-items:center;gap:6px;padding:10px 18px;background:rgba(0,255,136,.06);border:1.5px solid rgba(0,255,136,.15);border-radius:12px;color:var(--up);font-weight:800;font-size:13px;cursor:pointer">← <span data-t="back">رجوع</span></button>
 </div>
 <div id="hmGrid"></div>
 </div>
 
 <!-- ⭐ FAVORITES PAGE -->
 <div class="pg" id="pg-favs">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-<span style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">⭐ <span data-t="qa_favs">المفضلات</span></span>
-<button class="rfr" onclick="sp('dash')" style="margin:0;width:auto;padding:6px 12px;font-size:9px">🔙</button>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+<span style="font-family:var(--fd);font-weight:800;font-size:16px;color:var(--t0)">⭐ <span data-t="qa_favs">المفضلات</span></span>
+<button onclick="sp('dash')" style="display:flex;align-items:center;gap:6px;padding:10px 18px;background:rgba(0,255,136,.06);border:1.5px solid rgba(0,255,136,.15);border-radius:12px;color:var(--up);font-weight:800;font-size:13px;cursor:pointer">← <span data-t="back">رجوع</span></button>
 </div>
 <div id="favList"></div>
 <div style="display:flex;gap:4px;margin-top:8px"><input class="mo-inp" id="favInp" placeholder="BTC, ETH..." style="flex:1;margin:0"><button class="rfr" onclick="addFav()" style="margin:0;width:auto;padding:9px 16px">➕</button></div>
@@ -612,18 +605,18 @@ canvas{width:100%!important;border-radius:4px}
 
 <!-- 🔔 ALERTS PAGE -->
 <div class="pg" id="pg-alerts">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-<span style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">🔔 <span data-t="qa_alerts">تنبيهات المنصة</span></span>
-<button class="rfr" onclick="sp('dash')" style="margin:0;width:auto;padding:6px 12px;font-size:9px">🔙</button>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+<span style="font-family:var(--fd);font-weight:800;font-size:16px;color:var(--t0)">🔔 <span data-t="qa_alerts">تنبيهات المنصة</span></span>
+<button onclick="sp('dash')" style="display:flex;align-items:center;gap:6px;padding:10px 18px;background:rgba(0,255,136,.06);border:1.5px solid rgba(0,255,136,.15);border-radius:12px;color:var(--up);font-weight:800;font-size:13px;cursor:pointer">← <span data-t="back">رجوع</span></button>
 </div>
 <div id="alertList"></div>
 </div>
 
 <!-- 🤖 MONITOR PAGE -->
 <div class="pg" id="pg-monitor">
-<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-<span style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">🤖 <span data-t="qa_monitor">مراقب البيانات</span></span>
-<button class="rfr" onclick="sp('dash')" style="margin:0;width:auto;padding:6px 12px;font-size:9px">🔙</button>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+<span style="font-family:var(--fd);font-weight:800;font-size:16px;color:var(--t0)">🤖 <span data-t="qa_monitor">مراقب البيانات</span></span>
+<button onclick="sp('dash')" style="display:flex;align-items:center;gap:6px;padding:10px 18px;background:rgba(0,255,136,.06);border:1.5px solid rgba(0,255,136,.15);border-radius:12px;color:var(--up);font-weight:800;font-size:13px;cursor:pointer">← <span data-t="back">رجوع</span></button>
 </div>
 <div id="monPanel"></div>
 <button class="rfr" onclick="runValidator().then(function(){renderMonPanel()})">🔍 <span data-t="refresh">فحص يدوي</span></button>

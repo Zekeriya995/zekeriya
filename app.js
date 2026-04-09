@@ -731,24 +731,23 @@ function renderAdminPanel() {
 let cache={scan:null,scanTime:0,whale:null,whaleTime:0,fr:null,frTime:0};
 const CACHE_TTL=60000;
 const TR={nav_home:{ar:'الرئيسية',en:'Home'},nav_scan:{ar:'السكانر',en:'Scanner'},nav_whale:{ar:'حيتان',en:'Whales'},nav_ind:{ar:'مؤشرات',en:'Indicators'},nav_me:{ar:'حسابي',en:'Profile'},breakout:{ar:'بداية صعود',en:'Rising'},whales:{ar:'شراء حيتان',en:'Whale Buying'},scanning:{ar:'جاري المسح...',en:'Scanning...'},all:{ar:'الكل',en:'All'},full_scan:{ar:'مسح شامل',en:'Full Scan'},refresh:{ar:'تحديث',en:'Refresh'},total:{ar:'إجمالي',en:'Total'},buying:{ar:'شراء',en:'Buying'},selling:{ar:'بيع',en:'Selling'},success:{ar:'النجاح',en:'Success'},portfolio:{ar:'المحفظة',en:'Portfolio'},risk_calc:{ar:'حاسبة المخاطر',en:'Risk Calc'},alerts:{ar:'تنبيهات',en:'Alerts'},add_coins:{ar:'أضف عملات',en:'Add coins'},add_coin:{ar:'إضافة عملة',en:'Add Coin'},add:{ar:'إضافة',en:'Add'},cancel:{ar:'إلغاء',en:'Cancel'},back:{ar:'رجوع',en:'Back'},capital:{ar:'رأس المال',en:'Capital'},risk_pct:{ar:'المخاطرة',en:'Risk'},entry_price:{ar:'سعر الدخول',en:'Entry'},enter_data:{ar:'ادخل البيانات',en:'Enter data'},search_ph:{ar:'ابحث عن أي عملة...',en:'Search any coin...'},no_ultra:{ar:'لا ULTRA حالياً',en:'No ULTRA'},no_whale:{ar:'لا تجميع حيتان',en:'No whales'},confirmed:{ar:'مؤكدة',en:'Confirmed'},buy_strong:{ar:'شراء قوي',en:'Strong Buy'},buy:{ar:'شراء',en:'Buy'},sell:{ar:'بيع',en:'Sell'},hold:{ar:'انتظار',en:'Hold'},risk_amt:{ar:'💰 المخاطرة',en:'💰 Risk'},pos_size:{ar:'📦 الحجم',en:'📦 Size'},pos_val:{ar:'💵 القيمة',en:'💵 Value'},leverage:{ar:'📊 الرافعة',en:'📊 Leverage'},exp_profit:{ar:'🎯 الربح',en:'🎯 Profit'},sl_loss:{ar:'🛑 الخسارة',en:'🛑 Loss'},no_data:{ar:'لا بيانات',en:'No data'},empty_port:{ar:'فارغة',en:'Empty'},market_health:{ar:'🏥 صحة السوق',en:'🏥 Market Health'},smart_warn:{ar:'تحذيرات ذكية',en:'Smart Warnings'},sec_accuracy:{ar:'📈 نسبة النجاح',en:'📈 Accuracy'},scan_desc:{ar:'صيد مبكر — 6 فحوصات — 🏆 Top 100 Focus','en':'Early detection — 6 checks — 🏆 Top 100 Focus'},days:{ar:'يوم',en:'days'},today:{ar:'اليوم!',en:'Today!'},instant:{ar:'فوري',en:'Instant'},strong_signal:{ar:'شراء/بيع قوي',en:'Strong signal'},before_unlock:{ar:'قبل الفك',en:'Before unlock'},gems:{ar:'جواهر',en:'Gems'},gem_desc:{ar:'💎 عملات صغيرة بحركة غير عادية — فرص أرباح كبيرة',en:'💎 Small caps with unusual moves — big profit potential'},wl_desc:{ar:'👁 أضف عملات لمراقبتها 24/7',en:'👁 Add coins to watch 24/7'},stable_flow:{ar:'حركة الأموال',en:'Money Flow'},sf_index:{ar:'مؤشر التدفق',en:'Flow Index'},sf_buy:{ar:'شراء كريبتو',en:'Buying Crypto'},sf_sell:{ar:'بيع كريبتو',en:'Selling Crypto'},sf_neutral:{ar:'متوازن',en:'Balanced'},online:{ar:'متصل',en:'online'},settings:{ar:'الإعدادات',en:'Settings'},profile:{ar:'👤 الملف الشخصي',en:'👤 Profile'},general:{ar:'⚙️ عام',en:'⚙️ General'},language:{ar:'اللغة',en:'Language'},theme:{ar:'الثيم',en:'Theme'},sound:{ar:'الصوت',en:'Sound'},tone:{ar:'🔔 نغمة الإشعار',en:'🔔 Notification Tone'},t_bell:{ar:'جرس',en:'Bell'},t_horn:{ar:'بوق',en:'Horn'},t_pulse:{ar:'نبض',en:'Pulse'},t_silent:{ar:'صامت',en:'Silent'},about:{ar:'عن المنصة',en:'About'},clear_data:{ar:'مسح البيانات',en:'Clear Data'},mkt_dir:{ar:'اتجاه السوق',en:'Market Direction'},mkt_dir_sub:{ar:'تقرير مفصل — BTC & ETH — كل 4 ساعات',en:'Detailed Report — BTC & ETH — Every 4h'},nav_market:{ar:'حركة السوق',en:'Market'},top3:{ar:'أفضل 3 فرص الآن',en:'Top 3 Opportunities Now'},scan_trade:{ar:'صفقات مضاربة',en:'Trading'},scan_trend:{ar:'ترند القطاعات',en:'Sector Trends'},scan_gems:{ar:'صيد الجواهر',en:'Gem Hunter'},scan_all:{ar:'الكل',en:'All'},scan_fast:{ar:'⚡ سريع',en:'⚡ Fast'},scan_daily:{ar:'📊 يومي',en:'📊 Daily'},scan_early:{ar:'🟢 مبكر',en:'🟢 Early'},scan_still:{ar:'🟡 فرصة',en:'🟡 Still'},scan_late:{ar:'🔴 متأخر',en:'🔴 Late'},scan_signals:{ar:'إشارة',en:'signals'},scan_sectors:{ar:'قطاعات',en:'sectors'},scan_gems_found:{ar:'جواهر مكتشفة',en:'gems found'},scan_updated:{ar:'آخر تحديث',en:'Updated'},scan_enter:{ar:'▶ ادخل',en:'▶ Enter'},scan_chart:{ar:'📈 شارت',en:'📈 Chart'},scan_duration:{ar:'مدة متوقعة',en:'Duration'},scan_warn_small:{ar:'⚠️ ربح عالي + مخاطرة عالية — لا تدخل أكثر من 5% من رأس مالك!',en:'⚠️ High profit + High risk — max 5% of capital!'},mkt_daily:{ar:'تحليل يومي',en:'Daily Analysis'},mkt_full:{ar:'تقرير شامل',en:'Full Report'},mkt_hourly:{ar:'كل ساعة',en:'Hourly'},mkt_4h:{ar:'كل 4 ساعات — 12 طبقة',en:'Every 4h — 12 layers'},mkt_fresh:{ar:'بيانات طازجة',en:'Fresh data'},mkt_stale:{ar:'بيانات قديمة — حدّث!',en:'Stale — Refresh!'}};
-const t=k=>TR[k]?TR[k][lang]:(k||'');
-const fmt=n=>{if(n>=1e9)return'$'+(n/1e9).toFixed(1)+'B';if(n>=1e6)return'$'+(n/1e6).toFixed(1)+'M';if(n>=1e3)return'$'+(n/1e3).toFixed(1)+'K';return'$'+n.toFixed(0)};
-const fP=p=>{if(!p||isNaN(p))return'$0';if(p>=1e3)return'$'+p.toLocaleString('en',{maximumFractionDigits:2});if(p>=1)return'$'+p.toFixed(2);if(p>=.01)return'$'+p.toFixed(4);return'$'+p.toFixed(6)};
-const safeC=c=>{return(c&&!isNaN(c))?c:0}; /* NaN-safe change % */
-const fj=async u=>{try{var c=new AbortController();var tm=setTimeout(function(){c.abort()},8000);var t0=Date.now();var r=await fetch(u,{signal:c.signal});clearTimeout(tm);connMetrics.lastLatency=Date.now()-t0;if(!r.ok){connMetrics.apiFail++;throw 0}connMetrics.apiOk++;return r.json()}catch(e){connMetrics.apiFail++;return null}};
+function t(k){return TR[k]?TR[k][lang]:(k||'')}
+function fmt(n){if(n>=1e9)return'$'+(n/1e9).toFixed(1)+'B';if(n>=1e6)return'$'+(n/1e6).toFixed(1)+'M';if(n>=1e3)return'$'+(n/1e3).toFixed(1)+'K';return'$'+n.toFixed(0)}
+function fP(p){if(!p||isNaN(p))return'$0';if(p>=1e3)return'$'+p.toLocaleString('en',{maximumFractionDigits:2});if(p>=1)return'$'+p.toFixed(2);if(p>=.01)return'$'+p.toFixed(4);return'$'+p.toFixed(6)}
+function safeC(c){return(c&&!isNaN(c))?c:0} /* NaN-safe change % */
+async function fj(u){try{var c=new AbortController();var tm=setTimeout(function(){c.abort()},8000);var t0=Date.now();var r=await fetch(u,{signal:c.signal});clearTimeout(tm);connMetrics.lastLatency=Date.now()-t0;if(!r.ok){connMetrics.apiFail++;throw 0}connMetrics.apiOk++;return r.json()}catch(e){connMetrics.apiFail++;return null}}
 function calcRSI(c,p){p=p||14;if(c.length<p+1)return 50;var g=0,l=0;for(var i=c.length-p;i<c.length;i++){var d=c[i]-c[i-1];if(d>0)g+=d;else l+=Math.abs(d)}return 100-100/(1+g/Math.max(l,.001))}
 function calcMACD(c){if(c.length<26)return{h:0,signal:0,cross:'none'};var ema=function(d,p){var k=2/(p+1),e=d[0];for(var i=1;i<d.length;i++)e=d[i]*k+e*(1-k);return e};var macdLine=ema(c.slice(-12),12)-ema(c,26);var macdHist=[];for(var i=26;i<=c.length;i++){macdHist.push(ema(c.slice(i-12,i),12)-ema(c.slice(0,i),26))}var signal=macdHist.length>=9?ema(macdHist.slice(-9),9):macdLine;var prev=macdHist.length>=2?macdHist[macdHist.length-2]:0;var cross=macdLine>signal&&prev<=signal?'bull':macdLine<signal&&prev>=signal?'bear':'none';return{h:macdLine,signal:signal,cross:cross}}
 function timeAgo(ts){var d=Date.now()-ts,m=Math.floor(d/60000),h=Math.floor(d/3600000);if(m<2)return{text:lang==='ar'?'🆕 الآن':'🆕 Now',cls:'fresh'};if(m<60)return{text:lang==='ar'?'منذ '+m+' دقيقة':m+'m ago',cls:'fresh'};return{text:lang==='ar'?'منذ '+h+' ساعة':h+'h ago',cls:h<6?'':'old'}}
 function timeBadge(ts){var a=timeAgo(ts);return'<span class="time-badge '+a.cls+'">⏱ '+a.text+'</span>'}
-function recSig(sym,type){var k=sym+'_'+type;if(!sigHist[k])sigHist[k]=Date.now();localStorage.setItem('nxsig10',JSON.stringify(sigHist));return sigHist[k]}
+function recSig(sym,type){var k=sym+'_'+type;if(!sigHist[k])sigHist[k]=Date.now();try{localStorage.setItem('nxsig10',JSON.stringify(sigHist))}catch(e){};return sigHist[k]}
 function getSigTime(sym,type){return sigHist[sym+'_'+type]||Date.now()}
 /* NOTIFICATION HISTORY */
 var notifHist=[];try{notifHist=JSON.parse(localStorage.getItem('nxnh10')||'[]')}catch(e){}
-function addNotifHist(icon,sym,type,body){notifHist.unshift({icon:icon,sym:sym,type:type,body:body,time:Date.now()});if(notifHist.length>50)notifHist=notifHist.slice(0,50);localStorage.setItem('nxnh10',JSON.stringify(notifHist))}
+function addNotifHist(icon,sym,type,body){notifHist.unshift({icon:icon,sym:sym,type:type,body:body,time:Date.now()});if(notifHist.length>50)notifHist=notifHist.slice(0,50);try{localStorage.setItem('nxnh10',JSON.stringify(notifHist))}catch(e){}}
 function renderNotifHist(){var el=document.getElementById('notifHistList');if(!el)return;el.innerHTML=notifHist.length?notifHist.slice(0,20).map(function(n){return'<div class="al-i" style="cursor:pointer" onclick="openCoin(\''+n.sym+'\')"><div class="al-l"><div style="font-size:18px">'+n.icon+'</div><div><div style="font-weight:600;font-size:11px">'+n.sym+' — '+n.type+'</div><div style="font-size:8px;color:var(--t3)">'+n.body+'</div></div></div><div style="font-size:8px;font-family:var(--fm);color:var(--t2)">'+timeBadge(n.time)+'</div></div>'}).join(''):'<div class="empty"><div class="empty-ic">🔔</div><div class="empty-tx">'+(lang==='ar'?'لا إشعارات':'No notifications')+'</div></div>'}
 /* WATCHLIST ALERTS — check every update */
-function checkWatchlistAlerts(){var wl=JSON.parse(localStorage.getItem('nxwl10')||'[]');wl.forEach(function(sym){var d=T[sym];if(!d)return;if(d.c>=5){var k='wl_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;localStorage.setItem('nxnot10',JSON.stringify(notifiedSet));playSound('whale');showPopup('👁',sym+' — '+(lang==='ar'?'عملة مراقبة تحركت!':'Watchlist coin moved!'),'+'+d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('👁',sym,'Watchlist','+'+d.c.toFixed(1)+'%')}}if(d.c<=-5){var k='wl_dn_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;localStorage.setItem('nxnot10',JSON.stringify(notifiedSet));playSound('whale');showPopup('⚠️',sym+' — '+(lang==='ar'?'عملة مراقبة هبطت!':'Watchlist coin dropped!'),d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('⚠️',sym,'Watchlist Drop',d.c.toFixed(1)+'%')}}})}
-/* SOUND NOTIFICATIONS — respects user tone preference */
+function checkWatchlistAlerts(){var wl=[];try{wl=JSON.parse(localStorage.getItem('nxwl10')||'[]')}catch(e){};wl.forEach(function(sym){var d=T[sym];if(!d)return;if(d.c>=5){var k='wl_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};playSound('whale');showPopup('👁',sym+' — '+(lang==='ar'?'عملة مراقبة تحركت!':'Watchlist coin moved!'),'+'+d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('👁',sym,'Watchlist','+'+d.c.toFixed(1)+'%')}}if(d.c<=-5){var k='wl_dn_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};playSound('whale');showPopup('⚠️',sym+' — '+(lang==='ar'?'عملة مراقبة هبطت!':'Watchlist coin dropped!'),d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('⚠️',sym,'Watchlist Drop',d.c.toFixed(1)+'%')}}})}/* SOUND NOTIFICATIONS — respects user tone preference */
 function playSound(type){if(!soundEnabled||soundPref==='silent')return;previewTone(soundPref)}
 /* 📲 TELEGRAM — SECURE PROXY (no token exposed!) */
 var TG_PROXY='https://your-nexus-proxy.workers.dev/notify';
@@ -809,22 +808,24 @@ function notify(sym,type,score,extra){var k=sym+'_'+type+'_'+new Date().getHours
   else if(type==='whale'){showPopup('🐋',sym+' — '+(lang==='ar'?'تجميع حيتان!':'Whale detected!'),(lang==='ar'?'نشاط غير عادي':'Unusual activity'));addNotifHist('🐋',sym,lang==='ar'?'حوت':'Whale',fP(T[sym]?T[sym].p:0));tgNotify(sym,'whale',{});if(T[sym])openTrade(sym,T[sym].p,'whale',score)}
   else if(type==='gem'){showPopup('💎',sym+' — '+(lang==='ar'?'جوهرة مكتشفة!':'Gem found!'),(lang==='ar'?'عملة صغيرة بحركة قوية':'Small cap with strong move'));addNotifHist('💎',sym,lang==='ar'?'جوهرة':'Gem','+'+(T[sym]?T[sym].c.toFixed(1):0)+'%');tgNotify(sym,'gem',{});if(T[sym])openTrade(sym,T[sym].p,'gem',score)}}
 /* LANG/THEME/NAV */
-function togLang(){lang=lang==='ar'?'en':'ar';localStorage.setItem('nxlang',lang);document.documentElement.lang=lang;document.documentElement.dir=lang==='ar'?'rtl':'ltr';document.body.dataset.lang=lang;document.getElementById('sInp').placeholder=t('search_ph');document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(TR[k])el.textContent=TR[k][lang]});updateMenuLang()}
-function togTh(){var d=document.body.dataset.theme==='dark'?'light':'dark';document.body.dataset.theme=d;if(tg){tg.setHeaderColor(d==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(d==='dark'?'#020408':'#f0f4f8')}localStorage.setItem('nxt10',d);updateMenuTheme()}
+function togLang(){lang=lang==='ar'?'en':'ar';try{localStorage.setItem('nxlang',lang)}catch(e){};document.documentElement.lang=lang;document.documentElement.dir=lang==='ar'?'rtl':'ltr';document.body.dataset.lang=lang;var sI=document.getElementById('sInp');if(sI)sI.placeholder=t('search_ph');document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(TR[k])el.textContent=TR[k][lang]});updateMenuLang()}
+function togTh(){var d=document.body.dataset.theme==='dark'?'light':'dark';document.body.dataset.theme=d;if(tg){try{tg.setHeaderColor(d==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(d==='dark'?'#020408':'#f0f4f8')}catch(e){}}try{localStorage.setItem('nxt10',d)}catch(e){};updateMenuTheme()}
+function setLang(l){lang=l;try{localStorage.setItem('nxlang',lang)}catch(e){};document.documentElement.lang=lang;document.documentElement.dir=lang==='ar'?'rtl':'ltr';document.body.dataset.lang=lang;var sI=document.getElementById('sInp');if(sI)sI.placeholder=t('search_ph');document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(TR[k])el.textContent=TR[k][lang]});updateMenuLang()}
+function setTheme(d){document.body.dataset.theme=d;if(tg){try{tg.setHeaderColor(d==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(d==='dark'?'#020408':'#f0f4f8')}catch(e){}}try{localStorage.setItem('nxt10',d)}catch(e){};updateMenuTheme()}
 /* SIDEBAR MENU */
 function toggleMenu(){document.getElementById('sideMenu').classList.toggle('open');document.getElementById('sideOverlay').classList.toggle('open')}
 /* PROFILE */
 var userProfile={};try{userProfile=JSON.parse(localStorage.getItem('nxprof10')||'{}')}catch(e){}
 function loadProfile(){if(userProfile.name)document.getElementById('userName').value=userProfile.name;if(userProfile.nick)document.getElementById('userNick').value=userProfile.nick;var av=document.getElementById('sideAvatar');if(userProfile.name)av.textContent=userProfile.name.charAt(0).toUpperCase();else av.textContent='👤'}
-function saveProfile(){userProfile.name=document.getElementById('userName').value;userProfile.nick=document.getElementById('userNick').value;localStorage.setItem('nxprof10',JSON.stringify(userProfile));var av=document.getElementById('sideAvatar');if(userProfile.name)av.textContent=userProfile.name.charAt(0).toUpperCase()}
+function saveProfile(){userProfile.name=document.getElementById('userName').value;userProfile.nick=document.getElementById('userNick').value;try{localStorage.setItem('nxprof10',JSON.stringify(userProfile))}catch(e){};var av=document.getElementById('sideAvatar');if(userProfile.name)av.textContent=userProfile.name.charAt(0).toUpperCase()}
 /* MENU STATE SYNC */
 function updateMenuLang(){var isAr=lang==='ar';document.getElementById('sLangAr').classList.toggle('act',isAr);document.getElementById('sLangEn').classList.toggle('act',!isAr)}
 function updateMenuTheme(){var isDark=document.body.dataset.theme==='dark';document.getElementById('sThDark').classList.toggle('act',isDark);document.getElementById('sThLight').classList.toggle('act',!isDark)}
 /* SOUND PREFERENCES */
-var soundPref=localStorage.getItem('nxsnd10')||'bell';
-var soundEnabled=localStorage.getItem('nxsndon10')!=='off';
-function saveSoundPref(){soundEnabled=document.getElementById('tglSound').classList.contains('on');localStorage.setItem('nxsndon10',soundEnabled?'on':'off')}
-function selTone(el){document.querySelectorAll('.tone-opt').forEach(function(o){o.classList.remove('act')});el.classList.add('act');soundPref=el.dataset.tone;localStorage.setItem('nxsnd10',soundPref);previewTone(soundPref)}
+var soundPref='bell';try{soundPref=localStorage.getItem('nxsnd10')||'bell'}catch(e){}
+var soundEnabled=true;try{soundEnabled=localStorage.getItem('nxsndon10')!=='off'}catch(e){}
+function saveSoundPref(){var el=document.getElementById('tglSound');if(el)soundEnabled=el.classList.contains('on');try{localStorage.setItem('nxsndon10',soundEnabled?'on':'off')}catch(e){}}
+function selTone(el){document.querySelectorAll('.tone-opt').forEach(function(o){o.classList.remove('act')});el.classList.add('act');soundPref=el.dataset.tone;try{localStorage.setItem('nxsnd10',soundPref)}catch(e){};previewTone(soundPref)}
 function previewTone(tone){if(tone==='silent')return;try{var ac=new(window.AudioContext||window.webkitAudioContext)();var osc=ac.createOscillator();var gain=ac.createGain();osc.connect(gain);gain.connect(ac.destination);
   if(tone==='bell'){osc.frequency.value=880;osc.type='sine';gain.gain.value=0.3;osc.start();osc.stop(ac.currentTime+0.15);setTimeout(function(){var o2=ac.createOscillator();var g2=ac.createGain();o2.connect(g2);g2.connect(ac.destination);g2.gain.value=0.3;o2.frequency.value=1100;o2.type='sine';o2.start();o2.stop(ac.currentTime+0.15)},180)}
   else if(tone==='horn'){osc.frequency.value=440;osc.type='sawtooth';gain.gain.value=0.35;osc.start();osc.stop(ac.currentTime+0.4)}
@@ -832,7 +833,7 @@ function previewTone(tone){if(tone==='silent')return;try{var ac=new(window.Audio
   }catch(e){}}
 function loadToneUI(){var opts=document.querySelectorAll('.tone-opt');opts.forEach(function(o){o.classList.remove('act');if(o.dataset.tone===soundPref)o.classList.add('act')});if(!soundEnabled)document.getElementById('tglSound').classList.remove('on')}
 /* Active users removed */
-(function(){if(localStorage.getItem('nxt10')==='light'){document.body.dataset.theme='light'};if(lang==='en')togLang()})();
+(function(){try{if(localStorage.getItem('nxt10')==='light'){document.body.dataset.theme='light'}}catch(e){};if(lang==='en')togLang()})();
 document.querySelectorAll('.bb').forEach(function(b){b.onclick=function(){sp(b.dataset.p)}});
 function sp(id){document.querySelectorAll('.pg').forEach(function(p){p.classList.remove('act')});document.querySelectorAll('.bb').forEach(function(b){b.classList.remove('act')});var el=document.getElementById('pg-'+id);if(el)el.classList.add('act');document.querySelectorAll('[data-p="'+id+'"]').forEach(function(b){b.classList.add('act')});if(id==='scan')scanTab(curScanTab,document.querySelector('#pg-scan .big-tab.act'));if(id==='whale')loadWhales();if(id==='ind')loadInd();if(id==='me')renderPort();if(id==='market')loadMarket();window.scrollTo({top:0})}
 function openMo(id){document.getElementById(id).classList.add('show')}
@@ -845,7 +846,8 @@ function pTab(i,btn){document.getElementById('pg-me').querySelectorAll('.big-tab
 function renderMyTrades(){
   var el=document.getElementById('myTradesPanel');if(!el)return;var ar=lang==='ar';var h='';
   h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:0 0 8px">📋 '+(ar?'صفقات مفتوحة':'Open Trades')+'</div>';
-  if(typeof openTrades!=='undefined'&&openTrades.length){
+  var openTrades=activeTrades.filter(function(x){return x.status==='OPEN'});
+  if(openTrades.length){
     openTrades.forEach(function(tr){
       var d=T[tr.sym];var cp=d?d.p:0;var pnl=tr.entry>0?((cp-tr.entry)/tr.entry*100):0;if(tr.type==='SHORT')pnl=-pnl;
       var pCol=pnl>=0?'var(--up)':'var(--dn)';
@@ -861,7 +863,7 @@ function renderMyTrades(){
   var logs=typeof factorLog!=='undefined'?factorLog.slice(-15).reverse():[];
   if(logs.length){
     logs.forEach(function(lg){
-      var isWin=lg.result==='win'||lg.result==='partial';
+      var isWin=lg.outcome==='win'||lg.outcome==='partial';
       h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--bdr);font-size:11px">';
       h+='<span style="font-weight:700;min-width:40px">'+lg.sym+'</span>';
       h+='<span style="color:'+(isWin?'var(--up)':'var(--dn)')+';font-weight:700">'+(isWin?'✅ '+(ar?'ربح':'Win'):'❌ '+(ar?'خسارة':'Loss'))+'</span>';
@@ -988,9 +990,10 @@ async function loadSmallCaps2(){if(!Object.keys(T).length)await loadTk();var can
   var proms=cands.slice(0,25).map(function(e){var s=e[0];return fj(BN+'/klines?symbol='+s+'USDT&interval=1h&limit=12').then(function(kl){if(!kl||kl.length<6)return;var vols=kl.map(function(k){return+k[5]});var cls=kl.map(function(k){return+k[4]});var avgV=vols.slice(0,-2).reduce(function(a,b){return a+b},0)/Math.max(1,vols.length-2);var recV=(vols[vols.length-1]+vols[vols.length-2])/2;var vx=avgV>0?recV/avgV:1;
     var sI=vols.length-1;for(var i=vols.length-1;i>=1;i--){if(vols[i]>avgV*1.5)sI=i;else break}var pS=+kl[sI][1];var pN=cls[cls.length-1];var gain=pS>0?((pN-pS)/pS*100):0;
     var timing,tBadge;if(gain<3){timing='early';tBadge={ic:'🟢',l:lang==='ar'?'مبكر — ادخل!':'Early — Enter!',col:'var(--up)'}}else if(gain<8){timing='still';tBadge={ic:'🟡',l:lang==='ar'?'فيه فرصة — حذر':'Still time — Caution',col:'var(--warn)'}}else{timing='late';tBadge={ic:'🔴',l:lang==='ar'?'متأخر — راقب':'Late — Watch',col:'var(--dn)'}}
-    var sc=0;if(vx>=4)sc+=45;else if(vx>=3)sc+=40;else if(vx>=2)sc+=30;else if(vx>=1.5)sc+=15;if(timing==='early')sc+=30;else if(timing==='still')sc+=15;if(T[s].c>0&&T[s].c<3)sc+=20;else if(T[s].c>=3&&T[s].c<8)sc+=10;
+    var _d=T[s];if(!_d)return;
+    var sc=0;if(vx>=4)sc+=45;else if(vx>=3)sc+=40;else if(vx>=2)sc+=30;else if(vx>=1.5)sc+=15;if(timing==='early')sc+=30;else if(timing==='still')sc+=15;if(_d.c>0&&_d.c<3)sc+=20;else if(_d.c>=3&&_d.c<8)sc+=10;
     var target=timing!=='late'?pN*(timing==='early'?1.30:1.25):null;var stop=timing!=='late'?pN*(timing==='early'?0.90:0.88):null;
-    if(sc>=25)res.push({s:s,p:T[s].p,c:T[s].c,v:T[s].v,vx:vx,gain:gain,timing:timing,tBadge:tBadge,sc:sc,target:target,stop:stop})}).catch(function(){})});
+    if(sc>=25)res.push({s:s,p:_d.p,c:_d.c,v:_d.v,vx:vx,gain:gain,timing:timing,tBadge:tBadge,sc:sc,target:target,stop:stop})}).catch(function(){})});
   await Promise.all(proms);res.sort(function(a,b){return b.sc-a.sc});return res}
 function filterSmall(f,btn){curSmallFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadSmallCapsUI()}
 function renderSmallCaps(res){var f=res;if(curSmallFilter!=='all')f=res.filter(function(x){return x.timing===curSmallFilter});
@@ -1027,6 +1030,8 @@ function initLiqWS(){
     if(!liquidationData[sym])liquidationData[sym]=[];
     liquidationData[sym].push({side:o.S,value:val,price:+o.p,time:Date.now()});
     if(liquidationData[sym].length>50)liquidationData[sym]=liquidationData[sym].slice(-50);
+    liqEvents.push({s:o.s,S:o.S,p:+o.p,q:+o.q,time:Date.now()});
+    if(liqEvents.length>100)liqEvents=liqEvents.slice(-100);
     if(val>=200000){var ic=o.S==='BUY'?'💥':'🔻';var lb=o.S==='BUY'?(lang==='ar'?'Short تصفّى!':'Short liquidated!'):(lang==='ar'?'Long تصفّى!':'Long liquidated!');
       showPopup(ic,sym+' — '+lb,'$'+fmt(val));addNotifHist(ic,sym,'Liquidation','$'+fmt(val))}}catch(ex){}};
   wsLiq.onclose=function(){setTimeout(initLiqWS,5000)};wsLiq.onerror=function(){wsLiq.close()}}
@@ -1040,10 +1045,10 @@ var onChainData={};
 async function fetchOnChainBTC(){try{var data=await fj('https://mempool.space/api/mempool/recent');if(!data||!data.length)return;var whale=data.filter(function(tx){return tx.fee>50000});onChainData.BTC={count:whale.length,time:Date.now(),signal:whale.length>=3?'WHALE_RUSH':whale.length>=1?'MODERATE':'LOW'}}catch(e){}}
 /* ═══ 👛 FEATURE 3: WALLET TRACKING ═══ */
 var trackedWallets=[];try{trackedWallets=JSON.parse(localStorage.getItem('nxwallets')||'[]')}catch(e){}
-function addWallet(addr,label){if(trackedWallets.length>=20||trackedWallets.some(function(w){return w.address===addr}))return false;trackedWallets.push({address:addr,label:label||addr.slice(0,10),chain:'ethereum',lastBal:null,lastChk:0});localStorage.setItem('nxwallets',JSON.stringify(trackedWallets));return true}
-function rmWallet(i){trackedWallets.splice(i,1);localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}
+function addWallet(addr,label){if(trackedWallets.length>=20||trackedWallets.some(function(w){return w.address===addr}))return false;trackedWallets.push({address:addr,label:label||addr.slice(0,10),chain:'ethereum',lastBal:null,lastChk:0});try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){};return true}
+function rmWallet(i){trackedWallets.splice(i,1);try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){}}
 window.addWallet=addWallet;window.rmWallet=rmWallet;
-async function checkWallets(){for(var i=0;i<trackedWallets.length;i++){var w=trackedWallets[i];if(Date.now()-w.lastChk<60000)continue;try{var res=await fj('https://api.etherscan.io/api?module=account&action=balance&address='+w.address+'&tag=latest');if(res&&res.result){var bal=+res.result/1e18;if(w.lastBal!==null){var chg=bal-w.lastBal;var pct=w.lastBal>0?(chg/w.lastBal)*100:0;if(Math.abs(pct)>5){var ic=chg>0?'📥':'📤';showPopup(ic,w.label+(chg>0?' received':' sent'),Math.abs(chg).toFixed(2)+' ETH');addNotifHist(ic,w.label,'Wallet',pct.toFixed(1)+'%')}}w.lastBal=bal;w.lastChk=Date.now()}}catch(e){}await new Promise(function(r){setTimeout(r,6000)})}localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}
+async function checkWallets(){for(var i=0;i<trackedWallets.length;i++){var w=trackedWallets[i];if(Date.now()-w.lastChk<60000)continue;try{var res=await fj('https://api.etherscan.io/api?module=account&action=balance&address='+w.address+'&tag=latest');if(res&&res.result){var bal=+res.result/1e18;if(w.lastBal!==null){var chg=bal-w.lastBal;var pct=w.lastBal>0?(chg/w.lastBal)*100:0;if(Math.abs(pct)>5){var ic=chg>0?'📥':'📤';showPopup(ic,w.label+(chg>0?' received':' sent'),Math.abs(chg).toFixed(2)+' ETH');addNotifHist(ic,w.label,'Wallet',pct.toFixed(1)+'%')}}w.lastBal=bal;w.lastChk=Date.now()}}catch(e){}await new Promise(function(r){setTimeout(r,6000)})}try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){}}
 /* ═══ 🔓 FEATURE 4: TOKEN UNLOCK ═══ */
 var unlockCache={};
 async function checkUnlocks(){try{var coins=['ARB','OP','SUI','SEI','TIA','APT','INJ'];for(var i=0;i<coins.length;i++){var sym=coins[i];var d=T[sym];if(!d)continue;/* Check known unlock schedules — manual fallback */}}catch(e){}}
@@ -1168,8 +1173,8 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,30);
 function calcHealth(){var sc=0,f=[];sc+=fgValue<25?5:fgValue<40?10:fgValue<60?15:fgValue<75?18:12;f.push({l:'Fear/Greed',v:fgValue,c:fgValue<30?'dn':fgValue>70?'up':'warn'});sc+=btcDom>60?8:btcDom>50?12:btcDom>40?15:10;f.push({l:'BTC Dom',v:btcDom.toFixed(1)+'%',c:btcDom>55?'warn':'neon'});var bk=Object.values(T).filter(function(x){return x.c>=8}).length;sc+=bk>20?15:bk>10?12:bk>5?10:5;f.push({l:lang==='ar'?'انفجارات':'Breakouts',v:bk,c:bk>15?'up':bk>5?'warn':'dn'});var rs=Object.values(T).filter(function(x){return x.c>0}).length,tt=Object.keys(T).length,bp=tt>0?Math.round(rs/tt*100):50;sc+=bp>60?15:bp>45?10:5;f.push({l:lang==='ar'?'صاعدة':'Bullish',v:bp+'%',c:bp>60?'up':bp>40?'warn':'dn'});var af=Object.values(FR).reduce(function(s,x){return s+x.rate},0)/Math.max(1,Object.keys(FR).length);sc+=af>0.05?5:af>0.02?10:af<-0.01?18:15;f.push({l:'Avg FR',v:(af>=0?'+':'')+af.toFixed(4)+'%',c:af>0.05?'dn':af<-0.01?'up':'warn'});var vc=Object.values(T).filter(function(x){return x.v>1e8}).length;sc+=vc>15?15:vc>8?10:5;f.push({l:'Vol>$100M',v:vc,c:vc>10?'up':'warn'});return{score:Math.min(100,sc),factors:f}}
 function getWarnings(){var w=[];Object.entries(FR).filter(function(e){return WL.includes(e[0])}).forEach(function(e){if(e[1].rate>0.08)w.push({ic:'🔴',txt:e[0]+': FR '+e[1].rate.toFixed(3)+'% — '+(lang==='ar'?'خطر تصفية':'Liquidation risk')});if(e[1].rate<-0.05)w.push({ic:'🟢',txt:e[0]+': FR '+e[1].rate.toFixed(3)+'% — '+(lang==='ar'?'فرصة شراء':'Buy opportunity')})});Object.entries(LS).forEach(function(e){if(e[1].ratio>2)w.push({ic:'⚠️',txt:e[0]+': L/S '+e[1].ratio.toFixed(2)+' — '+(lang==='ar'?'Long مفرط':'Excessive Longs')});if(e[1].ratio<0.6)w.push({ic:'⚠️',txt:e[0]+': L/S '+e[1].ratio.toFixed(2)+' — Short Squeeze'})});return w.slice(0,4)}
 /* ACCURACY */
-function savePred(sym,p,tgt,sc){predictions.push({sym:sym,price:p,target:tgt,score:sc,time:Date.now(),checked:false,hit:false,partial:false});if(predictions.length>100)predictions=predictions.slice(-100);localStorage.setItem('nxpred10',JSON.stringify(predictions))}
-function getAcc(){var ch=false;predictions.forEach(function(p){if(!p.checked&&Date.now()-p.time>12*3600*1000){var cur=T[p.sym];if(cur){p.checked=true;var gain=(cur.p-p.price)/p.price*100;p.hit=gain>=5;p.partial=gain>=2&&gain<5;p.finalPrice=cur.p;p.pnl=gain;ch=true}}});if(ch)localStorage.setItem('nxpred10',JSON.stringify(predictions));var c=predictions.filter(function(p){return p.checked});var hits=c.filter(function(p){return p.hit}).length;var partials=c.filter(function(p){return p.partial}).length;return{total:c.length,hits:hits,partials:partials,rate:c.length>0?Math.round((hits+partials*0.5)/c.length*100):0}}
+function savePred(sym,p,tgt,sc){predictions.push({sym:sym,price:p,target:tgt,score:sc,time:Date.now(),checked:false,hit:false,partial:false});if(predictions.length>100)predictions=predictions.slice(-100);try{localStorage.setItem('nxpred10',JSON.stringify(predictions))}catch(e){}}
+function getAcc(){var ch=false;predictions.forEach(function(p){if(!p.checked&&Date.now()-p.time>12*3600*1000){var cur=T[p.sym];if(cur){p.checked=true;var gain=(cur.p-p.price)/p.price*100;p.hit=gain>=5;p.partial=gain>=2&&gain<5;p.finalPrice=cur.p;p.pnl=gain;ch=true}}});if(ch)try{localStorage.setItem('nxpred10',JSON.stringify(predictions))}catch(e){};var c=predictions.filter(function(p){return p.checked});var hits=c.filter(function(p){return p.hit}).length;var partials=c.filter(function(p){return p.partial}).length;return{total:c.length,hits:hits,partials:partials,rate:c.length>0?Math.round((hits+partials*0.5)/c.length*100):0}}
 function renderAcc(id){var a=getAcc();var el=document.getElementById(id);if(!el)return;
   var types={ultra:{h:0,t:0,p:0},whale:{h:0,t:0,p:0},brk:{h:0,t:0,p:0}};
   predictions.filter(function(p){return p.checked}).forEach(function(p){
@@ -1228,7 +1233,7 @@ function openTrade(sym,price,type,score,extra){
   trade.confAtEntry = score;
   activeTrades.push(trade);saveTrades();return trade}
 
-function saveTrades(){if(activeTrades.length>200)activeTrades=activeTrades.slice(-200);localStorage.setItem('nxTrades',JSON.stringify(activeTrades))}
+function saveTrades(){if(activeTrades.length>200)activeTrades=activeTrades.slice(-200);try{localStorage.setItem('nxTrades',JSON.stringify(activeTrades))}catch(e){}}
 
 function closeTrade(trade,exitPrice,reason){
   trade.status='CLOSED';trade.exitPrice=exitPrice;trade.exitTime=Date.now();trade.exitReason=reason;
@@ -1326,24 +1331,22 @@ async function loadStableFlow(){
     if(avgFR>0.05)flowIndex+=8;else if(avgFR<-0.02)flowIndex-=8;
     /* Clamp */
     flowIndex=Math.max(5,Math.min(95,Math.round(flowIndex)));
-    /* Update UI */
-    document.getElementById('sfUSDT').textContent=fmt(usdtVol);
-    document.getElementById('sfUSDC').textContent=fmt(usdcVol);
-    document.getElementById('sfUSDTch').style.color=btcChange>=0?'var(--up)':'var(--dn)';
-    document.getElementById('sfUSDTch').textContent=btcChange>=0?'📈 '+(lang==='ar'?'شراء كريبتو':'Buying crypto'):'📉 '+(lang==='ar'?'بيع كريبتو':'Selling crypto');
-    document.getElementById('sfUSDCch').style.color=usdcVol>1e9?'var(--warn)':'var(--t2)';
-    document.getElementById('sfUSDCch').textContent=usdcVol>1e9?(lang==='ar'?'نشاط عالي':'High activity'):(lang==='ar'?'طبيعي':'Normal');
+    /* Update UI — safe null checks */
+    var sfUSDTEl=document.getElementById('sfUSDT');if(sfUSDTEl)sfUSDTEl.textContent=fmt(usdtVol);
+    var sfUSDCEl=document.getElementById('sfUSDC');if(sfUSDCEl)sfUSDCEl.textContent=fmt(usdcVol);
+    var sfUSDTchEl=document.getElementById('sfUSDTch');if(sfUSDTchEl){sfUSDTchEl.style.color=btcChange>=0?'var(--up)':'var(--dn)';sfUSDTchEl.textContent=btcChange>=0?'📈 '+(lang==='ar'?'شراء كريبتو':'Buying crypto'):'📉 '+(lang==='ar'?'بيع كريبتو':'Selling crypto')}
+    var sfUSDCchEl=document.getElementById('sfUSDCch');if(sfUSDCchEl){sfUSDCchEl.style.color=usdcVol>1e9?'var(--warn)':'var(--t2)';sfUSDCchEl.textContent=usdcVol>1e9?(lang==='ar'?'نشاط عالي':'High activity'):(lang==='ar'?'طبيعي':'Normal')}
     var idxColor=flowIndex<=30?'var(--up)':flowIndex<=55?'var(--warn)':'var(--dn)';
-    document.getElementById('sfIndex').textContent=flowIndex;document.getElementById('sfIndex').style.color=idxColor;
+    var sfIdxEl=document.getElementById('sfIndex');if(sfIdxEl){sfIdxEl.textContent=flowIndex;sfIdxEl.style.color=idxColor}
     var idxLabel=flowIndex<=20?(lang==='ar'?'🟢 شراء قوي':'🟢 Strong Buy'):flowIndex<=35?(lang==='ar'?'🟢 شراء':'🟢 Buying'):flowIndex<=55?(lang==='ar'?'🟡 متوازن':'🟡 Balanced'):flowIndex<=75?(lang==='ar'?'🔴 بيع':'🔴 Selling'):(lang==='ar'?'🔴 بيع قوي':'🔴 Strong Sell');
-    document.getElementById('sfIndexLbl').textContent=idxLabel;document.getElementById('sfIndexLbl').style.color=idxColor;
-    document.getElementById('sfPt').style.left=flowIndex+'%';
+    var sfIdxLblEl=document.getElementById('sfIndexLbl');if(sfIdxLblEl){sfIdxLblEl.textContent=idxLabel;sfIdxLblEl.style.color=idxColor}
+    var sfPtEl=document.getElementById('sfPt');if(sfPtEl)sfPtEl.style.left=flowIndex+'%';
     var signalEl=document.getElementById('sfSignal');
-    if(flowIndex<=30){signalEl.textContent=lang==='ar'?'🟢 صعودي':'🟢 BULLISH';signalEl.style.background='var(--ud)';signalEl.style.color='var(--up)'}
+    if(signalEl){if(flowIndex<=30){signalEl.textContent=lang==='ar'?'🟢 صعودي':'🟢 BULLISH';signalEl.style.background='var(--ud)';signalEl.style.color='var(--up)'}
     else if(flowIndex<=55){signalEl.textContent=lang==='ar'?'🟡 محايد':'🟡 NEUTRAL';signalEl.style.background='var(--wd)';signalEl.style.color='var(--warn)'}
-    else{signalEl.textContent=lang==='ar'?'🔴 هبوطي':'🔴 BEARISH';signalEl.style.background='var(--dd)';signalEl.style.color='var(--dn)'}
+    else{signalEl.textContent=lang==='ar'?'🔴 هبوطي':'🔴 BEARISH';signalEl.style.background='var(--dd)';signalEl.style.color='var(--dn)'}}
     var advice=flowIndex<=25?(lang==='ar'?'💡 الناس تشتري كريبتو بقوة — السوق صاعد':'💡 People buying crypto aggressively — Bullish'):flowIndex<=40?(lang==='ar'?'💡 تدفق إيجابي — فرص شراء':'💡 Positive flow — Buy opportunities'):flowIndex<=60?(lang==='ar'?'💡 السوق متوازن — انتظر إشارة واضحة':'💡 Market balanced — Wait for clear signal'):flowIndex<=80?(lang==='ar'?'💡 الناس تبيع كريبتو — حذر':'💡 People selling crypto — Be cautious'):(lang==='ar'?'⚠️ تدفق كبير نحو المستقرة — خطر هبوط':'⚠️ Major flow to stables — Crash risk');
-    document.getElementById('sfAdvice').textContent=advice;document.getElementById('sfAdvice').style.color=idxColor;
+    var sfAdvEl=document.getElementById('sfAdvice');if(sfAdvEl){sfAdvEl.textContent=advice;sfAdvEl.style.color=idxColor}
   }catch(e){try{document.getElementById('sfIndex').textContent='--'}catch(ex){}}}
 /* RENDER — with real sparklines */
 function mkSpark(s){var hist=sparkHist[s];var up=T[s]?(!isNaN(T[s].c)?T[s].c>=0:true):true;
@@ -1472,12 +1475,12 @@ function getTimeMultiplier(){
 function wlRecordSignal(sym,conf,layers,price){
   whaleLearning.preds.push({sym:sym,conf:conf,layers:Object.fromEntries(Object.entries(layers).map(function(e){return[e[0],{sc:e[1].score,sig:e[1].signal}]})),price:price,time:Date.now(),chk:false,hit:false});
   if(whaleLearning.preds.length>300)whaleLearning.preds=whaleLearning.preds.slice(-300);
-  localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds))}
+  try{localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds))}catch(e){}}
 function wlVerify(){
   var ch=false;whaleLearning.preds.forEach(function(p){
     if(!p.chk&&Date.now()-p.time>8*3600000){var cur=T[p.sym];if(cur){p.chk=true;p.hit=((cur.p-p.price)/p.price*100)>=2;ch=true;
       Object.entries(p.layers).forEach(function(e){var k=e[0],l=e[1];if(l.sc>0){if(!whaleLearning.layerAcc[k])whaleLearning.layerAcc[k]={ok:0,t:0};whaleLearning.layerAcc[k].t++;if(p.hit)whaleLearning.layerAcc[k].ok++}})}}});
-  if(ch){localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds));localStorage.setItem('nxwlacc',JSON.stringify(whaleLearning.layerAcc))}}
+  if(ch){try{localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds));localStorage.setItem('nxwlacc',JSON.stringify(whaleLearning.layerAcc))}catch(e){}}}
 function wlGetStats(){var c=whaleLearning.preds.filter(function(p){return p.chk});var h=c.filter(function(p){return p.hit});return{total:c.length,hits:h.length,rate:c.length>0?Math.round(h.length/c.length*100):0}}
 
 /* LAYER 1: Order Book — walls, spoofing, imbalance (15%) */
@@ -1677,7 +1680,7 @@ async function detectWhaleWaves(candidates){
     if(l4.score+l5.score>5){
       if(!whaleWaves[c.s])whaleWaves[c.s]={waves:[],totalBuy:0,engine:null};
       whaleWaves[c.s].engine={confidence:Math.round((l4.score+l5.score)*2),signal:'POSSIBLE_WHALE_ACTIVITY',strength:'WEAK',layers:{ob:{score:0,signal:'SKIP'},trades:{score:0,signal:'SKIP'},liqs:{score:0,signal:'SKIP'},fr:l4,xex:l5},activeLayers:2,reasons:[]}}});
-  localStorage.setItem('nxww10',JSON.stringify(whaleWaves))}
+  try{localStorage.setItem('nxww10',JSON.stringify(whaleWaves))}catch(e){}}
 
 /* ═══ WHALE CARD v3.0 — 5 Layers + 8 Techniques ═══ */
 function whaleCard(r,rank){
@@ -2355,7 +2358,8 @@ async function loadLiq(){if(!Object.keys(T).length)await loadTk();document.getEl
 /* GEM FINDER — small caps with unusual activity */
 async function loadGems(){
   if(!Object.keys(T).length)await loadTk();
-  document.getElementById('gemL').innerHTML='<div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div>';
+  var gemLEl=document.getElementById('gemL');if(!gemLEl)return;
+  gemLEl.innerHTML='<div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div>';
   /* Step 1: Filter small-cap coins (price < $1, volume $500K-$50M) */
   var candidates=Object.entries(T).filter(function(e){var d=e[1];return d.p>0&&d.p<1&&d.v>500000&&d.v<5e7}).sort(function(a,b){return b[1].v-a[1].v}).slice(0,40);
   /* Step 2: Fetch klines for top candidates to analyze volume spike */
@@ -2388,18 +2392,19 @@ async function loadGems(){
       var gemScore=0;
       if(volMultiple>=3)gemScore+=40;else if(volMultiple>=2)gemScore+=30;else if(volMultiple>=1.5)gemScore+=15;
       if(timing==='early')gemScore+=30;else if(timing==='still')gemScore+=15;
-      if(T[s].c>0&&T[s].c<3)gemScore+=20; /* small positive = accumulating */
-      else if(T[s].c>=3&&T[s].c<8)gemScore+=10;
-      if(gemScore>=25)gemResults.push({s:s,p:T[s].p,c:T[s].c,v:T[s].v,volX:volMultiple,gainSinceSpike:gainSinceSpike,spikeTime:spikeStartTime,timing:timing,timingCls:timingCls,timingLabel:timingLabel,score:gemScore,priceAtSpike:priceAtSpike})
+      var _gd=T[s];if(!_gd)return;
+      if(_gd.c>0&&_gd.c<3)gemScore+=20; /* small positive = accumulating */
+      else if(_gd.c>=3&&_gd.c<8)gemScore+=10;
+      if(gemScore>=25)gemResults.push({s:s,p:_gd.p,c:_gd.c,v:_gd.v,volX:volMultiple,gainSinceSpike:gainSinceSpike,spikeTime:spikeStartTime,timing:timing,timingCls:timingCls,timingLabel:timingLabel,score:gemScore,priceAtSpike:priceAtSpike})
     }).catch(function(){})});
   await Promise.all(proms);
   /* Sort: early + high volume first */
   gemResults.sort(function(a,b){return b.score-a.score});
   /* Render */
-  document.getElementById('gemL').innerHTML=gemResults.length?gemResults.map(function(g){
+  gemLEl.innerHTML=gemResults.length?gemResults.map(function(g){
     /* Notify only for EARLY gems with high volume */
     if(g.timing==='early'&&g.volX>=2)notify(g.s,'gem',g.score);
-    var src=[];if(T[g.s])src.push('Binance');if(T[g.s].by)src.push('Bybit');if(CBP[g.s])src.push('Coinbase');
+    var src=[];if(T[g.s])src.push('Binance');if(T[g.s]&&T[g.s].by)src.push('Bybit');if(CBP[g.s])src.push('Coinbase');
     return'<div class="whale-card" onclick="openCoin(\''+g.s+'\')">'
     +'<div class="whale-head"><div class="whale-sym">💎 '+g.s+'/USDT <span class="str-badge '+g.timingCls+'">'+g.timingLabel+'</span></div>'+timeBadge(g.spikeTime)+'</div>'
     +'<div class="whale-grid">'
@@ -2967,7 +2972,7 @@ async function loadETHChart(){
 
 
 /* PORTFOLIO */
-var sP=function(){localStorage.setItem('nxp10',JSON.stringify(portfolio))};
+var sP=function(){try{localStorage.setItem('nxp10',JSON.stringify(portfolio))}catch(e){}};
 function addPort(){var sym=document.getElementById('aSym').value.toUpperCase().trim(),amt=+document.getElementById('aAmt').value,pr=+document.getElementById('aPr').value;if(!sym||!amt)return;portfolio.push({sym:sym,amt:amt,bp:pr});sP();closeMo('addMo');renderPort()}
 function rmPort(i){portfolio.splice(i,1);sP();renderPort()}
 function renderPort(){var tV=0,tC=0;portfolio.forEach(function(p){var d=T[p.sym];if(d){tV+=d.p*p.amt;tC+=p.bp*p.amt}});var pnl=tC>0?((tV-tC)/tC*100):0;document.getElementById('pVal').textContent=tV>0?fmt(tV):'$0';var pE=document.getElementById('pCh');if(tC>0){pE.textContent=(pnl>=0?'+':'')+pnl.toFixed(2)+'%';pE.style.color=pnl>=0?'var(--up)':'var(--dn)'}else{pE.textContent=t('add_coins');pE.style.color='var(--t3)'};document.getElementById('pList').innerHTML=portfolio.length?portfolio.map(function(p,i){var d=T[p.sym],cp=d?d.p:0,v=cp*p.amt,pnl=p.bp>0?((cp-p.bp)/p.bp*100):0;var bg=COL[p.sym]||'#444';return'<div class="port-i"><div style="display:flex;align-items:center;gap:8px"><div class="cr-ic" style="background:'+bg+'0a;color:'+bg+';border:1px solid '+bg+'22;width:26px;height:26px;font-size:9px">'+p.sym.slice(0,2)+'</div><div><div class="cr-n">'+p.sym+'</div><div class="cr-sub">'+p.amt+' × '+fP(cp)+'</div></div></div><div style="text-align:left"><div class="cr-p">'+fmt(v)+'</div><div style="font-family:var(--fm);font-size:9px;font-weight:700;color:'+(pnl>=0?'var(--up)':'var(--dn)')+'">'+(p.bp>0?(pnl>=0?'+':'')+pnl.toFixed(1)+'%':'--')+'</div><div style="font-size:7px;color:var(--t3);cursor:pointer" onclick="rmPort('+i+')">🗑</div></div></div>'}).join(''):'<div class="empty"><div class="empty-ic">💼</div><div class="empty-tx">'+t('empty_port')+'</div></div>'}
@@ -3329,7 +3334,7 @@ async function scanBybitGainers(){
     var gainers=by.result.list.filter(function(x){return x.symbol.endsWith('USDT')&&+x.price24hPcnt*100>=3&&+x.turnover24h>50000}).sort(function(a,b){return+b.price24hPcnt-+a.price24hPcnt}).slice(0,20);
     gainers.forEach(function(x){var s=x.symbol.replace('USDT','');var chg=+x.price24hPcnt*100;
       if(!T[s]||T[s].src==='BY'){T[s]={p:+x.lastPrice,c:chg,v:+x.turnover24h,h:+x.highPrice24h,l:+x.lowPrice24h,src:'BY',by:+x.lastPrice}}
-      if(chg>=5&&chg<=15){var k='by_'+s+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;localStorage.setItem('nxnot10',JSON.stringify(notifiedSet));recSig(s,'breakout');if(chg<8)notify(s,'gem',0)}}})}catch(e){}}
+      if(chg>=5&&chg<=15){var k='by_'+s+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};recSig(s,'breakout');if(chg<8)notify(s,'gem',0)}}})}catch(e){}}
 /* INIT */
 async function init(){try{document.getElementById('sInp').placeholder=t('search_ph')}catch(e){}try{document.getElementById('notifB').dataset.c='0'}catch(e){}
   loadProfile();loadToneUI();updateMenuLang();updateMenuTheme();

@@ -563,6 +563,7 @@ canvas{width:100%!important;border-radius:4px}
 <div class="qa-card" onclick="openQA('favs')"><div class="qa-ic">⭐</div><div class="qa-nm" data-t="qa_favs">المفضلات</div><div class="qa-val" id="qaFav" style="color:var(--warn)">0</div></div>
 <div class="qa-card" onclick="openQA('alerts')"><div class="qa-ic">🔔</div><div class="qa-nm" data-t="qa_alerts">تنبيهات</div><div class="qa-val" id="qaAlerts" style="color:var(--dn)">0</div></div>
 <div class="qa-card" onclick="openQA('monitor')"><div class="qa-ic">🤖</div><div class="qa-nm" data-t="qa_monitor">مراقب البيانات</div><div class="qa-val" id="qaMon" style="color:var(--neon)">--</div></div>
+<div class="qa-card" onclick="openQA('calc')"><div class="qa-ic">⚖️</div><div class="qa-nm" data-t="qa_calc">حاسبة مخاطر</div><div class="qa-val" style="color:var(--warn)">R:R</div></div>
 </div>
 
 <div class="tkr"><div class="tkr-s" id="tkrEl">⏳</div></div>
@@ -622,7 +623,14 @@ canvas{width:100%!important;border-radius:4px}
 <button class="rfr" onclick="runValidator().then(function(){renderMonPanel()})">🔍 <span data-t="refresh">فحص يدوي</span></button>
 </div>
 
-<!-- 🤖 ADMIN PANEL (hidden — 3 taps on logo to open) -->
+<!-- ⚖️ RISK CALCULATOR PAGE -->
+<div class="pg" id="pg-calc">
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+<span style="font-family:var(--fd);font-weight:800;font-size:16px;color:var(--t0)">⚖️ <span data-t="qa_calc">حاسبة المخاطر</span></span>
+<button onclick="sp('dash')" style="display:flex;align-items:center;gap:6px;padding:10px 18px;background:rgba(0,255,136,.06);border:1.5px solid rgba(0,255,136,.15);border-radius:12px;color:var(--up);font-weight:800;font-size:13px;cursor:pointer">← <span data-t="back">رجوع</span></button>
+</div>
+<div class="cd"><div class="cd-t" style="margin-bottom:10px">⚖️ <span data-t="risk_calc">حاسبة المخاطر</span></div><div class="rc-label">💰 <span data-t="capital">رأس المال</span> ($)</div><input class="rc-inp" id="rcCap2" type="number" placeholder="10000" oninput="calcRisk2()"><div class="rc-label">📊 <span data-t="risk_pct">المخاطرة</span> (%)</div><input class="rc-inp" id="rcRisk2" type="number" placeholder="2" value="2" oninput="calcRisk2()"><div class="rc-label">💵 <span data-t="entry_price">سعر الدخول</span></div><input class="rc-inp" id="rcEntry2" type="number" placeholder="67000" oninput="calcRisk2()"><div class="rc-label">🛑 Stop Loss</div><input class="rc-inp" id="rcSL2" type="number" placeholder="65000" oninput="calcRisk2()"><div class="rc-label">🎯 Take Profit</div><input class="rc-inp" id="rcTP2" type="number" placeholder="72000" oninput="calcRisk2()"><div class="rc-result" id="rcRes2"><div style="text-align:center;color:var(--t3);padding:12px;font-size:12px" data-t="enter_data">ادخل البيانات</div></div></div>
+</div>
 <div class="pg" id="pg-admin">
 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
 <div style="font-family:var(--fd);font-weight:800;font-size:16px;color:var(--t0)">🤖 <span data-t="admin_panel">مراقب المنصة</span></div>
@@ -724,23 +732,19 @@ canvas{width:100%!important;border-radius:4px}
 <!-- 👤 PROFILE -->
 <div class="pg" id="pg-me">
 <div class="big-tabs">
-<div class="big-tab t-green act" onclick="pTab(0,this)"><div class="bt-ic">💼</div><span data-t="portfolio">المحفظة</span></div>
-<div class="big-tab t-orange" onclick="pTab(1,this)"><div class="bt-ic">⚖️</div><span data-t="risk_calc">حاسبة المخاطر</span></div>
+<div class="big-tab t-green act" onclick="pTab(0,this)"><div class="bt-ic">💼</div><span data-t="portfolio">محفظتي</span></div>
+<div class="big-tab t-orange" onclick="pTab(1,this)"><div class="bt-ic">📋</div><span>صفقاتي</span></div>
+<div class="big-tab t-purple" onclick="pTab(2,this)"><div class="bt-ic">📊</div><span>إحصائياتي</span></div>
 </div>
 <div class="big-tabs">
-<div class="big-tab t-blue" onclick="pTab(2,this)"><div class="bt-ic">🔔</div><span data-t="alerts">تنبيهات</span></div>
-<div class="big-tab t-purple" onclick="pTab(3,this)"><div class="bt-ic">📜</div>سجل</div>
+<div class="big-tab t-blue" onclick="pTab(3,this)"><div class="bt-ic">⚙️</div><span>إعداداتي</span></div>
+<div class="big-tab t-red" onclick="pTab(4,this)"><div class="bt-ic">📜</div><span>سجل</span></div>
 </div>
 <div id="p0"><div class="cd"><div class="port-tot"><div class="port-val" id="pVal">$0</div><div class="port-ch" id="pCh" style="color:var(--t3)" data-t="add_coins">أضف عملات</div></div></div><div id="pList"></div><button class="add-btn" onclick="openMo('addMo')">➕ <span data-t="add_coin">إضافة عملة</span></button></div>
-<div id="p1" style="display:none"><div class="cd"><div class="cd-t" style="margin-bottom:10px">⚖️ <span data-t="risk_calc">حاسبة المخاطر</span></div><div class="rc-label">💰 <span data-t="capital">رأس المال</span> ($)</div><input class="rc-inp" id="rcCap" type="number" placeholder="10000" oninput="calcRisk()"><div class="rc-label">📊 <span data-t="risk_pct">المخاطرة</span> (%)</div><input class="rc-inp" id="rcRisk" type="number" placeholder="2" value="2" oninput="calcRisk()"><div class="rc-label">💵 <span data-t="entry_price">سعر الدخول</span></div><input class="rc-inp" id="rcEntry" type="number" placeholder="67000" oninput="calcRisk()"><div class="rc-label">🛑 Stop Loss</div><input class="rc-inp" id="rcSL" type="number" placeholder="65000" oninput="calcRisk()"><div class="rc-label">🎯 Take Profit</div><input class="rc-inp" id="rcTP" type="number" placeholder="72000" oninput="calcRisk()"><div class="rc-result" id="rcRes"><div style="text-align:center;color:var(--t3);padding:12px;font-size:11px" data-t="enter_data">ادخل البيانات</div></div></div></div>
-<div id="p2" style="display:none">
-<div class="al-i"><div class="al-l"><div style="font-size:18px">⭐</div><div><div style="font-weight:600;font-size:11px">ULTRA</div><div style="font-size:8px;color:var(--t3)">🔔 صوت + إشعار</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
-<div class="al-i"><div class="al-l"><div style="font-size:18px">🐋</div><div><div style="font-weight:600;font-size:11px" data-t="whales">شراء حيتان</div><div style="font-size:8px;color:var(--t3)">🔔 صوت + إشعار</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
-<div class="al-i"><div class="al-l"><div style="font-size:18px">💥</div><div><div style="font-weight:600;font-size:11px" data-t="breakout">على وشك الانفجار</div><div style="font-size:8px;color:var(--t3)">Score 60+</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
-<div class="al-i"><div class="al-l"><div style="font-size:18px">⚠️</div><div><div style="font-weight:600;font-size:11px" data-t="smart_warn">تحذيرات ذكية</div><div style="font-size:8px;color:var(--t3)">FR + OI</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
-<div class="al-i"><div class="al-l"><div style="font-size:18px">👁</div><div><div style="font-weight:600;font-size:11px">Watchlist ±5%</div><div style="font-size:8px;color:var(--t3)">🔔 تنبيه لما عملة مراقبة تتحرك</div></div></div><div class="tgl on" onclick="this.classList.toggle('on')"><div class="tgl-k"></div></div></div>
-</div>
-<div id="p3" style="display:none">
+<div id="p1" style="display:none"><div id="myTradesPanel"></div></div>
+<div id="p2" style="display:none"><div id="myStatsPanel"></div></div>
+<div id="p3" style="display:none"><div id="mySettingsPanel"></div></div>
+<div id="p4" style="display:none">
 <div class="sec"><span class="sec-t">📜 سجل الإشعارات</span></div>
 <div id="notifHistList"><div class="muted">لا إشعارات بعد</div></div>
 <button class="rfr" onclick="notifHist=[];localStorage.setItem('nxnh10','[]');renderNotifHist()" style="margin-top:8px">🗑 مسح السجل</button>

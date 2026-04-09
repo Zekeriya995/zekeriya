@@ -840,7 +840,81 @@ function closeMo(id){document.getElementById(id).classList.remove('show')}
 document.querySelectorAll('.mo').forEach(function(m){m.onclick=function(e){if(e.target===m)m.classList.remove('show')}});
 function indTab(){} /* removed — accordion cards */
 function whTab(i,btn){document.getElementById('pg-whale').querySelectorAll('.big-tab').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');['wh0','wh1','wh2'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=([0,1,2].indexOf(i)===j)?'block':'none'});if(i===0)loadWhales();if(i===1)loadLiq();if(i===2)loadWhaleSells()}
-function pTab(i,btn){document.getElementById('pg-me').querySelectorAll('.big-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');['p0','p1','p2','p3'].forEach(function(id,j){document.getElementById(id).style.display=j===i?'block':'none'});if(i===3)renderNotifHist()}
+function pTab(i,btn){document.getElementById('pg-me').querySelectorAll('.big-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');['p0','p1','p2','p3','p4'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=j===i?'block':'none'});if(i===1)renderMyTrades();if(i===2)renderMyStats();if(i===3)renderMySettings();if(i===4)renderNotifHist()}
+/* ═══ 📋 MY TRADES ═══ */
+function renderMyTrades(){
+  var el=document.getElementById('myTradesPanel');if(!el)return;var ar=lang==='ar';var h='';
+  h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:0 0 8px">📋 '+(ar?'صفقات مفتوحة':'Open Trades')+'</div>';
+  if(typeof openTrades!=='undefined'&&openTrades.length){
+    openTrades.forEach(function(tr){
+      var d=T[tr.sym];var cp=d?d.p:0;var pnl=tr.entry>0?((cp-tr.entry)/tr.entry*100):0;if(tr.type==='SHORT')pnl=-pnl;
+      var pCol=pnl>=0?'var(--up)':'var(--dn)';
+      h+='<div class="cd" style="padding:10px;margin-bottom:6px"><div style="display:flex;justify-content:space-between;align-items:center">';
+      h+='<div><div style="font-weight:800;font-size:13px;color:var(--t0)">'+tr.sym+'/USDT</div><div style="font-size:10px;color:var(--t2)">'+tr.type+' — '+(ar?'دخول: ':'Entry: ')+fP(tr.entry)+'</div></div>';
+      h+='<div style="text-align:left"><div style="font-family:var(--fm);font-size:14px;font-weight:800;color:'+pCol+';direction:ltr">'+(pnl>=0?'+':'')+pnl.toFixed(1)+'%</div><div style="font-family:var(--fm);font-size:10px;color:var(--t2);direction:ltr">'+fP(cp)+'</div></div></div>';
+      if(tr.tp1)h+='<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:10px;margin-top:6px;border-top:1px solid var(--bdr)"><span style="color:var(--t2)">🎯 TP1</span><span style="font-family:var(--fm);color:var(--up);direction:ltr">'+fP(tr.tp1)+'</span></div>';
+      if(tr.sl)h+='<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:10px"><span style="color:var(--t2)">🛑 SL</span><span style="font-family:var(--fm);color:var(--dn);direction:ltr">'+fP(tr.sl)+'</span></div>';
+      h+='</div>';
+    });
+  }else{h+='<div class="empty"><div class="empty-ic">📋</div><div class="empty-tx">'+(ar?'لا صفقات مفتوحة':'No open trades')+'</div></div>';}
+  h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:16px 0 8px">📜 '+(ar?'آخر الصفقات المغلقة':'Recent Closed')+'</div>';
+  var logs=typeof factorLog!=='undefined'?factorLog.slice(-15).reverse():[];
+  if(logs.length){
+    logs.forEach(function(lg){
+      var isWin=lg.result==='win'||lg.result==='partial';
+      h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--bdr);font-size:11px">';
+      h+='<span style="font-weight:700;min-width:40px">'+lg.sym+'</span>';
+      h+='<span style="color:'+(isWin?'var(--up)':'var(--dn)')+';font-weight:700">'+(isWin?'✅ '+(ar?'ربح':'Win'):'❌ '+(ar?'خسارة':'Loss'))+'</span>';
+      h+='<span style="font-family:var(--fm);font-size:9px;color:var(--t3)">'+new Date(lg.time).toLocaleDateString('en',{month:'short',day:'numeric'})+'</span></div>';
+    });
+  }else{h+='<div style="text-align:center;color:var(--t3);font-size:11px;padding:10px">'+(ar?'لا صفقات مغلقة بعد':'No closed trades yet')+'</div>';}
+  el.innerHTML=h;
+}
+/* ═══ 📊 MY STATS ═══ */
+function renderMyStats(){
+  var el=document.getElementById('myStatsPanel');if(!el)return;var ar=lang==='ar';
+  var ms=monitorState||{perf:{overallRate:0,totalTrades:0,totalWins:0,totalLosses:0,bestHour:-1,worstHour:-1},coinStats:{},hourStats:{},coinBlacklist:[]};
+  var perf=ms.perf;var h='';
+  h+='<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:12px">';
+  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:24px;font-weight:800;color:'+(perf.overallRate>=65?'var(--up)':perf.overallRate>=50?'var(--warn)':'var(--dn)')+'">'+perf.overallRate+'%</div><div style="font-size:10px;color:var(--t2)">'+(ar?'نسبة النجاح':'Win Rate')+'</div></div>';
+  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:24px;font-weight:800;color:var(--neon)">'+perf.totalTrades+'</div><div style="font-size:10px;color:var(--t2)">'+(ar?'إجمالي':'Total')+'</div><div style="font-size:9px;color:var(--t3)">✅'+perf.totalWins+' ❌'+(perf.totalLosses||0)+'</div></div>';
+  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:24px;font-weight:800;color:var(--up)">'+(perf.bestHour>=0?perf.bestHour+':00':'--')+'</div><div style="font-size:10px;color:var(--t2)">'+(ar?'أفضل ساعة':'Best Hour')+'</div></div>';
+  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:24px;font-weight:800;color:var(--dn)">'+(perf.worstHour>=0?perf.worstHour+':00':'--')+'</div><div style="font-size:10px;color:var(--t2)">'+(ar?'أسوأ ساعة':'Worst Hour')+'</div></div></div>';
+  var coins=Object.entries(ms.coinStats).sort(function(a,b){return(b[1].rate||0)-(a[1].rate||0)});
+  if(coins.length){
+    h+='<div style="font-weight:800;font-size:13px;color:var(--t0);margin:10px 0 6px">🏆 '+(ar?'أفضل العملات':'Best Coins')+'</div><div class="cd" style="padding:10px">';
+    coins.slice(0,5).forEach(function(e){var s=e[0],c=e[1];h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr);font-size:11px"><span style="font-weight:700">'+s+'</span><span style="font-family:var(--fm);font-weight:700;color:var(--up)">'+c.rate+'%</span><span style="font-size:9px;color:var(--t3)">'+c.wins+'/'+c.total+'</span></div>';});
+    h+='</div>';
+    if(coins.length>5){
+      h+='<div style="font-weight:800;font-size:13px;color:var(--t0);margin:10px 0 6px">⚠️ '+(ar?'أسوأ العملات':'Worst Coins')+'</div><div class="cd" style="padding:10px">';
+      coins.slice(-3).reverse().forEach(function(e){var s=e[0],c=e[1];h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr);font-size:11px"><span style="font-weight:700">'+s+'</span><span style="font-family:var(--fm);font-weight:700;color:var(--dn)">'+c.rate+'%</span><span style="font-size:9px;color:var(--t3)">'+c.wins+'/'+c.total+'</span></div>';});
+      h+='</div>';
+    }
+  }else{h+='<div style="text-align:center;color:var(--t3);font-size:11px;padding:10px">'+(ar?'تحتاج صفقات لعرض الإحصائيات':'Need trades to show stats')+'</div>';}
+  el.innerHTML=h;
+}
+/* ═══ ⚙️ MY SETTINGS ═══ */
+var alertPrefs={};try{alertPrefs=JSON.parse(localStorage.getItem('nxAlertPrefs')||'{}')}catch(e){alertPrefs={}}
+function saveAlertPref(key,val){alertPrefs[key]=val;try{localStorage.setItem('nxAlertPrefs',JSON.stringify(alertPrefs))}catch(e){}}
+function renderMySettings(){
+  var el=document.getElementById('mySettingsPanel');if(!el)return;var ar=lang==='ar';var h='';
+  h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:0 0 10px">🌐 '+(ar?'اللغة':'Language')+'</div>';
+  h+='<div style="display:flex;gap:6px;margin-bottom:14px"><button class="rfr" onclick="setLang(\'ar\');renderMySettings()" style="flex:1;margin:0;'+(lang==='ar'?'background:var(--ud);color:var(--up);border-color:var(--up)':'')+'">عربي</button><button class="rfr" onclick="setLang(\'en\');renderMySettings()" style="flex:1;margin:0;'+(lang==='en'?'background:var(--ud);color:var(--up);border-color:var(--up)':'')+'">English</button></div>';
+  h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:0 0 10px">🎨 '+(ar?'الثيم':'Theme')+'</div>';
+  var isDark=document.body.dataset.theme==='dark';
+  h+='<div style="display:flex;gap:6px;margin-bottom:14px"><button class="rfr" onclick="setTheme(\'dark\');renderMySettings()" style="flex:1;margin:0;'+(isDark?'background:var(--ud);color:var(--up);border-color:var(--up)':'')+'">🌙 '+(ar?'مظلم':'Dark')+'</button><button class="rfr" onclick="setTheme(\'light\');renderMySettings()" style="flex:1;margin:0;'+(!isDark?'background:var(--ud);color:var(--up);border-color:var(--up)':'')+'">☀️ '+(ar?'فاتح':'Light')+'</button></div>';
+  h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:0 0 10px">🔊 '+(ar?'الصوت':'Sound')+'</div>';
+  h+='<div class="al-i"><div class="al-l"><div style="font-size:18px">🔊</div><div><div style="font-weight:600;font-size:12px">'+(ar?'تفعيل الصوت':'Enable Sound')+'</div></div></div><div class="tgl '+(soundEnabled?'on':'')+'" onclick="this.classList.toggle(\'on\');soundEnabled=!soundEnabled;try{localStorage.setItem(\'nxsnd\',soundEnabled?\'1\':\'0\')}catch(e){}"><div class="tgl-k"></div></div></div>';
+  h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:14px 0 10px">🔔 '+(ar?'التنبيهات':'Alerts')+'</div>';
+  var alerts=[{key:'ultra',ic:'⭐',nm:'ULTRA',sub:ar?'إشارات قوية':'Strong signals'},{key:'whale',ic:'🐋',nm:ar?'حيتان':'Whales',sub:ar?'شراء حيتان':'Whale buys'},{key:'breakout',ic:'💥',nm:ar?'انفجار':'Breakout',sub:'Score 60+'},{key:'warning',ic:'⚠️',nm:ar?'تحذيرات':'Warnings',sub:'FR + OI'},{key:'watchlist',ic:'👁',nm:'Watchlist',sub:'±5%'}];
+  alerts.forEach(function(a){
+    var isOn=alertPrefs[a.key]!==false;
+    h+='<div class="al-i"><div class="al-l"><div style="font-size:18px">'+a.ic+'</div><div><div style="font-weight:600;font-size:12px">'+a.nm+'</div><div style="font-size:9px;color:var(--t3)">'+a.sub+'</div></div></div><div class="tgl '+(isOn?'on':'')+'" onclick="this.classList.toggle(\'on\');saveAlertPref(\''+a.key+'\',this.classList.contains(\'on\'))"><div class="tgl-k"></div></div></div>';
+  });
+  el.innerHTML=h;
+}
+/* ⚖️ calcRisk2 for QA page */
+function calcRisk2(){var cap=+document.getElementById('rcCap2').value,risk=+document.getElementById('rcRisk2').value,entry=+document.getElementById('rcEntry2').value,sl=+document.getElementById('rcSL2').value,tp=+document.getElementById('rcTP2').value;if(!cap||!entry||!sl){document.getElementById('rcRes2').innerHTML='<div style="text-align:center;color:var(--t3);padding:12px;font-size:12px">'+t('enter_data')+'</div>';return};var rA=cap*(risk/100),slD=Math.abs(entry-sl),pos=slD>0?rA/slD:0,posV=pos*entry,rew=tp?pos*Math.abs(tp-entry):0,rr=tp&&rA>0?rew/rA:0,lev=cap>0?posV/cap:0;document.getElementById('rcRes2').innerHTML='<div class="rc-row"><span>'+t('risk_amt')+'</span><span class="rc-val" style="color:var(--dn)">'+fmt(rA)+'</span></div><div class="rc-row"><span>'+t('pos_size')+'</span><span class="rc-val">'+pos.toFixed(4)+'</span></div><div class="rc-row"><span>'+t('pos_val')+'</span><span class="rc-val">'+fmt(posV)+'</span></div><div class="rc-row"><span>'+t('leverage')+'</span><span class="rc-val" style="color:'+(lev>10?'var(--dn)':lev>5?'var(--warn)':'var(--up)')+'\">'+lev.toFixed(1)+'x</span></div>'+(tp?'<div class="rc-row"><span>'+t('exp_profit')+'</span><span class="rc-val" style="color:var(--up)">'+fmt(rew)+'</span></div><div class="rc-row"><span>R/R</span><span class="rc-val" style="color:'+(rr>=2?'var(--up)':rr>=1?'var(--warn)':'var(--dn)')+'">1:'+rr.toFixed(1)+'</span></div>':'')+'<div class="rc-row"><span>'+t('sl_loss')+'</span><span class="rc-val" style="color:var(--dn)">-'+fmt(rA)+'</span></div>'}
 var curScanTab=0,curTradeFilter='all',curSmallFilter='all',chartSignal=null;
 var SECTORS={ai:{ic:'🤖',n:{ar:'ذكاء اصطناعي',en:'AI'},coins:['FET','RNDR','TAO','WLD','AKT','ARKM','OCEAN','AGIX','PRIME','CTXC','NMR'],col:'#7c3aed'},gaming:{ic:'🎮',n:{ar:'ألعاب وميتافيرس',en:'Gaming'},coins:['IMX','GALA','AXS','SAND','MANA','ENJ','PIXEL','BEAM','ILV','PORTAL','YGG','ALICE'],col:'#06b6d4'},layer1:{ic:'⛓️',n:{ar:'الطبقة الأولى',en:'Layer 1'},coins:['ETH','SOL','AVAX','DOT','ATOM','NEAR','APT','SUI','SEI','ICP','FTM','ALGO','HBAR','TIA'],col:'#3b82f6'},layer2:{ic:'🔗',n:{ar:'الطبقة الثانية',en:'Layer 2'},coins:['ARB','OP','MATIC','MANTA','STRK','METIS','ZK','BLAST'],col:'#8b5cf6'},defi:{ic:'💰',n:{ar:'التمويل اللامركزي',en:'DeFi'},coins:['UNI','AAVE','MKR','LDO','SNX','CRV','COMP','DYDX','GMX','SUSHI','PENDLE','JUP'],col:'#10b981'},meme:{ic:'🐕',n:{ar:'عملات ميم',en:'Meme'},coins:['DOGE','PEPE','WIF','BONK','FLOKI','SHIB','MEME','TURBO'],col:'#f59e0b'},rwa:{ic:'🏦',n:{ar:'أصول حقيقية',en:'RWA'},coins:['ONDO','POLYX','DUSK','RIO','CPOOL'],col:'#64748b'},depin:{ic:'🌐',n:{ar:'بنية تحتية',en:'DePIN'},coins:['FIL','AR','HNT','THETA','ANKR','IOTX'],col:'#0ea5e9'},data:{ic:'⚡',n:{ar:'بيانات وأوراكل',en:'Data/Oracle'},coins:['LINK','GRT','BAND','PYTH','API3','TRB'],col:'#6366f1'},privacy:{ic:'🔒',n:{ar:'خصوصية',en:'Privacy'},coins:['XMR','ZEC','SCRT','ROSE'],col:'#475569'}};
 function getCoinSector(sym){for(var k in SECTORS)if(SECTORS[k].coins.includes(sym))return k;return null}
@@ -1771,21 +1845,17 @@ function frRow(){return''} /* replaced by accordion */
 /* ═══ 🆕 QUICK ACCESS CARDS ═══ */
 var favorites=[];try{favorites=JSON.parse(localStorage.getItem('nxfav10')||'[]')}catch(e){favorites=[]}
 function openQA(page){
-  document.querySelectorAll('.pg').forEach(function(p){p.classList.remove('act')});
+  document.querySelectorAll('.pg').forEach(function(p){p.classList.remove('act');p.style.display=''});
   document.querySelectorAll('.bb').forEach(function(b){b.classList.remove('act')});
   var el=document.getElementById('pg-'+page);
   if(!el)return;
   el.classList.add('act');
-  el.style.display='block';
   try{
     if(page==='heatmap')renderHeatmap();
     else if(page==='favs')renderFavs();
     else if(page==='alerts')renderAlerts();
     else if(page==='monitor')renderMonPanel();
-  }catch(e){
-    var cont=el.querySelector('[id]');
-    if(cont)cont.innerHTML='<div style="text-align:center;padding:20px;color:var(--t3);font-size:11px">⚠️ '+(lang==='ar'?'خطأ — حاول لاحقاً':'Error — try later')+'</div>';
-  }
+  }catch(e){}
   window.scrollTo({top:0});
 }
 function updateQACards(){

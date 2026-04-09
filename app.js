@@ -1770,31 +1770,42 @@ function scanItem(r){var sc=r.score>=60?'background:var(--ud);color:var(--up)':r
 function frRow(s,d){var cls=d.rate>0.05?'dn':d.rate<-0.01?'up':'warn';var w=Math.min(48,Math.abs(d.rate)*500);return'<div class="fr-row"><span class="fr-sym">'+s+'</span><div class="fr-bar"><div class="fr-mid"></div><div class="fr-fill" style="'+(d.rate>=0?'left':'right')+':50%;width:'+w+'%;background:var(--'+cls+')"></div></div><div><div class="fr-val" style="color:var(--'+cls+')">'+(d.rate>=0?'+':'')+d.rate.toFixed(4)+'%</div><div class="fr-sub-t">'+(d.rate>0.05?(lang==='ar'?'⚠️ خطر':'⚠️ Danger'):d.rate<-0.01?(lang==='ar'?'فرصة':'Opportunity'):(lang==='ar'?'طبيعي':'Normal'))+'</div></div></div>'}
 /* DASHBOARD */
 async function loadDash(){
+  try{ await loadTk(); }catch(e){ console.error('loadTk:',e); }
+  try{ initWS(); }catch(e){}
+  try{ await loadFutures(); }catch(e){ console.error('loadFutures:',e); }
+  try{ refreshTiers(); }catch(e){}
+  try{ checkVolSpikes(); }catch(e){}
+  try{ await loadTop4Ext(); }catch(e){}
   try{
-  await loadTk();initWS();await loadFutures();refreshTiers();checkVolSpikes();await loadTop4Ext();
   var fg=await fj('https://api.alternative.me/fng/?limit=1');if(fg&&fg.data){fgValue=+fg.data[0].value;var fgE=document.getElementById('fgV');if(fgE)fgE.textContent=fgValue;var fgLE=document.getElementById('fgL');if(fgLE)fgLE.textContent=fg.data[0].value_classification;var pFGE=document.getElementById('pFG');if(pFGE)pFGE.textContent=fgValue}
+  }catch(e){}
+  try{
   var gl=await fj(CG+'/global');if(gl&&gl.data){btcDom=gl.data.market_cap_percentage?gl.data.market_cap_percentage.btc:50;var btcDE=document.getElementById('btcD');if(btcDE)btcDE.textContent=btcDom.toFixed(1)+'%'}
+  }catch(e){}
+  try{
   var h=calcHealth();var hc=h.score>=70?'up':h.score>=45?'warn':'dn';
   var mhSE=document.getElementById('mhScore');if(mhSE){mhSE.textContent=h.score;mhSE.style.color='var(--'+hc+')'}
   var mhLE=document.getElementById('mhLabel');if(mhLE)mhLE.textContent=h.score>=70?(lang==='ar'?'سوق صحي':'Healthy'):h.score>=45?(lang==='ar'?'محايد — حذر':'Neutral'):(lang==='ar'?'ضعيف':'Weak');
   var mhPE=document.getElementById('mhPt');if(mhPE)mhPE.style.left=h.score+'%';var pMHE=document.getElementById('pMH');if(pMHE)pMHE.textContent=h.score;
   var mhFE=document.getElementById('mhFactors');if(mhFE)mhFE.innerHTML=h.factors.map(function(f){return'<div class="mh-f"><div class="mh-f-v" style="color:var(--'+f.c+')">'+f.v+'</div><div class="mh-f-l">'+f.l+'</div></div>'}).join('');
-  /* Stablecoin Flow */
-  loadStableFlow();
+  }catch(e){}
+  try{ loadStableFlow(); }catch(e){}
+  try{
   var wbE=document.getElementById('warnBox');if(wbE)wbE.innerHTML=getWarnings().map(function(w){return'<div class="warn-box"><div class="w-ic">'+w.ic+'</div><div class="w-txt">'+w.txt+'</div></div>'}).join('');
   var bk=Object.values(T).filter(function(x){return x.c>=8}).length;var bkE=document.getElementById('brkC');if(bkE)bkE.textContent=bk;var pBE=document.getElementById('pBrk');if(pBE)pBE.textContent=bk;
+  }catch(e){}
+  try{
   var cands=quickScan();var results=await deepAnalyze(cands);cache.scan=results;cache.scanTime=Date.now();detectWhaleWaves(results);
   var ultras=results.filter(function(r){return r.ultra});var conf=results.filter(function(r){return r.confirmed});
   var ultraLE=document.getElementById('ultraL');if(ultraLE)ultraLE.innerHTML=ultras.length?ultras.slice(0,3).map(ultraCard).join(''):conf.length?conf.slice(0,2).map(ultraCard).join(''):'<div class="muted">'+t('no_ultra')+'</div>';
   var ulCE=document.getElementById('ulC');if(ulCE)ulCE.textContent=ultras.length||conf.length;var pUlE=document.getElementById('pUl');if(pUlE)pUlE.textContent=ultras.length||conf.length;var notifBE=document.getElementById('notifB');if(notifBE)notifBE.dataset.c=(ultras.length||conf.length).toString();
-  /* ⚖️ L/S Intelligence v2.0 */
-  await loadTakerVol();
-  renderDashLS();
-  renderAcc('accCard');
-  renderTopCoins();
-  renderTop3();
-  checkWatchlistAlerts();
-  }catch(e){console.error('loadDash error:',e)}
+  }catch(e){ console.error('scan:',e); }
+  try{ await loadTakerVol(); }catch(e){}
+  try{ renderDashLS(); }catch(e){ console.error('renderDashLS:',e); }
+  try{ renderAcc('accCard'); }catch(e){}
+  try{ renderTopCoins(); }catch(e){ console.error('renderTopCoins:',e); }
+  try{ renderTop3(); }catch(e){ console.error('renderTop3:',e); }
+  try{ checkWatchlistAlerts(); }catch(e){}
 }
 /* SCANNER PAGE — uses cache for instant switch */
 async function runScan(){if(cache.scan&&Date.now()-cache.scanTime<CACHE_TTL){renderScanResults(cache.scan);setTimeout(async function(){var c=quickScan();cache.scan=await deepAnalyze(c);cache.scanTime=Date.now();renderScanResults(cache.scan)},100);return}var c=quickScan();var r=await deepAnalyze(c);cache.scan=r;cache.scanTime=Date.now();renderScanResults(r)}

@@ -1785,8 +1785,8 @@ async function loadDash(){
   var bk=Object.values(T).filter(function(x){return x.c>=8}).length;var bkE=document.getElementById('brkC');if(bkE)bkE.textContent=bk;var pBE=document.getElementById('pBrk');if(pBE)pBE.textContent=bk;
   var cands=quickScan();var results=await deepAnalyze(cands);cache.scan=results;cache.scanTime=Date.now();detectWhaleWaves(results);
   var ultras=results.filter(function(r){return r.ultra});var conf=results.filter(function(r){return r.confirmed});
-  document.getElementById('ultraL').innerHTML=ultras.length?ultras.slice(0,3).map(ultraCard).join(''):conf.length?conf.slice(0,2).map(ultraCard).join(''):'<div class="muted">'+t('no_ultra')+'</div>';
-  document.getElementById('ulC').textContent=ultras.length||conf.length;document.getElementById('pUl').textContent=ultras.length||conf.length;document.getElementById('notifB').dataset.c=(ultras.length||conf.length).toString();
+  var ultraLE=document.getElementById('ultraL');if(ultraLE)ultraLE.innerHTML=ultras.length?ultras.slice(0,3).map(ultraCard).join(''):conf.length?conf.slice(0,2).map(ultraCard).join(''):'<div class="muted">'+t('no_ultra')+'</div>';
+  var ulCE=document.getElementById('ulC');if(ulCE)ulCE.textContent=ultras.length||conf.length;var pUlE=document.getElementById('pUl');if(pUlE)pUlE.textContent=ultras.length||conf.length;var notifBE=document.getElementById('notifB');if(notifBE)notifBE.dataset.c=(ultras.length||conf.length).toString();
   /* ⚖️ L/S Intelligence v2.0 */
   await loadTakerVol();
   renderDashLS();
@@ -2010,32 +2010,55 @@ function renderWL(){document.getElementById('wlList').innerHTML=watchlist.length
 /* 📊 MARKET DIRECTION REPORT — Parallel + Error-Safe */
 /* ═══ MARKET REPORT v2.0 ═══ */
 function calcEMA(arr,p){if(!arr||arr.length<p)return arr?arr[arr.length-1]:0;var k=2/(p+1),e=arr[0];for(var i=1;i<arr.length;i++)e=arr[i]*k+e*(1-k);return e}
-var curMktTab=0,dailyCache={h:null,t:0},compCache={h:null,t:0},DAILY_TTL=3600000,COMP_TTL=4*3600000;
-var RPT_COINS=[{s:'BTC',ic:'₿',col:'#f7931a'},{s:'ETH',ic:'Ξ',col:'#627eea'},{s:'SOL',ic:'◎',col:'#9945ff'},{s:'BNB',ic:'⬡',col:'#f0b90b'},{s:'XRP',ic:'✕',col:'#0085c0'}];
+/* ═══ MARKET CHARTS v2.0 ═══ */
+var curMktTab=0;
+var btcCache={h:null,t:0};
+var ethCache={h:null,t:0};
+var MKT_TTL=4*3600000;
+var RPT_COINS=[{s:'BTC',ic:'\u20bf',col:'#f7931a'},{s:'ETH',ic:'\u039e',col:'#627eea'},{s:'SOL',ic:'\u25ce',col:'#9945ff'},{s:'BNB',ic:'\u2b21',col:'#f0b90b'},{s:'XRP',ic:'\u2715',col:'#0085c0'}];
 var reportHistory=[];try{reportHistory=JSON.parse(localStorage.getItem('nxRptHist')||'[]')}catch(e){reportHistory=[]}
 var prevReport=null;try{prevReport=JSON.parse(localStorage.getItem('nxPrevRpt')||'null')}catch(e){prevReport=null}
 var hourlyLog=[];try{hourlyLog=JSON.parse(localStorage.getItem('nxHrLog')||'[]')}catch(e){hourlyLog=[]}
 var FOMC_DATES=['2026-01-28','2026-03-18','2026-05-06','2026-06-17','2026-07-29','2026-09-16','2026-11-04','2026-12-16'];
 var CPI_DATES=['2026-01-14','2026-02-12','2026-03-11','2026-04-10','2026-05-13','2026-06-10','2026-07-15','2026-08-12','2026-09-11','2026-10-14','2026-11-12','2026-12-10'];
 var TOKEN_UNLOCKS=[];
+var CANDLE_NAMES={
+  ar:{bull_engulf:'\u0627\u0628\u062a\u0644\u0627\u0639 \u0634\u0631\u0627\u0626\u064a',bear_engulf:'\u0627\u0628\u062a\u0644\u0627\u0639 \u0628\u064a\u0639\u064a',hammer:'\u0645\u0637\u0631\u0642\u0629 (Hammer)',shooting:'\u0634\u0647\u0627\u0628 (Shooting Star)',doji:'Doji \u2014 \u062a\u0631\u062f\u062f',marubozu_up:'Marubozu \u0635\u0639\u0648\u062f\u064a',marubozu_dn:'Marubozu \u0647\u0628\u0648\u0637\u064a',normal_up:'\u0634\u0645\u0639\u0629 \u062e\u0636\u0631\u0627\u0621',normal_dn:'\u0634\u0645\u0639\u0629 \u062d\u0645\u0631\u0627\u0621'},
+  en:{bull_engulf:'Bullish Engulfing',bear_engulf:'Bearish Engulfing',hammer:'Hammer',shooting:'Shooting Star',doji:'Doji',marubozu_up:'Bullish Marubozu',marubozu_dn:'Bearish Marubozu',normal_up:'Green Candle',normal_dn:'Red Candle'}
+};
 var MKT_TPL={
-  bull_strong:['{coin} يواصل صعوده مدعوماً بـ{reason1}. الإغلاق فوق {ema} يعزز الإيجابية. المستوى الحرج {resistance} — اختراقه يفتح الباب لـ{target}. {warning}','{coin} في اتجاه صعودي قوي — {reason1}. السعر ثابت فوق {support} مع حجم {volStatus}. الهدف {target}. {warning}'],
-  bull_mild:['{coin} يميل للصعود — {reason1}. السعر فوق {ema} لكن {warning}. دخول عند {entry} وقف {stop}.','{coin} إيجابي بشكل عام — {reason1}. المستوى المهم {resistance}. {warning}'],
-  neutral:['{coin} يتداول جانبياً بين {support} و {resistance}. {reason1}. انتظر اختراق واضح. {warning}','{coin} في منطقة محايدة — لا إشارات قوية. {reason1}. الأفضل الانتظار.'],
-  bear_mild:['{coin} يميل للهبوط — {reason1}. تحت {ema}. دعم مهم {support}. كسره يفتح هبوط نحو {target}. {warning}'],
-  bear_strong:['{coin} في هبوط قوي — {reason1}. كسر {support} يسرّع الهبوط. تجنب الشراء حالياً. {warning}']
+  bull_strong:['{coin} \u064a\u0648\u0627\u0635\u0644 \u0635\u0639\u0648\u062f\u0647 \u0645\u062f\u0639\u0648\u0645\u0627\u0628\u0640{reason1}. \u0627\u0644\u0625\u063a\u0644\u0627\u0642 \u0641\u0648\u0642 {ema} \u064a\u0639\u0632\u0632 \u0627\u0644\u0625\u064a\u062c\u0627\u0628\u064a\u0629. \u0627\u0644\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u062d\u0631\u062c {resistance} \u2014 \u0627\u062e\u062a\u0631\u0627\u0642\u0647 \u064a\u0641\u062a\u062d \u0627\u0644\u0628\u0627\u0628 \u0644\u0640{target}. {warning}','{coin} \u0641\u064a \u0627\u062a\u062c\u0627\u0647 \u0635\u0639\u0648\u062f\u064a \u0642\u0648\u064a \u2014 {reason1}. \u0627\u0644\u0633\u0639\u0631 \u062b\u0627\u0628\u062a \u0641\u0648\u0642 {support} \u0645\u0639 \u062d\u062c\u0645 {volStatus}. \u0627\u0644\u0647\u062f\u0641 {target}. {warning}'],
+  bull_mild:['{coin} \u064a\u0645\u064a\u0644 \u0644\u0644\u0635\u0639\u0648\u062f \u2014 {reason1}. \u0627\u0644\u0633\u0639\u0631 \u0641\u0648\u0642 {ema} \u0644\u0643\u0646 {warning}. \u062f\u062e\u0648\u0644 \u0639\u0646\u062f {entry} \u0648\u0642\u0641 {stop}.','{coin} \u0625\u064a\u062c\u0627\u0628\u064a \u0628\u0634\u0643\u0644 \u0639\u0627\u0645 \u2014 {reason1}. \u0627\u0644\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0645\u0647\u0645 {resistance}. {warning}'],
+  neutral:['{coin} \u064a\u062a\u062f\u0627\u0648\u0644 \u062c\u0627\u0646\u0628\u064a\u0627\u064b \u0628\u064a\u0646 {support} \u0648 {resistance}. {reason1}. \u0627\u0646\u062a\u0638\u0631 \u0627\u062e\u062a\u0631\u0627\u0642 \u0648\u0627\u0636\u062d. {warning}','{coin} \u0641\u064a \u0645\u0646\u0637\u0642\u0629 \u0645\u062d\u0627\u064a\u062f\u0629 \u2014 \u0644\u0627 \u0625\u0634\u0627\u0631\u0627\u062a \u0642\u0648\u064a\u0629. {reason1}. \u0627\u0644\u0623\u0641\u0636\u0644 \u0627\u0644\u0627\u0646\u062a\u0638\u0627\u0631.'],
+  bear_mild:['{coin} \u064a\u0645\u064a\u0644 \u0644\u0644\u0647\u0628\u0648\u0637 \u2014 {reason1}. \u062a\u062d\u062a {ema}. \u062f\u0639\u0645 \u0645\u0647\u0645 {support}. \u0643\u0633\u0631\u0647 \u064a\u0641\u062a\u062d \u0647\u0628\u0648\u0637 \u0646\u062d\u0648 {target}. {warning}'],
+  bear_strong:['{coin} \u0641\u064a \u0647\u0628\u0648\u0637 \u0642\u0648\u064a \u2014 {reason1}. \u0643\u0633\u0631 {support} \u064a\u0633\u0631\u0651\u0639 \u0627\u0644\u0647\u0628\u0648\u0637. \u062a\u062c\u0646\u0628 \u0627\u0644\u0634\u0631\u0627\u0621 \u062d\u0627\u0644\u064a\u0627\u064b. {warning}']
 };
 var MKT_TPL_EN={
-  bull_strong:['{coin} continues rally — {reason1}. Close above {ema} is positive. Key level {resistance}. Target {target}. {warning}','{coin} in strong uptrend — {reason1}. Holding above {support}. Target {target}. {warning}'],
-  bull_mild:['{coin} mildly bullish — {reason1}. Above {ema}. {warning}.'],
+  bull_strong:['{coin} continues rally \u2014 {reason1}. Close above {ema} is positive. Key level {resistance}. Target {target}. {warning}','{coin} in strong uptrend \u2014 {reason1}. Holding above {support}. Target {target}. {warning}'],
+  bull_mild:['{coin} mildly bullish \u2014 {reason1}. Above {ema}. {warning}.'],
   neutral:['{coin} ranging between {support} and {resistance}. {reason1}. Wait for breakout.'],
-  bear_mild:['{coin} leaning bearish — {reason1}. Support at {support}. {warning}'],
-  bear_strong:['{coin} in strong decline — {reason1}. Avoid buying. {warning}']
+  bear_mild:['{coin} leaning bearish \u2014 {reason1}. Support at {support}. {warning}'],
+  bear_strong:['{coin} in strong decline \u2014 {reason1}. Avoid buying. {warning}']
 };
 
-function mktTab(idx,btn){curMktTab=idx;document.querySelectorAll('#mktTabs>.mkt-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');document.getElementById('mktDaily').style.display=idx===0?'block':'none';document.getElementById('mktComp').style.display=idx===1?'block':'none';if(idx===0)loadDaily();if(idx===1)loadComp()}
+function mktTab(idx,btn){
+  curMktTab=idx;
+  document.querySelectorAll('#mktTabs>.mkt-tab').forEach(function(b){b.classList.remove('act')});
+  if(btn)btn.classList.add('act');
+  var btcEl=document.getElementById('mktBTC');
+  var ethEl=document.getElementById('mktETH');
+  if(btcEl)btcEl.style.display=idx===0?'block':'none';
+  if(ethEl)ethEl.style.display=idx===1?'block':'none';
+  if(idx===0)loadBTCChart();
+  if(idx===1)loadETHChart();
+}
 
-function getFreshness(ct){var a=Date.now()-ct;if(a<1800000)return{cls:'ok',txt:lang==='ar'?'بيانات طازجة':'Fresh data'};if(a<10800000)return{cls:'aging',txt:lang==='ar'?'بيانات جيدة':'Good data'};return{cls:'stale',txt:lang==='ar'?'بيانات قديمة — حدّث!':'Stale — Refresh!'}}
+function getMktFresh(cacheTime){
+  var age=Date.now()-cacheTime;var pct=age/MKT_TTL;
+  if(pct<0.5)return{cls:'ok',txt:lang==='ar'?'بيانات طازجة':'Fresh'};
+  if(pct<0.9)return{cls:'aging',txt:lang==='ar'?'بيانات جيدة':'Good'};
+  return{cls:'stale',txt:lang==='ar'?'حدّث!':'Refresh!'};
+}
 
 function getUpcomingEvents(){var evs=[];var now=new Date();var in7=new Date(now.getTime()+7*86400000);
   FOMC_DATES.forEach(function(d){var dt=new Date(d);if(dt>=now&&dt<=in7){var dy=Math.ceil((dt-now)/86400000);evs.push({ic:'🏦',txt:lang==='ar'?'اجتماع Fed — '+(dy===0?'اليوم!':dy===1?'غداً':'بعد '+dy+' أيام'):'FOMC — '+(dy===0?'Today!':'in '+dy+'d'),impact:'high',warn:lang==='ar'?'توقع تذبذب عالي':'Expect volatility'})}});
@@ -2045,10 +2068,40 @@ function getUpcomingEvents(){var evs=[];var now=new Date();var in7=new Date(now.
 
 function getAccuracy(){var r=reportHistory.slice(-20);if(r.length<5)return null;var c=r.filter(function(x){return x.correct}).length;return{pct:Math.round(c/r.length*100),c:c,t:r.length}}
 
+function detectCandlePattern(o,h,l,c){
+  var body=Math.abs(c-o);var range=h-l;
+  if(range===0)return'doji';var bodyPct=body/range;
+  var upperWick=c>o?(h-c)/range:(h-o)/range;
+  var lowerWick=c>o?(o-l)/range:(c-l)/range;
+  if(bodyPct<0.1)return'doji';
+  if(bodyPct>0.8&&c>o)return'marubozu_up';
+  if(bodyPct>0.8&&c<o)return'marubozu_dn';
+  if(lowerWick>0.6&&upperWick<0.1&&c>o)return'hammer';
+  if(upperWick>0.6&&lowerWick<0.1&&c<o)return'shooting';
+  return c>o?'normal_up':'normal_dn';
+}
+
+function rP(p){
+  if(!p||isNaN(p))return'$0';
+  if(p>=100)return'$'+Math.round(p).toLocaleString('en');
+  if(p>=1)return'$'+(+p.toFixed(2));
+  return'$'+(+p.toFixed(4));
+}
+
+function mktSignature(){
+  return'<div class="mkt-signature">'
+    +'<div class="mkt-sig-name">'+(lang==='ar'?'تحليل مقدّم من خبير زكريا الأحمد':'Analysis by expert Zakaria Al-Ahmad')+'</div>'
+    +'<div class="mkt-sig-wish">'+(lang==='ar'?'أتمنى لكم النجاح 🎯':'Wishing you success 🎯')+'</div>'
+    +'<div class="mkt-sig-note">'+(lang==='ar'
+      ?'⚠️ ملاحظة: هذا تحليل حسب نظرة السوق — احتمال أي خبر كبير يقلب التحليل عكس النتائج'
+      :'⚠️ Note: This analysis is based on market outlook — any major news could reverse the results')+'</div>'
+    +'</div>';
+}
+
 function buildStory(coin,data){var tpls=lang==='ar'?MKT_TPL:MKT_TPL_EN;var cat=data.ts>=4?'bull_strong':data.ts>=2?'bull_mild':data.ts<=-4?'bear_strong':data.ts<=-2?'bear_mild':'neutral';
   var pool=tpls[cat];var tmpl=pool[Math.floor(Date.now()/3600000)%pool.length];
   var cn=lang==='ar'?(coin==='BTC'?'البيتكوين':coin==='ETH'?'الإيثيريوم':coin==='SOL'?'سولانا':coin):coin;
-  return tmpl.replace('{coin}',cn).replace('{reason1}',data.reasons[0]||'').replace('{reason2}',data.reasons[1]||'').replace('{ema}',fP(data.ema20)).replace('{support}',fP(data.supp)).replace('{resistance}',fP(data.resist)).replace('{target}',fP(data.f618U)).replace('{entry}',fP(data.price*0.99)).replace('{stop}',fP(data.supp)).replace('{volStatus}',data.volT>1.3?(lang==='ar'?'قوي':'strong'):(lang==='ar'?'ضعيف':'weak')).replace('{warning}',data.warning||'')}
+  return tmpl.replace('{coin}',cn).replace('{reason1}',data.reasons[0]||'').replace('{reason2}',data.reasons[1]||'').replace('{ema}',rP(data.ema20)).replace('{support}',rP(data.supp)).replace('{resistance}',rP(data.resist)).replace('{target}',rP(data.f618U)).replace('{entry}',rP(data.price*0.99)).replace('{stop}',rP(data.supp)).replace('{volStatus}',data.volT>1.3?(lang==='ar'?'قوي':'strong'):(lang==='ar'?'ضعيف':'weak')).replace('{warning}',data.warning||'')}
 
 function addHourlyLog(msg){hourlyLog.push({time:Date.now(),txt:msg});if(hourlyLog.length>20)hourlyLog=hourlyLog.slice(-20);try{localStorage.setItem('nxHrLog',JSON.stringify(hourlyLog))}catch(e){}}
 
@@ -2121,7 +2174,7 @@ async function analyzeCoinRpt(sym){
   else if(divRSI1d==='bearish')warning=lang==='ar'?'⚠️ RSI Divergence على اليومي':'⚠️ RSI Div on Daily';
   else if(volT<0.7)warning=lang==='ar'?'حجم ضعيف':'Low volume';
   /* Scenarios */
-  var bullP=Math.min(80,Math.max(10,50+ts*5+(wConf>=50?5:0)+(bullTFs>=3?5:0)));var bearP=Math.min(40,Math.max(5,50-ts*5));var neutP=100-bullP-bearP;
+  var bullP=Math.min(80,Math.max(10,50+ts*4+(wConf>=50?5:0)+(bullTFs>=3?5:0)));var bearP=Math.min(35,Math.max(5,100-bullP-15));var neutP=100-bullP-bearP;
   var bullCond=lang==='ar'?'اختراق '+fP(resist)+' بحجم':'Break '+fP(resist)+' with volume';
   var bearCond=lang==='ar'?'كسر '+fP(supp)+' بإغلاق':'Close below '+fP(supp);
   var bullInv=lang==='ar'?'يُلغى لو كسر '+fP(supp):'Invalidated below '+fP(supp);
@@ -2134,7 +2187,7 @@ async function analyzeCoinRpt(sym){
   addSc(lang==='ar'?'الحيتان':'Whales',wConf>=60?2:wConf>=40?1:0,'whales');
   addSc('RSI',rsi>=30&&rsi<=55?1:0.5,'rsi');
   addSc('FR',fr&&fr.rate<0?1:fr&&fr.rate>0.05?0:0.5,'fr');
-  addSc('OI',OI[sym]?1:0.5,'oi');
+  addSc('OI',OI[sym]?(ch4h>0&&ts>0?1:0.5):0,'oi');
   addSc(lang==='ar'?'حجم':'Vol',volT>1.3?0.5:0,'vol');
   addSc('MACD',macd.h>0?0.5:0,'macd');
   addSc(lang==='ar'?'توافق':'TF',bullTFs>=3?1:bullTFs>=2?0.5:0,'confluence');
@@ -2145,179 +2198,368 @@ async function analyzeCoinRpt(sym){
     var longL=sL.filter(function(e){return e.S==='SELL'}).reduce(function(s,e){return s+(e.q||0)*(e.p||0)},0);
     var shortL=sL.filter(function(e){return e.S==='BUY'}).reduce(function(s,e){return s+(e.q||0)*(e.p||0)},0);
     if(longL>0)liqZones.push({side:'Long',amt:longL});if(shortL>0)liqZones.push({side:'Short',amt:shortL})}
-  return{sym:sym,price:price,d:d,ts:ts,dir:dir,dCol:dCol,dIc:dIc,rsi:rsi,rsi1d:rsi1d,macd:macd,macd1d:macd1d,ema20:ema20,ema50:ema50,volT:volT,resist:resist,supp:supp,f618U:f618U,f100U:f100U,f618D:f618D,fr:fr,ls:ls,oi:OI[sym],wConf:wConf,cvd:cvd,tf:{h1:tf1h,h4:tf4h,d:tf1d,w:tfW},bullTFs:bullTFs,ch:{h1:ch1h,h4:ch4h,h24:ch24,d7:ch7d},divRSI:divRSI,divRSI1d:divRSI1d,reasons:reasons,warning:warning,bullP:bullP,bearP:bearP,neutP:neutP,bullCond:bullCond,bearCond:bearCond,bullInv:bullInv,bearInv:bearInv,sc:+sc.toFixed(1),scB:scB,rec:rec,recIc:recIc,struct:struct,bos:bos,choch:choch,riskPct:riskPct,orderBlocks:orderBlocks,fvgs:fvgs,histMatch:histMatch,liqZones:liqZones}}
+  return{sym:sym,price:price,d:d,ts:ts,dir:dir,dCol:dCol,dIc:dIc,rsi:rsi,rsi1d:rsi1d,macd:macd,macd1d:macd1d,ema20:ema20,ema50:ema50,volT:volT,resist:resist,supp:supp,f618U:f618U,f100U:f100U,f618D:f618D,fr:fr,ls:ls,oi:OI[sym],wConf:wConf,cvd:cvd,tf:{h1:tf1h,h4:tf4h,d:tf1d,w:tfW},bullTFs:bullTFs,ch:{h1:ch1h,h4:ch4h,h24:ch24,d7:ch7d},divRSI:divRSI,divRSI1d:divRSI1d,reasons:reasons,warning:warning,bullP:bullP,bearP:bearP,neutP:neutP,bullCond:bullCond,bearCond:bearCond,bullInv:bullInv,bearInv:bearInv,sc:+sc.toFixed(1),scB:scB,rec:rec,recIc:recIc,struct:struct,bos:bos,choch:choch,riskPct:riskPct,orderBlocks:orderBlocks,fvgs:fvgs,histMatch:histMatch,liqZones:liqZones,kl4h:kl4h,kl1d:kl1d,kl1h:kl1h}}
 
-/* ═══ TAB 0: DAILY REPORT ═══ */
-async function loadDaily(){
-  if(dailyCache.h&&Date.now()-dailyCache.t<DAILY_TTL){document.getElementById('mktDaily').innerHTML=dailyCache.h;return}
-  document.getElementById('mktDaily').innerHTML='<div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>';
-  try{
-  var coins=await Promise.all(RPT_COINS.map(function(c){return analyzeCoinRpt(c.s)}));
-  var btc=coins[0];if(!btc){document.getElementById('mktDaily').innerHTML='<div class="empty"><div class="empty-ic">📊</div><div class="empty-tx">'+t('no_data')+'</div></div>';return}
-  var hlth=calcHealth();var hCol=hlth.score>=70?'var(--up)':hlth.score>=45?'var(--warn)':'var(--dn)';var evs=getUpcomingEvents();var warns=getWarnings();
-  var xml='';
-  var frsh=getFreshness(Date.now());
-  xml+='<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' — '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
-  /* Hero */
-  xml+='<div class="mkt-dir-hero" style="background:'+(btc.ts>=2?'rgba(0,255,136,.04)':btc.ts<=-2?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)')+';border:1px solid '+(btc.ts>=2?'rgba(0,255,136,.08)':btc.ts<=-2?'rgba(255,56,96,.08)':'rgba(255,184,0,.08)')+'">'
-    +'<div style="font-size:28px">'+btc.dIc+'</div><div style="font-size:16px;font-weight:800;color:'+btc.dCol+';margin:4px 0">'+btc.dir+'</div>'
-    +'<div style="font-family:var(--fm);font-size:20px;font-weight:800;color:var(--t0)">BTC '+fP(btc.price)+'</div>'
-    +'<div style="font-family:var(--fm);font-size:12px;color:'+(btc.ch.h24>=0?'var(--up)':'var(--dn)')+'">'+(btc.ch.h24>=0?'+':'')+btc.ch.h24.toFixed(1)+'% (24h)</div></div>';
-  /* What changed */
-  var changes=getChanges(btc);
-  if(changes.length){xml+='<div class="mkt-changed"><div class="mkt-changed-t">'+(lang==='ar'?'🔄 شو تغيّر؟':'🔄 What changed?')+'</div>';changes.forEach(function(c){xml+='<div class="mkt-changed-i"><span>'+c.ic+'</span><span>'+c.txt+'</span></div>'});xml+='</div>'}
-  prevReport={btcDir:btc.dIc,btcPrice:btc.price,fg:fgValue,time:Date.now()};try{localStorage.setItem('nxPrevRpt',JSON.stringify(prevReport))}catch(e){}
-  /* Quick 4 */
-  xml+='<div class="mkt-tf-grid">';
-  xml+='<div class="mkt-tf"><div class="mkt-tf-v" style="color:var(--t0)">'+fP(btc.price)+'</div><div class="mkt-tf-l">BTC</div></div>';
-  xml+='<div class="mkt-tf"><div class="mkt-tf-v" style="color:var(--t0)">'+fP(coins[1]?coins[1].price:0)+'</div><div class="mkt-tf-l">ETH</div></div>';
-  xml+='<div class="mkt-tf"><div class="mkt-tf-v" style="color:'+hCol+'">'+hlth.score+'</div><div class="mkt-tf-l">'+(lang==='ar'?'صحة':'Health')+'</div></div>';
-  xml+='<div class="mkt-tf"><div class="mkt-tf-v" style="color:'+(fgValue<30?'var(--dn)':fgValue>60?'var(--up)':'var(--warn)')+'">'+fgValue+'</div><div class="mkt-tf-l">F&G</div></div></div>';
-  /* Accuracy */
-  var acc=getAccuracy();if(acc)xml+='<div class="mkt-acc"><span>📈 '+(lang==='ar'?'دقة التقارير':'Accuracy')+':</span><span style="font-weight:800;color:'+(acc.pct>=70?'var(--up)':acc.pct>=50?'var(--warn)':'var(--dn)')+'">'+acc.pct+'% ('+acc.c+'/'+acc.t+')</span></div>';
-  /* Events */
-  if(evs.length){xml+='<div class="mkt-events">';evs.forEach(function(e){xml+='<div class="mkt-event-i"><span>'+e.ic+'</span><span>'+e.txt+'</span></div>'+(e.warn?'<div style="font-size:8px;color:var(--warn);padding:0 0 2px 22px">'+e.warn+'</div>':'')});xml+='</div>'}
-  /* Top 5 */
-  xml+='<div class="mkt-sh">'+(lang==='ar'?'📊 العملات الرئيسية':'📊 Top Coins')+'</div><div class="mkt-top5">';
-  coins.forEach(function(c,ci){if(!c)return;var coin=RPT_COINS[ci];
-    xml+='<div class="mkt-t5-row" onclick="openCoin(\''+c.sym+'\')"><div style="display:flex;align-items:center;gap:6px"><span style="font-size:14px;color:'+coin.col+'">'+coin.ic+'</span><span style="font-weight:800">'+c.sym+'</span></div><span style="font-family:var(--fm);font-weight:700">'+fP(c.price)+'</span><span style="font-family:var(--fm);font-weight:700;color:'+(c.ch.h24>=0?'var(--up)':'var(--dn)')+'">'+(c.ch.h24>=0?'+':'')+c.ch.h24.toFixed(1)+'%</span><span style="font-size:9px;color:'+c.dCol+'">'+c.dIc+'</span></div>'});
-  xml+='</div>';
-  /* BTC detailed */
-  xml+='<div class="rpt-card"><div class="rpt-card-bar" style="background:#f7931a"></div><div class="rpt-card-body">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px;color:#f7931a">₿</span><span style="font-weight:800;font-size:14px">BTC/USDT</span></div><span style="font-size:12px;font-weight:800;color:'+btc.dCol+'">'+btc.dIc+' '+btc.dir+'</span></div>';
-  xml+='<div class="mkt-story">'+buildStory('BTC',btc)+'</div>';
-  xml+='<div class="mkt-tf-grid"><div class="mkt-tf"><div class="mkt-tf-v" style="color:'+(btc.ch.h1>=0?'var(--up)':'var(--dn)')+'">'+(btc.ch.h1>=0?'+':'')+btc.ch.h1.toFixed(1)+'%</div><div class="mkt-tf-l">1H</div></div><div class="mkt-tf"><div class="mkt-tf-v" style="color:'+(btc.ch.h4>=0?'var(--up)':'var(--dn)')+'">'+(btc.ch.h4>=0?'+':'')+btc.ch.h4.toFixed(1)+'%</div><div class="mkt-tf-l">4H</div></div><div class="mkt-tf"><div class="mkt-tf-v" style="color:'+(btc.ch.h24>=0?'var(--up)':'var(--dn)')+'">'+(btc.ch.h24>=0?'+':'')+btc.ch.h24.toFixed(1)+'%</div><div class="mkt-tf-l">24H</div></div><div class="mkt-tf"><div class="mkt-tf-v" style="color:'+(btc.ch.d7>=0?'var(--up)':'var(--dn)')+'">'+(btc.ch.d7>=0?'+':'')+btc.ch.d7.toFixed(1)+'%</div><div class="mkt-tf-l">7D</div></div></div>';
-  xml+='<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:8px;font-size:8px;font-family:var(--fm)">'
-    +'<span style="padding:2px 5px;border-radius:4px;background:var(--bg2);color:'+(btc.rsi<30?'var(--up)':btc.rsi>70?'var(--dn)':'var(--t1)')+'">RSI:'+btc.rsi.toFixed(0)+'</span>'
-    +'<span style="padding:2px 5px;border-radius:4px;background:var(--bg2);color:'+(btc.macd.h>0?'var(--up)':'var(--dn)')+'">MACD:'+(btc.macd.h>0?'✅':'❌')+'</span>'
-    +'<span style="padding:2px 5px;border-radius:4px;background:var(--bg2);color:var(--neon)">🐋'+btc.wConf+'%</span>'
-    +(btc.fr?'<span style="padding:2px 5px;border-radius:4px;background:var(--bg2);color:'+(btc.fr.rate>0.05?'var(--dn)':'var(--t2)')+'">FR:'+(btc.fr.rate>=0?'+':'')+btc.fr.rate.toFixed(4)+'%</span>':'')
-    +(btc.divRSI!=='none'?'<span style="padding:2px 5px;border-radius:4px;background:rgba(255,56,96,.1);color:var(--dn)">⚠️ Div</span>':'')+'</div>';
-  xml+='<div class="mkt-levels"><div class="mkt-lv"><span><span class="mkt-lv-tag" style="background:rgba(255,56,96,.1);color:var(--dn)">R</span> '+(lang==='ar'?'مقاومة':'Resistance')+'</span><span class="mkt-lv-price" style="color:var(--dn)">'+fP(btc.resist)+'</span></div><div class="mkt-lv"><span><span class="mkt-lv-tag" style="background:rgba(91,156,255,.1);color:var(--blue)">▶</span> '+(lang==='ar'?'الحالي':'Now')+'</span><span class="mkt-lv-price">'+fP(btc.price)+'</span></div><div class="mkt-lv"><span><span class="mkt-lv-tag" style="background:rgba(0,255,136,.1);color:var(--up)">S</span> '+(lang==='ar'?'دعم':'Support')+'</span><span class="mkt-lv-price" style="color:var(--up)">'+fP(btc.supp)+'</span></div></div>';
-  xml+='<div style="padding:8px;border-radius:8px;background:'+(btc.ts>=2?'var(--ud)':btc.ts<=-2?'rgba(255,56,96,.06)':'var(--wd)')+'"><div style="font-size:11px;font-weight:700;color:'+(btc.ts>=2?'var(--up)':btc.ts<=-2?'var(--dn)':'var(--warn)')+'">'+btc.rec+'</div></div>';
-  xml+='<div class="mkt-link-scan" onclick="sp(\'scan\')">📊 '+(lang==='ar'?'افتح بالسكانر':'Open in Scanner')+'</div>';
-  xml+='</div></div>';
-  /* ETH brief */
-  if(coins[1]){var eth=coins[1];xml+='<div class="rpt-card"><div class="rpt-card-bar" style="background:#627eea"></div><div class="rpt-card-body">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="display:flex;align-items:center;gap:6px"><span style="font-size:14px;color:#627eea">Ξ</span><span style="font-weight:800">ETH</span></div><span style="font-family:var(--fm);font-size:14px;font-weight:800">'+fP(eth.price)+'</span></div>'
-    +'<div style="display:flex;gap:8px;font-size:10px;font-family:var(--fm);margin-bottom:4px"><span style="color:'+(eth.ch.h24>=0?'var(--up)':'var(--dn)')+'">'+(eth.ch.h24>=0?'+':'')+eth.ch.h24.toFixed(1)+'% 24h</span><span style="color:'+eth.dCol+'">'+eth.dIc+' '+eth.dir+'</span><span>RSI:'+eth.rsi.toFixed(0)+'</span></div>'
-    +'<div style="font-size:9px;color:var(--t2)">ETH/BTC: '+(T.ETH&&T.BTC?(T.ETH.p/T.BTC.p).toFixed(5):'--')+'</div></div></div>'}
-  /* SOL brief */
-  if(coins[2]){var sol=coins[2];xml+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:var(--glass);border:1px solid var(--bdr);border-radius:10px;margin-bottom:8px;font-size:10px"><div style="display:flex;align-items:center;gap:6px"><span style="color:#9945ff">◎</span><span style="font-weight:700">SOL</span><span style="font-family:var(--fm)">'+fP(sol.price)+'</span></div><span style="font-family:var(--fm);color:'+(sol.ch.h24>=0?'var(--up)':'var(--dn)')+'">'+(sol.ch.h24>=0?'+':'')+sol.ch.h24.toFixed(1)+'%</span><span style="color:'+sol.dCol+'">'+sol.dIc+'</span></div>'}
-  /* Warnings */
-  if(warns.length){xml+='<div class="mkt-sh">'+(lang==='ar'?'⚠️ تحذيرات':'⚠️ Warnings')+'</div>';warns.forEach(function(w){xml+='<div style="display:flex;align-items:center;gap:6px;padding:4px 0;font-size:10px"><span>'+w.ic+'</span><span style="color:var(--t1)">'+w.txt+'</span></div>'})}
-  /* Hourly Log */
-  addHourlyLog(btc.dIc+' BTC '+fP(btc.price)+' ('+(btc.ch.h24>=0?'+':'')+btc.ch.h24.toFixed(1)+'%)');
-  var rLog=hourlyLog.slice(-8).reverse();
-  if(rLog.length>1){xml+='<div class="mkt-sh">'+(lang==='ar'?'📋 سجل التغييرات':'📋 Change Log')+'</div><div class="mkt-log">';rLog.forEach(function(l){xml+='<div class="mkt-log-i"><span class="mkt-log-time">'+new Date(l.time).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</span><span style="color:var(--t1)">'+l.txt+'</span></div>'});xml+='</div>'}
-  xml+='<div style="text-align:center;margin:10px 0"><span style="font-size:10px;color:var(--blue);cursor:pointer;font-weight:700" onclick="mktTab(1,document.querySelectorAll(\'#mktTabs>.mkt-tab\')[1])">📊 '+(lang==='ar'?'تقرير شامل — '+btc.sc+'/10':'Full Report — '+btc.sc+'/10')+' →</span></div>';
-  xml+='<div style="text-align:center;font-size:8px;color:var(--t3)">⚠️ '+(lang==='ar'?'تحليل فني — ليس نصيحة مالية':'Not financial advice')+'</div>';
-  xml+='<button class="rfr" onclick="dailyCache.t=0;loadDaily()">🔄 '+(lang==='ar'?'تحديث':'Refresh')+'</button>';
-  dailyCache.h=xml;dailyCache.t=Date.now();document.getElementById('mktDaily').innerHTML=xml;loadStableFlow()
-  }catch(e){document.getElementById('mktDaily').innerHTML='<div class="empty"><div class="empty-ic">📊</div><div class="empty-tx">'+t('no_data')+'</div></div>'}}
+/* ═══ buildChartHTML — 12 Professional Analysis Sections ═══ */
+function buildChartHTML(data, coinColor, coinIcon, coinName){
+  if(!data) return '<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u0644\u0627 \u0628\u064a\u0627\u0646\u0627\u062a':'No data')+'</div></div>';
+  var h='';
+  var cn=lang==='ar'?coinName.ar:coinName.en;
+  var sym=data.sym;
 
-/* ═══ TAB 1: COMPREHENSIVE — 12 LAYERS ═══ */
-async function loadComp(){
-  if(compCache.h&&Date.now()-compCache.t<COMP_TTL){document.getElementById('mktComp').innerHTML=compCache.h;return}
-  document.getElementById('mktComp').innerHTML='<div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div><div style="font-size:11px;color:var(--t2);margin-top:10px">'+(lang==='ar'?'جاري تحليل 12 طبقة...':'Analyzing 12 layers...')+'</div></div>';
-  try{
-  var coins=await Promise.all(RPT_COINS.map(function(c){return analyzeCoinRpt(c.s)}));
-  var btc=coins[0];if(!btc){document.getElementById('mktComp').innerHTML='<div class="empty"><div class="empty-ic">📊</div><div class="empty-tx">'+t('no_data')+'</div></div>';return}
-  var hlth=calcHealth();var hCol=hlth.score>=70?'var(--up)':hlth.score>=45?'var(--warn)':'var(--dn)';var evs=getUpcomingEvents();var warns=getWarnings();
-  var html='';
-  var frsh=getFreshness(Date.now());
-  html+='<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' — '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
-  /* Risk Score */
-  html+='<div class="mkt-risk" style="background:'+(hlth.score>=70?'rgba(0,255,136,.04)':hlth.score>=45?'rgba(255,184,0,.04)':'rgba(255,56,96,.04)')+'">'
-    +'<div class="mkt-risk-circle" style="background:var(--bg2);color:'+hCol+'">'+hlth.score+'</div>'
-    +'<div><div style="font-size:12px;font-weight:800;color:'+hCol+'">'+(hlth.score>=70?(lang==='ar'?'🟢 سوق صحي':'🟢 Healthy'):hlth.score>=45?(lang==='ar'?'🟡 حذر':'🟡 Caution'):(lang==='ar'?'🔴 خطر':'🔴 Danger'))+'</div><div style="font-size:9px;color:var(--t2)">Health Score / 100</div></div></div>';
-  /* Accuracy */
-  var acc=getAccuracy();if(acc)html+='<div class="mkt-acc"><span>📈 '+(lang==='ar'?'دقة':'Accuracy')+':</span><span style="font-weight:800;color:'+(acc.pct>=70?'var(--up)':acc.pct>=50?'var(--warn)':'var(--dn)')+'">'+acc.pct+'% ('+acc.c+'/'+acc.t+')</span></div>';
-  /* Events */
-  if(evs.length){html+='<div class="mkt-events">';evs.forEach(function(e){html+='<div class="mkt-event-i"><span>'+e.ic+'</span><span>'+e.txt+'</span></div>'+(e.warn?'<div style="font-size:8px;color:var(--warn);padding:0 0 2px 22px">'+e.warn+'</div>':'')});html+='</div>'}
-  /* BTC Dom + F&G + Alt Season */
-  var allC=Object.values(T);var altsUp=allC.filter(function(x){return x.c>0&&x.c>(T.BTC?T.BTC.c:0)}).length;var altIdx=allC.length>0?Math.round(altsUp/allC.length*100):50;
-  html+='<div class="mkt-cor"><div class="mkt-cor-i"><div class="mkt-cor-v">'+btcDom.toFixed(1)+'%</div><div class="mkt-cor-l">BTC Dom</div></div><div class="mkt-cor-i"><div class="mkt-cor-v" style="color:'+(fgValue<30?'var(--dn)':fgValue>60?'var(--up)':'var(--warn)')+'">'+fgValue+'</div><div class="mkt-cor-l">Fear&Greed</div></div><div class="mkt-cor-i"><div class="mkt-cor-v" style="color:'+(altIdx>60?'var(--up)':'var(--warn)')+'">'+altIdx+'%</div><div class="mkt-cor-l">Alt Season</div></div></div>';
-  /* Alt bar */
-  html+='<div class="mkt-alt-bar"><span style="font-size:8px;color:var(--t3);min-width:28px">BTC</span><div class="mkt-alt-track"><div style="width:'+(100-altIdx)+'%;background:#f7931a;height:100%"></div><div style="width:'+altIdx+'%;background:var(--up);height:100%"></div></div><span style="font-size:8px;color:var(--t3);min-width:28px;text-align:right">Alts</span></div>';
-  /* Money flow */
-  var btcVol=T.BTC?T.BTC.v:0;var ethVol=T.ETH?T.ETH.v:0;var totalVol=Object.values(T).reduce(function(s,x){return s+x.v},0);if(totalVol===0)totalVol=1;var altVol=totalVol-btcVol-ethVol;
-  html+='<div class="mkt-flow"><span style="color:var(--t3)">'+(lang==='ar'?'تدفق:':'Flow:')+'</span><span class="mkt-flow-b" style="background:rgba(247,147,26,.1);color:#f7931a">BTC '+Math.round(btcVol/totalVol*100)+'%</span><span>→</span><span class="mkt-flow-b" style="background:rgba(98,126,234,.1);color:#627eea">ETH '+Math.round(ethVol/totalVol*100)+'%</span><span>→</span><span class="mkt-flow-b" style="background:rgba(0,255,136,.1);color:var(--up)">Alts '+Math.round(altVol/totalVol*100)+'%</span></div>';
-  /* Per-coin cards — 12 layers each */
-  coins.forEach(function(c,ci){if(!c)return;var coin=RPT_COINS[ci];
-    html+='<div class="rpt-card"><div class="rpt-card-bar" style="background:'+coin.col+'"></div><div class="rpt-card-body">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px;color:'+coin.col+'">'+coin.ic+'</span><span style="font-weight:800;font-size:14px">'+c.sym+'/USDT</span></div><span style="font-size:12px;font-weight:800;color:'+c.dCol+'">'+c.dIc+' '+c.dir+'</span></div>'
-      +'<div style="font-family:var(--fm);font-size:20px;font-weight:800;color:var(--t0);margin-bottom:4px">'+fP(c.price)+' <span style="font-size:12px;color:'+(c.ch.h24>=0?'var(--up)':'var(--dn)')+'">'+(c.ch.h24>=0?'+':'')+c.ch.h24.toFixed(1)+'%</span></div>';
-    /* L1: Story */
-    html+='<div class="mkt-story">'+buildStory(c.sym,c)+'</div>';
-    /* L2: Multi-TF */
-    var tfIc=function(d){return d==='up'?'<span style="color:var(--up)">▲</span>':d==='down'?'<span style="color:var(--dn)">▼</span>':'<span style="color:var(--warn)">—</span>'};
-    html+='<div class="mkt-tf-grid"><div class="mkt-tf">'+tfIc(c.tf.w)+'<div class="mkt-tf-l">W</div></div><div class="mkt-tf">'+tfIc(c.tf.d)+'<div class="mkt-tf-l">D</div></div><div class="mkt-tf">'+tfIc(c.tf.h4)+'<div class="mkt-tf-l">4H</div></div><div class="mkt-tf">'+tfIc(c.tf.h1)+'<div class="mkt-tf-l">1H</div></div></div>'
-      +'<div class="mkt-conf" style="background:'+(c.bullTFs>=3?'rgba(0,255,136,.04)':c.bullTFs<=1?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)')+';color:'+(c.bullTFs>=3?'var(--up)':c.bullTFs<=1?'var(--dn)':'var(--warn)')+'">'+(lang==='ar'?'توافق: ':'Confluence: ')+c.bullTFs+'/4 '+(c.bullTFs>=3?(lang==='ar'?'صعودي':'Bullish'):(lang==='ar'?'مختلط':'Mixed'))+'</div>';
-    /* L3: Structure */
-    var stCol=c.struct==='HH/HL'?'var(--up)':c.struct==='LH/LL'?'var(--dn)':'var(--warn)';
-    html+='<div class="mkt-struct"><div style="font-size:10px;font-weight:700;margin-bottom:4px">'+(lang==='ar'?'🏗️ هيكل السوق':'🏗️ Market Structure')+'</div>'
-      +'<div class="mkt-struct-r"><span style="color:var(--t2)">'+(lang==='ar'?'النمط':'Pattern')+'</span><span style="font-weight:800;color:'+stCol+'">'+c.struct+'</span></div>'
-      +(c.bos?'<div class="mkt-struct-r"><span style="color:var(--t2)">BOS</span><span style="font-family:var(--fm);font-weight:700">'+c.bos+'</span></div>':'')
-      +(c.choch?'<div class="mkt-struct-r"><span style="color:var(--t2)">ChoCH</span><span style="font-family:var(--fm);font-weight:700;color:var(--dn)">'+c.choch+'</span></div>':'')+'</div>';
-    /* L4: Order Blocks + FVG */
-    if(c.orderBlocks.length||c.fvgs.length){html+='<div class="mkt-struct"><div style="font-size:10px;font-weight:700;margin-bottom:4px">📦 OB & FVG</div>';
-      c.orderBlocks.forEach(function(ob){html+='<div class="mkt-struct-r"><span style="color:var(--t2)">OB '+(ob.type==='bullish'?'🟢':'🔴')+'</span><span style="font-family:var(--fm);font-weight:700;color:'+(ob.type==='bullish'?'var(--up)':'var(--dn)')+'">'+ob.price+'</span></div>'});
-      c.fvgs.forEach(function(f){html+='<div class="mkt-struct-r"><span style="color:var(--t2)">FVG '+(f.type==='bullish'?'🟢':'🔴')+'</span><span style="font-family:var(--fm);font-weight:700">'+f.bot+' — '+f.top+'</span></div>'});
-      html+='</div>'}
-    /* L5: Divergence */
-    if(c.divRSI!=='none'||c.divRSI1d!=='none'){html+='<div style="padding:6px;background:rgba(255,56,96,.04);border:1px solid rgba(255,56,96,.08);border-radius:8px;margin-bottom:6px;font-size:10px;color:var(--dn);font-weight:700">';
-      if(c.divRSI!=='none')html+='⚠️ RSI Div 4H — '+(c.divRSI==='bearish'?(lang==='ar'?'هبوطي':'Bearish'):(lang==='ar'?'صعودي مخفي':'Hidden Bull'));
-      if(c.divRSI1d!=='none')html+=(c.divRSI!=='none'?' | ':'')+'⚠️ RSI Div Daily';html+='</div>'}
-    /* L6: Levels (R2/R1/NOW/S1/OB/S2) */
-    html+='<div class="mkt-levels">';
-    html+='<div class="mkt-lv"><span><span class="mkt-lv-tag" style="background:rgba(255,56,96,.1);color:var(--dn)">R2</span></span><span class="mkt-lv-price" style="color:var(--dn)">'+fP(c.f100U)+'</span></div>';
-    html+='<div class="mkt-lv"><span><span class="mkt-lv-tag" style="background:rgba(255,56,96,.1);color:var(--dn)">R1</span></span><span class="mkt-lv-price" style="color:var(--dn)">'+fP(c.resist)+'</span></div>';
-    html+='<div class="mkt-lv"><span><span class="mkt-lv-tag" style="background:rgba(91,156,255,.1);color:var(--blue)">▶</span></span><span class="mkt-lv-price">'+fP(c.price)+'</span></div>';
-    html+='<div class="mkt-lv"><span><span class="mkt-lv-tag" style="background:rgba(0,255,136,.1);color:var(--up)">S1</span></span><span class="mkt-lv-price" style="color:var(--up)">'+fP(c.supp)+'</span></div>';
-    var bOb=c.orderBlocks.filter(function(o){return o.type==='bullish'})[0];if(bOb)html+='<div class="mkt-lv"><span><span class="mkt-lv-tag" style="background:rgba(176,124,255,.1);color:#b07cff">OB</span></span><span class="mkt-lv-price" style="color:#b07cff">'+bOb.price+'</span></div>';
-    html+='<div class="mkt-lv"><span><span class="mkt-lv-tag" style="background:rgba(0,255,136,.1);color:var(--up)">S2</span></span><span class="mkt-lv-price" style="color:var(--up)">'+fP(c.f618D)+'</span></div></div>';
-    /* L7: Liquidations */
-    if(c.liqZones.length){html+='<div class="mkt-struct"><div style="font-size:10px;font-weight:700;margin-bottom:4px">'+(lang==='ar'?'💥 تصفيات':'💥 Liquidations')+'</div>';
-      c.liqZones.forEach(function(z){html+='<div class="mkt-struct-r"><span style="color:var(--t2)">'+z.side+'</span><span style="font-family:var(--fm);font-weight:700;color:'+(z.side==='Long'?'var(--dn)':'var(--up)')+'">$'+fmt(z.amt)+'</span></div>'});html+='</div>'}
-    /* L8: Indicators */
-    html+='<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:3px;margin-bottom:6px"><div class="mkt-tf"><div class="mkt-tf-v" style="color:'+(c.rsi<30?'var(--up)':c.rsi>70?'var(--dn)':'var(--t1)')+'">'+c.rsi.toFixed(0)+'</div><div class="mkt-tf-l">RSI</div></div><div class="mkt-tf"><div class="mkt-tf-v" style="color:'+(c.macd.h>0?'var(--up)':'var(--dn)')+'">'+(c.macd.h>0?'✅':'❌')+'</div><div class="mkt-tf-l">MACD</div></div><div class="mkt-tf"><div class="mkt-tf-v" style="color:'+(c.wConf>=40?'var(--neon)':'var(--t3)')+'">'+c.wConf+'%</div><div class="mkt-tf-l">🐋</div></div><div class="mkt-tf"><div class="mkt-tf-v">'+(c.fr?(c.fr.rate>=0?'+':'')+c.fr.rate.toFixed(3)+'%':'--')+'</div><div class="mkt-tf-l">FR</div></div><div class="mkt-tf"><div class="mkt-tf-v">'+(c.ls?c.ls.ratio.toFixed(2):'--')+'</div><div class="mkt-tf-l">L/S</div></div></div>';
-    /* L9: Whale intel */
-    if(c.wConf>=30){html+='<div class="mkt-whale"><div style="font-size:10px;font-weight:700;margin-bottom:4px">🐋 '+(lang==='ar'?'استخبارات الحيتان':'Whale Intel')+'</div>';
-      html+='<div class="mkt-whale-i"><span>🐋</span><span>'+(lang==='ar'?'ثقة: ':'Conf: ')+c.wConf+'%</span></div>';
-      if(c.cvd.signal)html+='<div class="mkt-whale-i"><span>📊</span><span>CVD: '+c.cvd.signal+(c.cvd.divergence!=='NONE'?' — '+c.cvd.divergence:'')+'</span></div>';html+='</div>'}
-    /* L10: Historical match */
-    if(c.histMatch){html+='<div class="mkt-hist"><div style="font-size:10px;font-weight:700;margin-bottom:4px">🔮 '+(lang==='ar'?'مطابقة تاريخية':'Historical Match')+'</div><div style="font-size:10px;color:var(--t1)">'+(lang==='ar'?'تشابه '+c.histMatch.sim+'% مع '+c.histMatch.days+' يوم سابق = '+c.histMatch.ret:'Similar '+c.histMatch.sim+'% to '+c.histMatch.days+'d ago = '+c.histMatch.ret)+'</div></div>'}
-    /* L11: 3 Scenarios */
-    html+='<div class="mkt-scenario up"><div class="mkt-scenario-t" style="color:var(--up)">📈 '+(lang==='ar'?'صعودي':'Bull')+' — '+c.bullP+'%</div><div class="mkt-scenario-s">'+(lang==='ar'?'شرط: ':'Trigger: ')+c.bullCond+'</div><div class="mkt-scenario-arrow">'+fP(c.price)+' → '+fP(c.f618U)+' → '+fP(c.f100U)+'</div><div class="mkt-scenario-inv">❌ '+c.bullInv+'</div><div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+c.bullP+'%;background:var(--up)"></div></div><span style="font-size:8px;color:var(--up)">'+c.bullP+'%</span></div></div>'
-      +'<div class="mkt-scenario neutral"><div class="mkt-scenario-t" style="color:var(--warn)">➡️ '+(lang==='ar'?'جانبي':'Sideways')+' — '+c.neutP+'%</div><div class="mkt-scenario-arrow">'+fP(c.supp)+' ↔ '+fP(c.resist)+'</div><div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+c.neutP+'%;background:var(--warn)"></div></div><span style="font-size:8px;color:var(--warn)">'+c.neutP+'%</span></div></div>'
-      +'<div class="mkt-scenario down"><div class="mkt-scenario-t" style="color:var(--dn)">📉 '+(lang==='ar'?'هبوطي':'Bear')+' — '+c.bearP+'%</div><div class="mkt-scenario-s">'+(lang==='ar'?'شرط: ':'Trigger: ')+c.bearCond+'</div><div class="mkt-scenario-arrow">'+fP(c.price)+' → '+fP(c.f618D)+' → '+fP(c.supp)+'</div><div class="mkt-scenario-inv">❌ '+c.bearInv+'</div><div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+c.bearP+'%;background:var(--dn)"></div></div><span style="font-size:8px;color:var(--dn)">'+c.bearP+'%</span></div></div>';
-    /* L12: Score (9 factors) */
-    html+='<div class="mkt-sh">'+(lang==='ar'?'📊 التقييم':'📊 Score')+': '+c.sc+'/10</div><div class="mkt-score-bd">';
-    c.scB.forEach(function(s){html+='<div class="mkt-score-i"><div class="mkt-score-v" style="color:'+(s.v>=1.5?'var(--up)':s.v>=0.5?'var(--warn)':'var(--dn)')+'">'+s.v+'</div><div class="mkt-score-l">'+s.n+'</div></div>'});html+='</div>';
-    /* Verdict + Position */
-    html+='<div class="mkt-verdict" style="background:'+(c.ts>=2?'rgba(0,255,136,.04)':c.ts<=-2?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)')+'">'
-      +'<div class="mkt-verdict-grade">'+c.recIc+'</div><div class="mkt-verdict-title" style="color:'+c.dCol+'">'+c.rec+'</div>'
-      +'<div class="mkt-verdict-action"><div class="mkt-verdict-row"><span>'+(lang==='ar'?'🎯 هدف 1':'🎯 T1')+'</span><span style="font-family:var(--fm);font-weight:700;color:var(--up)">'+fP(c.f618U)+'</span></div>'
-      +'<div class="mkt-verdict-row"><span>'+(lang==='ar'?'🎯 هدف 2':'🎯 T2')+'</span><span style="font-family:var(--fm);font-weight:700;color:var(--up)">'+fP(c.f100U)+'</span></div>'
-      +'<div class="mkt-verdict-row"><span>'+(lang==='ar'?'🛑 وقف':'🛑 Stop')+'</span><span style="font-family:var(--fm);font-weight:700;color:var(--dn)">'+fP(c.f618D)+'</span></div>'
-      +'<div class="mkt-verdict-row"><span>⚖️ R:R</span><span style="font-family:var(--fm);font-weight:700">1:'+((c.f618U-c.price)/Math.max(0.01,c.price-c.f618D)).toFixed(1)+'</span></div></div></div>'
-    +'<div class="mkt-pos">'+(lang==='ar'?'💰 حجم المركز: ':'💰 Position: ')+c.riskPct+'% '+(lang==='ar'?'من المحفظة':'of portfolio')+'</div>'
-    +'<div class="mkt-link-scan" onclick="chartSignal={entry:'+c.price*0.99+',target:'+c.f618U+',stop:'+c.supp+',s:\''+c.sym+'\'};openCoin(\''+c.sym+'\')">📈 '+(lang==='ar'?'شارت '+c.sym:'Chart '+c.sym)+'</div>'
-    +'</div></div>'});
+  /* ════ Section 1: Hero Header ════ */
+  var heroBg=data.ts>=2?'rgba(0,255,136,.04)':data.ts<=-2?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)';
+  var heroBdr=data.ts>=2?'rgba(0,255,136,.08)':data.ts<=-2?'rgba(255,56,96,.08)':'rgba(255,184,0,.08)';
+  h+='<div class="mkt-hero" style="background:'+heroBg+';border:1px solid '+heroBdr+'">';
+  h+='<div style="font-size:32px;color:'+coinColor+'">'+coinIcon+'</div>';
+  h+='<div style="font-size:14px;font-weight:800;color:var(--t0);margin:4px 0">'+cn+' <span style="color:var(--t2);font-size:10px">'+sym+'/USDT</span></div>';
+  h+='<div class="mkt-hero-price" style="direction:ltr">'+rP(data.price)+'</div>';
+  h+='<div class="mkt-hero-ch" style="color:'+(data.ch.h24>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.ch.h24>=0?'+':'')+data.ch.h24.toFixed(1)+'% (24h)</div>';
+  h+='<div class="mkt-hero-meta">'+(lang==='ar'?'\u0641\u0631\u064a\u0645: 4H \u2014 Binance':'Frame: 4H \u2014 Binance')+'</div>';
+  var nxt=new Date();nxt.setHours(nxt.getHours()+(4-(nxt.getUTCHours()%4)),0,0,0);
+  h+='<div class="mkt-hero-meta">'+(lang==='ar'?'\u0622\u062e\u0631 \u062a\u062d\u062f\u064a\u062b: ':'Updated: ')+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+' \u2014 '+(lang==='ar'?'\u0627\u0644\u0642\u0627\u062f\u0645: ':'Next: ')+nxt.toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
+  h+='</div>';
+
+  /* ════ Section 2: Candle Closings Grid (4H, D, W, M) ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F56F}\uFE0F '+(lang==='ar'?'\u0625\u063a\u0644\u0627\u0642\u0627\u062a \u0627\u0644\u0634\u0645\u0648\u0639':'Candle Closings')+'</div>';
+  var frames=[];
+  /* 4H candle */
+  if(data.kl4h&&data.kl4h.length>=2){
+    var k=data.kl4h[data.kl4h.length-1];
+    frames.push({tf:'4H',o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]});
+  }
+  /* Daily candle */
+  if(data.kl1d&&data.kl1d.length>=2){
+    var k2=data.kl1d[data.kl1d.length-1];
+    frames.push({tf:'D',o:+k2[1],h:+k2[2],l:+k2[3],c:+k2[4],v:+k2[5]});
+  }
+  /* Weekly: last 7 daily candles aggregated */
+  if(data.kl1d&&data.kl1d.length>=7){
+    var wSlice=data.kl1d.slice(-7);
+    var wO=+wSlice[0][1],wH=0,wL=999999999,wC=+wSlice[wSlice.length-1][4],wV=0;
+    for(var wi=0;wi<wSlice.length;wi++){if(+wSlice[wi][2]>wH)wH=+wSlice[wi][2];if(+wSlice[wi][3]<wL)wL=+wSlice[wi][3];wV+=+wSlice[wi][5]}
+    frames.push({tf:'W',o:wO,h:wH,l:wL,c:wC,v:wV});
+  }
+  /* Monthly: last 30 daily candles */
+  if(data.kl1d&&data.kl1d.length>=20){
+    var mSlice=data.kl1d.slice(-30);
+    var mO=+mSlice[0][1],mH=0,mL=999999999,mC=+mSlice[mSlice.length-1][4],mV=0;
+    for(var mi=0;mi<mSlice.length;mi++){if(+mSlice[mi][2]>mH)mH=+mSlice[mi][2];if(+mSlice[mi][3]<mL)mL=+mSlice[mi][3];mV+=+mSlice[mi][5]}
+    frames.push({tf:'M',o:mO,h:mH,l:mL,c:mC,v:mV});
+  }
+  /* Badge */
+  var posCount=0;
+  frames.forEach(function(f){if(f.c>=f.o)posCount++});
+  var bdgCol=posCount>=3?'var(--up)':posCount<=1?'var(--dn)':'var(--warn)';
+  var bdgBg=posCount>=3?'rgba(0,255,136,.08)':posCount<=1?'rgba(255,56,96,.08)':'rgba(255,184,0,.08)';
+  h+='<div class="mkt-badge" style="background:'+bdgBg+';color:'+bdgCol+'">'+posCount+'/'+frames.length+' '+(lang==='ar'?'\u0625\u064a\u062c\u0627\u0628\u064a':'Positive')+'</div>';
+  h+='<div class="mkt-candles">';
+  frames.forEach(function(f){
+    var up=f.c>=f.o;var cls=up?'up':'dn';
+    var pat=detectCandlePattern(f.o,f.h,f.l,f.c);
+    var patName=CANDLE_NAMES[lang==='ar'?'ar':'en'][pat]||pat;
+    h+='<div class="mkt-candle '+cls+'">';
+    h+='<div class="mkt-candle-tf">'+f.tf+'</div>';
+    h+='<div class="mkt-candle-ic">'+(up?'\u{1F7E2}':'\u{1F534}')+'</div>';
+    h+='<div class="mkt-candle-state" style="color:'+(up?'var(--up)':'var(--dn)')+'">'+(up?(lang==='ar'?'\u0625\u064a\u062c\u0627\u0628\u064a':'Bullish'):(lang==='ar'?'\u0633\u0644\u0628\u064a':'Bearish'))+'</div>';
+    h+='<div class="mkt-candle-close" style="direction:ltr">'+rP(f.c)+'</div>';
+    h+='<div class="mkt-candle-pat">'+patName+'</div>';
+    h+='</div>';
+  });
+  h+='</div></div>';
+
+  /* ════ Section 3: Detailed Candle Explanations ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F4D6} '+(lang==='ar'?'\u0634\u0631\u062d \u0645\u0641\u0635\u0651\u0644 \u0644\u0644\u0625\u063a\u0644\u0627\u0642\u0627\u062a':'Detailed Closing Analysis')+'</div>';
+  frames.forEach(function(f){
+    var up=f.c>=f.o;var pat=detectCandlePattern(f.o,f.h,f.l,f.c);
+    var patName=CANDLE_NAMES[lang==='ar'?'ar':'en'][pat]||pat;
+    h+='<div class="mkt-box"><div class="mkt-box-t">'+(up?'\u{1F7E2}':'\u{1F534}')+' '+(lang==='ar'?'\u0625\u063a\u0644\u0627\u0642 '+f.tf:'Close '+f.tf)+'</div>';
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u0627\u0641\u062a\u062a\u0627\u062d':'Open')+'</span><span class="mkt-row-val" style="direction:ltr">'+rP(f.o)+'</span></div>';
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u0625\u063a\u0644\u0627\u0642':'Close')+'</span><span class="mkt-row-val" style="direction:ltr;color:'+(up?'var(--up)':'var(--dn)')+'">'+rP(f.c)+'</span></div>';
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u0623\u0639\u0644\u0649':'High')+'</span><span class="mkt-row-val" style="direction:ltr">'+rP(f.h)+'</span></div>';
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u0623\u062f\u0646\u0649':'Low')+'</span><span class="mkt-row-val" style="direction:ltr">'+rP(f.l)+'</span></div>';
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u062d\u062c\u0645':'Volume')+'</span><span class="mkt-row-val" style="direction:ltr">'+fmt(f.v)+'</span></div>';
+    /* Assessment */
+    var assess='';
+    if(pat==='bull_engulf'||pat==='hammer')assess=lang==='ar'?'\u2705 '+patName+' \u0645\u0639 \u062d\u062c\u0645 \u0639\u0627\u0644\u064a \u2014 \u064a\u062f\u0639\u0645 \u0627\u0644\u0635\u0639\u0648\u062f':'\u2705 '+patName+' with volume \u2014 supports upside';
+    else if(pat==='bear_engulf'||pat==='shooting')assess=lang==='ar'?'\u26a0\ufe0f '+patName+' \u2014 \u0625\u0634\u0627\u0631\u0629 \u0636\u063a\u0637 \u0628\u064a\u0639\u064a':'\u26a0\ufe0f '+patName+' \u2014 selling pressure signal';
+    else if(pat==='doji')assess=lang==='ar'?'\u{1F7E1} '+patName+' \u2014 \u062a\u0631\u062f\u062f \u0628\u0627\u0644\u0633\u0648\u0642':'\u{1F7E1} '+patName+' \u2014 market indecision';
+    else if(up)assess=lang==='ar'?'\u2705 \u0634\u0645\u0639\u0629 \u0625\u064a\u062c\u0627\u0628\u064a\u0629 \u2014 '+(f.v>0?'\u062d\u062c\u0645 \u0637\u0628\u064a\u0639\u064a':''):'\u2705 Positive candle \u2014 '+(f.v>0?'normal volume':'');
+    else assess=lang==='ar'?'\u{1F534} \u0634\u0645\u0639\u0629 \u0633\u0644\u0628\u064a\u0629 \u2014 \u0636\u063a\u0637 \u0628\u064a\u0639\u064a':'\u{1F534} Negative candle \u2014 sell pressure';
+    if(assess)h+='<div class="mkt-assess">'+assess+'</div>';
+    h+='</div>';
+  });
+  h+='</div>';
+
+  /* ════ Section 4: Timeframe Confluence ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F504} '+(lang==='ar'?'\u062a\u0648\u0627\u0641\u0642 \u0627\u0644\u0641\u0631\u064a\u0645\u0627\u062a':'Timeframe Confluence')+'</div>';
+  var tfData=[
+    {n:'1H',d:data.tf.h1},{n:'4H',d:data.tf.h4},{n:'D',d:data.tf.d},{n:'7D',d:data.tf.w}
+  ];
+  h+='<div class="mkt-candles">';
+  tfData.forEach(function(tf){
+    var ic=tf.d==='up'?'\u{1F4C8}':tf.d==='down'?'\u{1F4C9}':'\u2194\uFE0F';
+    var col=tf.d==='up'?'var(--up)':tf.d==='down'?'var(--dn)':'var(--warn)';
+    var cls=tf.d==='up'?'up':tf.d==='down'?'dn':'nt';
+    var reason='';
+    if(tf.n==='1H')reason=tf.d==='up'?(lang==='ar'?'\u0641\u0648\u0642 EMA20':'Above EMA20'):(lang==='ar'?'\u062a\u062d\u062a EMA20':'Below EMA20');
+    else if(tf.n==='4H')reason=tf.d==='up'?(lang==='ar'?'MACD+ \u0648\u0641\u0648\u0642 EMA':'MACD+ & above EMA'):(lang==='ar'?'MACD- \u0623\u0648 \u062a\u062d\u062a EMA':'MACD- or below EMA');
+    else if(tf.n==='D')reason=tf.d==='up'?(lang==='ar'?'\u0641\u0648\u0642 EMA \u0627\u0644\u064a\u0648\u0645\u064a':'Above daily EMA'):(lang==='ar'?'\u062a\u062d\u062a EMA \u0627\u0644\u064a\u0648\u0645\u064a':'Below daily EMA');
+    else reason=tf.d==='up'?(lang==='ar'?'\u0625\u063a\u0644\u0627\u0642 \u0641\u0648\u0642 7 \u0623\u064a\u0627\u0645':'Close above 7d ago'):(lang==='ar'?'\u0625\u063a\u0644\u0627\u0642 \u062a\u062d\u062a 7 \u0623\u064a\u0627\u0645':'Close below 7d ago');
+    h+='<div class="mkt-candle '+cls+'" style="padding:6px 3px">';
+    h+='<div class="mkt-candle-tf">'+tf.n+'</div>';
+    h+='<div style="font-size:16px;margin:2px 0">'+ic+'</div>';
+    h+='<div style="font-size:7px;color:'+col+';font-weight:700">'+(tf.d==='up'?(lang==='ar'?'\u0635\u0627\u0639\u062f':'Bull'):tf.d==='down'?(lang==='ar'?'\u0647\u0627\u0628\u0637':'Bear'):(lang==='ar'?'\u0645\u062d\u0627\u064a\u062f':'Flat'))+'</div>';
+    h+='<div style="font-size:6px;color:var(--t3);margin-top:1px">'+reason+'</div>';
+    h+='</div>';
+  });
+  h+='</div>';
+  var confCol=data.bullTFs>=3?'var(--up)':data.bullTFs<=1?'var(--dn)':'var(--warn)';
+  h+='<div style="text-align:center;padding:5px;border-radius:6px;margin-bottom:8px;font-size:10px;font-weight:700;background:'+(data.bullTFs>=3?'rgba(0,255,136,.04)':data.bullTFs<=1?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)')+';color:'+confCol+'">'+(lang==='ar'?'\u062a\u0648\u0627\u0641\u0642: ':'Confluence: ')+data.bullTFs+'/4 '+(data.bullTFs>=3?(lang==='ar'?'\u0635\u0627\u0639\u062f\u0629 = \u062a\u0648\u0627\u0641\u0642 \u0642\u0648\u064a':'Bullish = Strong'):data.bullTFs<=1?(lang==='ar'?'\u0647\u0627\u0628\u0637\u0629':'Bearish'):(lang==='ar'?'\u0645\u062e\u062a\u0644\u0637\u0629':'Mixed'))+'</div>';
+  h+='</div>';
+
+  /* ════ Section 5: Market Structure (SMC) ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F3D7}\uFE0F '+(lang==='ar'?'\u0647\u064a\u0643\u0644 \u0627\u0644\u0633\u0648\u0642 (SMC)':'Market Structure (SMC)')+'</div>';
+  var stCol=data.struct==='HH/HL'?'var(--up)':data.struct==='LH/LL'?'var(--dn)':'var(--warn)';
+  h+='<div class="mkt-box">';
+  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u0627\u0644\u0646\u0645\u0637':'Pattern')+'</span><span class="mkt-row-val" style="font-weight:800;color:'+stCol+'">'+data.struct+'</span></div>';
+  if(data.bos)h+='<div class="mkt-row"><span class="mkt-row-label">BOS</span><span class="mkt-row-val" style="direction:ltr;color:var(--blue)">'+data.bos+'</span></div>';
+  if(data.choch)h+='<div class="mkt-row"><span class="mkt-row-label">ChoCH</span><span class="mkt-row-val" style="direction:ltr;color:var(--purple)">'+data.choch+'</span></div>';
+  h+='</div></div>';
+
+  /* ════ Section 6: Order Blocks + FVG ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F4E6} '+(lang==='ar'?'Order Blocks + FVG':'Order Blocks + FVG')+'</div>';
+  if(data.orderBlocks&&data.orderBlocks.length){
+    h+='<div class="mkt-box"><div class="mkt-box-t">'+(lang==='ar'?'Order Blocks':'Order Blocks')+'</div>';
+    data.orderBlocks.forEach(function(ob){
+      var obUp=ob.type==='bullish';
+      h+='<div class="mkt-row"><span class="mkt-row-label">'+(obUp?'\u{1F7E2}':'\u{1F534}')+' '+(obUp?(lang==='ar'?'\u0635\u0639\u0648\u062f\u064a':'Bullish'):(lang==='ar'?'\u0647\u0628\u0648\u0637\u064a':'Bearish'))+'</span><span class="mkt-row-val" style="direction:ltr;color:'+(obUp?'var(--up)':'var(--dn)')+'">'+ob.price+'</span></div>';
+    });
+    h+='</div>';
+  }
+  if(data.fvgs&&data.fvgs.length){
+    h+='<div class="mkt-box"><div class="mkt-box-t">FVG (Fair Value Gaps)</div>';
+    data.fvgs.forEach(function(fg){
+      var fgUp=fg.type==='bullish';
+      h+='<div class="mkt-row"><span class="mkt-row-label">'+(fgUp?'\u{1F7E2}':'\u{1F534}')+' '+(fgUp?(lang==='ar'?'\u0635\u0639\u0648\u062f\u064a':'Bullish'):(lang==='ar'?'\u0647\u0628\u0648\u0637\u064a':'Bearish'))+'</span><span class="mkt-row-val" style="direction:ltr">'+fg.bot+' \u2014 '+fg.top+'</span></div>';
+    });
+    h+='</div>';
+  }
+  if((!data.orderBlocks||!data.orderBlocks.length)&&(!data.fvgs||!data.fvgs.length)){
+    h+='<div class="mkt-box" style="text-align:center;color:var(--t3);font-size:10px">'+(lang==='ar'?'\u0644\u0627 OB / FVG \u062d\u0627\u0644\u064a\u0627\u064b':'No active OB / FVG')+'</div>';
+  }
+  h+='</div>';
+
+  /* ════ Section 7: Key Levels Map (descending) ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F5FA}\uFE0F '+(lang==='ar'?'\u0627\u0644\u0645\u0633\u062a\u0648\u064a\u0627\u062a \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629':'Key Levels')+'</div>';
+  h+='<div class="mkt-box">';
+  /* Sorted descending: R2 > R1 > Price > S1 > S2 */
+  var levels=[];
+  levels.push({tag:'R2',label:lang==='ar'?'\u0645\u0642\u0627\u0648\u0645\u0629 \u0631\u0626\u064a\u0633\u064a\u0629':'Major Resistance',price:data.f100U,col:'var(--dn)'});
+  levels.push({tag:'R1',label:lang==='ar'?'\u0645\u0642\u0627\u0648\u0645\u0629 / \u0645\u0646\u0637\u0642\u0629 \u0639\u0631\u0636':'Resistance / Supply',price:data.resist,col:'var(--dn)'});
+  levels.push({tag:'\u25B6',label:lang==='ar'?'\u0627\u0644\u0633\u0639\u0631 \u0627\u0644\u062d\u0627\u0644\u064a':'Current Price',price:data.price,col:'var(--blue)',highlight:true});
+  levels.push({tag:'S1',label:lang==='ar'?'\u062f\u0639\u0645 / \u0645\u0646\u0637\u0642\u0629 \u0637\u0644\u0628':'Support / Demand',price:data.supp,col:'var(--up)'});
+  if(data.ema50&&data.ema50<data.supp)levels.push({tag:'S2',label:'EMA50',price:data.ema50,col:'var(--warn)'});
+  /* Sort descending */
+  levels.sort(function(a,b){return b.price-a.price});
+  levels.forEach(function(lv){
+    var bg=lv.highlight?'rgba(91,156,255,.06)':'transparent';
+    h+='<div class="mkt-row" style="background:'+bg+';border-radius:4px;padding:5px 4px">';
+    h+='<span class="mkt-row-label"><span style="font-size:7px;padding:2px 5px;border-radius:3px;font-weight:700;background:'+lv.col+'15;color:'+lv.col+'">'+lv.tag+'</span> '+lv.label+'</span>';
+    h+='<span class="mkt-row-val" style="direction:ltr;color:'+lv.col+'">'+rP(lv.price)+'</span>';
+    h+='</div>';
+  });
+  h+='</div></div>';
+
+  /* ════ Section 8: Technical Indicators ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F4CA} '+(lang==='ar'?'\u0627\u0644\u0645\u0624\u0634\u0631\u0627\u062a \u0627\u0644\u0641\u0646\u064a\u0629':'Technical Indicators')+'</div>';
+  /* Card 1: 4H indicators */
+  h+='<div class="mkt-box"><div class="mkt-box-t">'+(lang==='ar'?'\u0641\u0631\u064a\u0645 4H':'4H Frame')+'</div>';
+  var rsiCol=data.rsi<30?'var(--up)':data.rsi>70?'var(--dn)':'var(--t0)';
+  var rsiLabel=data.rsi<30?(lang==='ar'?'\u0645\u0646\u0637\u0642\u0629 \u0634\u0631\u0627\u0621':'Oversold'):data.rsi>70?(lang==='ar'?'\u0645\u0646\u0637\u0642\u0629 \u0628\u064a\u0639':'Overbought'):data.rsi>=40&&data.rsi<=60?(lang==='ar'?'\u0635\u062d\u064a':'Healthy'):(lang==='ar'?'\u0645\u0642\u0628\u0648\u0644':'Normal');
+  h+='<div class="mkt-row"><span class="mkt-row-label">RSI</span><span class="mkt-row-val" style="color:'+rsiCol+'">'+Math.round(data.rsi)+' \u2014 '+rsiLabel+'</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">MACD</span><span class="mkt-row-val" style="color:'+(data.macd.h>0?'var(--up)':'var(--dn)')+'">'+(data.macd.h>0?'\u{1F7E2} ':'🔴 ')+(data.macd.cross==='bull'?(lang==='ar'?'\u062a\u0642\u0627\u0637\u0639 \u0635\u0639\u0648\u062f\u064a':'Bull Cross'):data.macd.cross==='bear'?(lang==='ar'?'\u062a\u0642\u0627\u0637\u0639 \u0647\u0628\u0648\u0637\u064a':'Bear Cross'):(data.macd.h>0?(lang==='ar'?'\u0625\u064a\u062c\u0627\u0628\u064a':'Positive'):(lang==='ar'?'\u0633\u0644\u0628\u064a':'Negative')))+'</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">EMA20</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.price>data.ema20?'var(--up)':'var(--dn)')+'">'+rP(data.ema20)+' '+(data.price>data.ema20?'\u2705':'\u274C')+'</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">EMA50</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.price>data.ema50?'var(--up)':'var(--dn)')+'">'+rP(data.ema50)+' '+(data.price>data.ema50?'\u2705':'\u274C')+'</span></div>';
+  if(data.divRSI!=='none'||data.divRSI1d!=='none'){
+    var divTxt=data.divRSI!=='none'?(lang==='ar'?'RSI Divergence \u0639\u0644\u0649 4H':'RSI Div on 4H'):(lang==='ar'?'RSI Divergence \u0639\u0644\u0649 \u0627\u0644\u064a\u0648\u0645\u064a':'RSI Div on Daily');
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u062f\u0627\u064a\u0641\u0631\u062c\u0646\u0633':'Divergence')+'</span><span class="mkt-row-val" style="color:var(--warn)">\u26a0\ufe0f '+divTxt+'</span></div>';
+  }
+  h+='</div>';
+  /* Card 2: Futures */
+  h+='<div class="mkt-box"><div class="mkt-box-t">'+(lang==='ar'?'\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0639\u0642\u0648\u062f':'Futures Data')+'</div>';
+  if(data.fr){
+    var frCol=data.fr.rate<0?'var(--up)':data.fr.rate>0.05?'var(--dn)':'var(--t0)';
+    var frLabel=data.fr.rate<0?(lang==='ar'?'\u0633\u0644\u0628\u064a = \u0641\u0631\u0635\u0629':'Negative = Opportunity'):data.fr.rate>0.05?(lang==='ar'?'\u0639\u0627\u0644\u064a = \u062e\u0637\u0631':'High = Risk'):(lang==='ar'?'\u0637\u0628\u064a\u0639\u064a':'Normal');
+    h+='<div class="mkt-row"><span class="mkt-row-label">Funding Rate</span><span class="mkt-row-val" style="direction:ltr;color:'+frCol+'">'+(data.fr.rate>=0?'+':'')+data.fr.rate.toFixed(4)+'% \u2014 '+frLabel+'</span></div>';
+  }
+  if(data.oi){h+='<div class="mkt-row"><span class="mkt-row-label">Open Interest</span><span class="mkt-row-val" style="direction:ltr">'+fmt(data.oi)+'</span></div>'}
+  if(data.ls){h+='<div class="mkt-row"><span class="mkt-row-label">Long/Short</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.ls.ratio>1.5?'var(--dn)':data.ls.ratio<0.8?'var(--up)':'var(--t0)')+'">'+data.ls.ratio.toFixed(2)+' (L:'+data.ls.long.toFixed(0)+'% S:'+data.ls.short.toFixed(0)+'%)</span></div>'}
+  if(data.liqZones&&data.liqZones.length){
+    data.liqZones.forEach(function(lz){
+      h+='<div class="mkt-row"><span class="mkt-row-label">'+(lz.side==='Short'?'\u{1F4A5}':'\u{1F4A5}')+' '+(lang==='ar'?'\u062a\u0635\u0641\u064a\u0627\u062a '+lz.side:'Liq '+lz.side)+'</span><span class="mkt-row-val" style="direction:ltr">'+fmt(lz.amt)+'</span></div>';
+    });
+  }
+  h+='</div></div>';
+
+  /* ════ Section 9: Whale Intelligence ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F433} '+(lang==='ar'?'\u0627\u0633\u062a\u062e\u0628\u0627\u0631\u0627\u062a \u0627\u0644\u062d\u064a\u062a\u0627\u0646':'Whale Intelligence')+'</div>';
+  h+='<div class="mkt-box">';
+  var ww=typeof whaleWaves!=='undefined'?whaleWaves[sym]:null;
+  if(ww&&ww.waves&&ww.waves.length){
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u062d\u062c\u0645 \u0627\u0644\u062a\u062c\u0645\u064a\u0639':'Accumulation Volume')+'</span><span class="mkt-row-val" style="direction:ltr">'+ww.waves.length+' '+(lang==='ar'?'\u0645\u0648\u062c\u0629':'waves')+'</span></div>';
+    if(ww.waves.length>=2){
+      var wPrices=ww.waves.map(function(w){return w.p||w.price||0}).filter(function(p){return p>0});
+      if(wPrices.length>=2){
+        h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u0645\u0646\u0637\u0642\u0629 \u0627\u0644\u062a\u062c\u0645\u064a\u0639':'Accumulation Zone')+'</span><span class="mkt-row-val" style="direction:ltr">'+rP(Math.min.apply(null,wPrices))+' \u2014 '+rP(Math.max.apply(null,wPrices))+'</span></div>';
+      }
+    }
+  }
+  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u062b\u0642\u0629 \u0627\u0644\u062d\u064a\u062a\u0627\u0646':'Whale Confidence')+'</span><span class="mkt-row-val" style="color:'+(data.wConf>=50?'var(--up)':data.wConf>=30?'var(--warn)':'var(--t3)')+'">'+data.wConf+'%</span></div>';
+  if(data.cvd){
+    h+='<div class="mkt-row"><span class="mkt-row-label">CVD</span><span class="mkt-row-val" style="color:'+(data.cvd.divergence==='BULLISH'?'var(--up)':data.cvd.divergence==='BEARISH'?'var(--dn)':'var(--t0)')+'">'+data.cvd.signal+(data.cvd.divergence!=='NONE'?' \u2014 '+data.cvd.divergence:'')+'</span></div>';
+  }
+  if(typeof CBP!=='undefined'&&CBP[sym]){
+    var cbPrem=((CBP[sym]-data.price)/data.price*100);
+    h+='<div class="mkt-row"><span class="mkt-row-label">Coinbase Premium</span><span class="mkt-row-val" style="direction:ltr;color:'+(cbPrem>0?'var(--up)':'var(--dn)')+'">'+(cbPrem>=0?'+':'')+cbPrem.toFixed(2)+'%</span></div>';
+  }
+  /* Summary */
+  var wSummary='';
+  if(data.wConf>=50)wSummary=lang==='ar'?'\u{1F433} \u062a\u062c\u0645\u064a\u0639 \u0642\u0648\u064a \u0645\u0646 \u0627\u0644\u062d\u064a\u062a\u0627\u0646 \u2014 \u0625\u0634\u0627\u0631\u0629 \u0625\u064a\u062c\u0627\u0628\u064a\u0629':'\u{1F433} Strong whale accumulation \u2014 positive';
+  else if(data.wConf>=30)wSummary=lang==='ar'?'\u{1F433} \u0646\u0634\u0627\u0637 \u062d\u064a\u062a\u0627\u0646 \u0645\u062a\u0648\u0633\u0637':'\u{1F433} Moderate whale activity';
+  else wSummary=lang==='ar'?'\u{1F433} \u0644\u0627 \u0646\u0634\u0627\u0637 \u062d\u064a\u062a\u0627\u0646 \u0648\u0627\u0636\u062d':'\u{1F433} No clear whale activity';
+  h+='<div class="mkt-assess">'+wSummary+'</div>';
+  h+='</div></div>';
+
+  /* ════ Section 10: Trading Signal ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F3AF} '+(lang==='ar'?'\u0625\u0634\u0627\u0631\u0629 \u0627\u0644\u062a\u062f\u0627\u0648\u0644':'Trading Signal')+'</div>';
+  var sigCls=data.ts>=2?'buy':data.ts<=-2?'sell':'wait';
+  var entryPrice=data.price*0.99;
+  var slPrice=data.ts>=2?data.f618D:data.supp;
+  var rr=Math.abs(slPrice-entryPrice)>0?((data.f618U-entryPrice)/Math.abs(entryPrice-slPrice)):0;
+  h+='<div class="mkt-signal '+sigCls+'">';
+  h+='<div class="mkt-signal-hdr"><div class="mkt-signal-dir" style="color:'+data.dCol+'">'+data.dIc+' '+data.dir+'</div>';
+  h+='<div class="mkt-signal-score">'+(lang==='ar'?'\u062a\u0642\u064a\u064a\u0645: ':'Score: ')+data.sc+'/10</div></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u{1F3AF} \u0646\u0642\u0637\u0629 \u0627\u0644\u062f\u062e\u0648\u0644':'\u{1F3AF} Entry')+'</span><span class="mkt-row-val" style="direction:ltr;color:var(--blue)">'+rP(entryPrice)+'</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u{1F3AF} \u0647\u062f\u0641 1 (TP1)':'\u{1F3AF} TP1')+'</span><span class="mkt-row-val" style="direction:ltr;color:var(--up)">'+rP(data.f618U)+'</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u{1F3AF} \u0647\u062f\u0641 2 (TP2)':'\u{1F3AF} TP2')+'</span><span class="mkt-row-val" style="direction:ltr;color:var(--up)">'+rP(data.f100U)+'</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u{1F6D1} \u0648\u0642\u0641 \u062e\u0633\u0627\u0631\u0629 (SL)':'\u{1F6D1} Stop Loss')+'</span><span class="mkt-row-val" style="direction:ltr;color:var(--dn)">'+rP(slPrice)+'</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">\u2696\uFE0F R:R</span><span class="mkt-row-val">1:'+rr.toFixed(1)+'</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u{1F4B0} \u062d\u062c\u0645 \u0627\u0644\u0645\u0631\u0643\u0632':'\u{1F4B0} Position Size')+'</span><span class="mkt-row-val">'+data.riskPct+'%</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u23F0 \u0627\u0644\u0645\u062f\u0629':'\u23F0 Duration')+'</span><span class="mkt-row-val">'+(lang==='ar'?'3-5 \u0623\u064a\u0627\u0645':'3-5 days')+'</span></div>';
+  h+='<div style="margin-top:6px;font-size:9px;color:var(--dn)">\u274C '+(lang==='ar'?'\u0634\u0631\u0637 \u0627\u0644\u0625\u0644\u063a\u0627\u0621: '+(data.ts>=0?data.bullInv:data.bearInv):'Cancel if: '+(data.ts>=0?data.bullInv:data.bearInv))+'</div>';
+  h+='</div></div>';
+
+  /* ════ Section 11: 3 Scenarios ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F52E} '+(lang==='ar'?'\u0627\u0644\u0633\u064a\u0646\u0627\u0631\u064a\u0648\u0647\u0627\u062a':'Scenarios')+'</div>';
+  /* Bull scenario */
+  var step1U=data.price;var step2U=data.f618U;var step3U=data.f100U;
+  h+='<div class="mkt-scenario up">';
+  h+='<div class="mkt-scenario-t" style="color:var(--up)"><span>\u{1F4C8} '+(lang==='ar'?'\u0635\u0639\u0648\u062f\u064a':'Bullish')+'</span><span class="mkt-badge" style="background:rgba(0,255,136,.08);color:var(--up);margin:0">'+data.bullP+'%</span></div>';
+  h+='<div class="mkt-scenario-s">'+(lang==='ar'?'\u0634\u0631\u0637: ':'Trigger: ')+data.bullCond+'</div>';
+  h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0627\u0644\u0645\u0631\u062d\u0644\u0629 1: ':'Stage 1: ')+rP(step1U)+' \u2192 '+rP(step2U)+'</div>';
+  h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0627\u0644\u0645\u0631\u062d\u0644\u0629 2: ':'Stage 2: ')+rP(step2U)+' \u2192 '+rP(step3U)+'</div>';
+  h+='<div class="mkt-scenario-inv">\u274C '+data.bullInv+'</div>';
+  h+='<div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+data.bullP+'%;background:var(--up)"></div></div><span style="font-size:8px;color:var(--up)">'+data.bullP+'%</span></div>';
+  h+='</div>';
+  /* Neutral scenario */
+  h+='<div class="mkt-scenario neutral">';
+  h+='<div class="mkt-scenario-t" style="color:var(--warn)"><span>\u27A1\uFE0F '+(lang==='ar'?'\u062c\u0627\u0646\u0628\u064a':'Sideways')+'</span><span class="mkt-badge" style="background:rgba(255,184,0,.08);color:var(--warn);margin:0">'+data.neutP+'%</span></div>';
+  h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0646\u0637\u0627\u0642: ':'Range: ')+rP(data.supp)+' \u2194 '+rP(data.resist)+'</div>';
+  h+='<div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+data.neutP+'%;background:var(--warn)"></div></div><span style="font-size:8px;color:var(--warn)">'+data.neutP+'%</span></div>';
+  h+='</div>';
+  /* Bear scenario */
+  var step1D=data.price;var step2D=data.f618D;var step3D=data.supp;
+  h+='<div class="mkt-scenario down">';
+  h+='<div class="mkt-scenario-t" style="color:var(--dn)"><span>\u{1F4C9} '+(lang==='ar'?'\u0647\u0628\u0648\u0637\u064a':'Bearish')+'</span><span class="mkt-badge" style="background:rgba(255,56,96,.08);color:var(--dn);margin:0">'+data.bearP+'%</span></div>';
+  h+='<div class="mkt-scenario-s">'+(lang==='ar'?'\u0634\u0631\u0637: ':'Trigger: ')+data.bearCond+'</div>';
+  h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0627\u0644\u0645\u0631\u062d\u0644\u0629 1: ':'Stage 1: ')+rP(step1D)+' \u2192 '+rP(step2D)+'</div>';
+  h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0627\u0644\u0645\u0631\u062d\u0644\u0629 2: ':'Stage 2: ')+rP(step2D)+' \u2192 '+rP(step3D)+'</div>';
+  h+='<div class="mkt-scenario-inv">\u274C '+data.bearInv+'</div>';
+  h+='<div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+data.bearP+'%;background:var(--dn)"></div></div><span style="font-size:8px;color:var(--dn)">'+data.bearP+'%</span></div>';
+  h+='</div></div>';
+
+  /* ════ Section 12: Summary + Correlations + Events + Signature ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F4CB} '+(lang==='ar'?'\u0627\u0644\u062e\u0644\u0627\u0635\u0629 \u0648\u0627\u0644\u0627\u0631\u062a\u0628\u0627\u0637\u0627\u062a':'Summary & Correlations')+'</div>';
+  /* Upcoming events */
+  var evs=getUpcomingEvents();
+  if(evs.length){
+    h+='<div class="mkt-events">';
+    evs.forEach(function(e){h+='<div class="mkt-event-i"><span>'+e.ic+'</span><span>'+e.txt+'</span></div>'+(e.warn?'<div style="font-size:8px;color:var(--warn);padding:0 0 2px 22px">'+e.warn+'</div>':'')});
+    h+='</div>';
+  }
   /* Correlations */
-  html+='<div class="mkt-sh">'+(lang==='ar'?'🔗 ارتباطات حقيقية':'🔗 Correlations')+'</div>'
-    +'<div class="mkt-cor"><div class="mkt-cor-i"><div class="mkt-cor-v">'+btcDom.toFixed(1)+'%</div><div class="mkt-cor-l">BTC Dom</div></div><div class="mkt-cor-i"><div class="mkt-cor-v">'+(T.ETH&&T.BTC?(T.ETH.p/T.BTC.p).toFixed(4):'--')+'</div><div class="mkt-cor-l">ETH/BTC</div></div><div class="mkt-cor-i"><div class="mkt-cor-v" style="color:var(--warn)">'+fgValue+'</div><div class="mkt-cor-l">Fear&Greed</div></div></div>';
-  /* Health factors */
-  html+='<div class="mkt-sh">'+(lang==='ar'?'🏥 عوامل الصحة':'🏥 Health')+'</div>';
-  hlth.factors.forEach(function(f){html+='<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:10px;border-bottom:1px solid rgba(56,72,96,.05)"><span style="color:var(--t2)">'+f.l+'</span><span style="font-family:var(--fm);font-weight:700;color:var(--'+f.c+')">'+f.v+'</span></div>'});
-  if(warns.length){html+='<div class="mkt-sh">'+(lang==='ar'?'⚠️ تحذيرات':'⚠️ Warnings')+'</div>';warns.forEach(function(w){html+='<div style="display:flex;align-items:center;gap:6px;padding:3px 0;font-size:10px"><span>'+w.ic+'</span><span style="color:var(--t1)">'+w.txt+'</span></div>'})}
-  html+='<div style="text-align:center;margin-top:10px;font-size:8px;color:var(--t3)">⚠️ '+(lang==='ar'?'تحليل فني — ليس نصيحة مالية':'Not financial advice')+'</div>';
-  html+='<button class="rfr" onclick="compCache.t=0;loadComp()">🔄 '+(lang==='ar'?'تحديث':'Refresh')+'</button>';
-  compCache.h=html;compCache.t=Date.now();document.getElementById('mktComp').innerHTML=html
-  }catch(e){document.getElementById('mktComp').innerHTML='<div class="empty"><div class="empty-ic">📊</div><div class="empty-tx">'+t('no_data')+'</div></div><button class="rfr" onclick="compCache.t=0;loadComp()">🔄</button>'}}
+  h+='<div class="mkt-cor">';
+  h+='<div class="mkt-cor-i"><div class="mkt-cor-v">'+btcDom.toFixed(1)+'%</div><div class="mkt-cor-l">BTC Dom</div></div>';
+  h+='<div class="mkt-cor-i"><div class="mkt-cor-v">'+(T.ETH&&T.BTC?(T.ETH.p/T.BTC.p).toFixed(4):'--')+'</div><div class="mkt-cor-l">ETH/BTC</div></div>';
+  h+='<div class="mkt-cor-i"><div class="mkt-cor-v" style="color:'+(fgValue<30?'var(--dn)':fgValue>60?'var(--up)':'var(--warn)')+'">'+fgValue+'</div><div class="mkt-cor-l">Fear&Greed</div></div>';
+  h+='</div>';
+  /* Story summary */
+  h+='<div class="mkt-summary" style="border-right:3px solid '+coinColor+'20;background:var(--bg2)">'+buildStory(sym,data)+'</div>';
+  /* Risk cards */
+  h+='<div class="mkt-risk-grid">';
+  var riskLbl=data.riskPct>=4?(lang==='ar'?'\u0645\u062e\u0627\u0637\u0631\u0629 \u0639\u0627\u0644\u064a\u0629':'High Risk'):data.riskPct>=2?(lang==='ar'?'\u0645\u062e\u0627\u0637\u0631\u0629 \u0645\u062a\u0648\u0633\u0637\u0629':'Medium'):data.riskPct>=1?(lang==='ar'?'\u0645\u062e\u0627\u0637\u0631\u0629 \u0645\u0646\u062e\u0641\u0636\u0629':'Low Risk'):(lang==='ar'?'\u0644\u0627 \u062f\u062e\u0648\u0644':'No Entry');
+  h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v" style="color:'+(data.riskPct>=4?'var(--dn)':data.riskPct>=2?'var(--warn)':'var(--up)')+'">'+riskLbl+'</div><div class="mkt-risk-card-l">'+(lang==='ar'?'\u0627\u0644\u0645\u062e\u0627\u0637\u0631\u0629':'Risk')+'</div></div>';
+  h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v">1:'+rr.toFixed(1)+'</div><div class="mkt-risk-card-l">R:R</div></div>';
+  h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v">4H</div><div class="mkt-risk-card-l">'+(lang==='ar'?'\u0627\u0644\u0641\u0631\u064a\u0645':'Frame')+'</div></div>';
+  h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v">3-5d</div><div class="mkt-risk-card-l">'+(lang==='ar'?'\u0627\u0644\u0645\u062f\u0629':'Duration')+'</div></div>';
+  h+='</div>';
+  /* Disclaimer */
+  h+='<div style="text-align:center;font-size:8px;color:var(--t3);margin:6px 0">\u26a0\ufe0f '+(lang==='ar'?'\u062a\u062d\u0644\u064a\u0644 \u0641\u0646\u064a \u2014 \u0644\u064a\u0633 \u0646\u0635\u064a\u062d\u0629 \u0645\u0627\u0644\u064a\u0629':'Technical analysis \u2014 not financial advice')+'</div>';
+  /* Signature */
+  h+=mktSignature();
+  h+='</div>';
 
-function updateReportHeader(){}
+  return h;
+}
+
+/* ═══ loadBTCChart ═══ */
+async function loadBTCChart(){
+  var el=document.getElementById('mktBTC');
+  if(btcCache.h&&Date.now()-btcCache.t<MKT_TTL){
+    if(el)el.innerHTML=btcCache.h;
+    return;
+  }
+  if(el)el.innerHTML='<div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div><div style="font-size:11px;color:var(--t2);margin-top:10px">'+(lang==='ar'?'\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 12 \u0642\u0633\u0645...':'Analyzing 12 sections...')+'</div></div>';
+  try{
+    var data=await analyzeCoinRpt('BTC');
+    if(!data){if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u0644\u0627 \u0628\u064a\u0627\u0646\u0627\u062a':'No data')+'</div></div>';return}
+    var frsh=getMktFresh(Date.now());
+    var xml='<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' \u2014 '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
+    xml+=buildChartHTML(data,'#f7931a','\u20bf',{ar:'\u0627\u0644\u0628\u064a\u062a\u0643\u0648\u064a\u0646',en:'Bitcoin'});
+    xml+='<button class="rfr" onclick="btcCache.t=0;loadBTCChart()">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
+    btcCache.h=xml;
+    btcCache.t=Date.now();
+    if(el)el.innerHTML=xml;
+  }catch(e){
+    if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u062e\u0637\u0623 \u2014 \u062d\u0627\u0648\u0644 \u0644\u0627\u062d\u0642\u0627\u064b':'Error \u2014 try later')+'</div></div><button class="rfr" onclick="btcCache.t=0;loadBTCChart()">\u{1F504}</button>';
+  }
+}
+
+/* ═══ loadETHChart ═══ */
+async function loadETHChart(){
+  var el=document.getElementById('mktETH');
+  if(ethCache.h&&Date.now()-ethCache.t<MKT_TTL){
+    if(el)el.innerHTML=ethCache.h;
+    return;
+  }
+  if(el)el.innerHTML='<div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div><div style="font-size:11px;color:var(--t2);margin-top:10px">'+(lang==='ar'?'\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 12 \u0642\u0633\u0645...':'Analyzing 12 sections...')+'</div></div>';
+  try{
+    var data=await analyzeCoinRpt('ETH');
+    if(!data){if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u0644\u0627 \u0628\u064a\u0627\u0646\u0627\u062a':'No data')+'</div></div>';return}
+    var frsh=getMktFresh(Date.now());
+    var xml='<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' \u2014 '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
+    xml+=buildChartHTML(data,'#627eea','\u039e',{ar:'\u0627\u0644\u0625\u064a\u062b\u064a\u0631\u064a\u0648\u0645',en:'Ethereum'});
+    xml+='<button class="rfr" onclick="ethCache.t=0;loadETHChart()">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
+    ethCache.h=xml;
+    ethCache.t=Date.now();
+    if(el)el.innerHTML=xml;
+  }catch(e){
+    if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u062e\u0637\u0623 \u2014 \u062d\u0627\u0648\u0644 \u0644\u0627\u062d\u0642\u0627\u064b':'Error \u2014 try later')+'</div></div><button class="rfr" onclick="ethCache.t=0;loadETHChart()">\u{1F504}</button>';
+  }
+}
+
+
 /* PORTFOLIO */
 var sP=function(){localStorage.setItem('nxp10',JSON.stringify(portfolio))};
 function addPort(){var sym=document.getElementById('aSym').value.toUpperCase().trim(),amt=+document.getElementById('aAmt').value,pr=+document.getElementById('aPr').value;if(!sym||!amt)return;portfolio.push({sym:sym,amt:amt,bp:pr});sP();closeMo('addMo');renderPort()}
@@ -2608,8 +2850,8 @@ function renderTop3(){
     +'<div style="margin-top:4px;display:flex;gap:8px;font-size:8px;font-family:var(--fm)"><span style="color:var(--up)">🎯 '+fP(o.p*1.08)+' — '+fP(o.p*1.15)+'</span><span style="color:var(--dn)">🛑 '+fP(o.p*0.93)+'</span></div>'
     +'</div>'}).join(''):'<div class="muted">'+(lang==='ar'?'لا فرص قوية حالياً — السوق هادئ':'No strong opportunities — Market quiet')+'</div>'}
 /* 📈 MARKET MOVEMENT PAGE */
-async function loadMarket(){loadStableFlow();if(curMktTab===0)loadDaily();else loadComp()}
-setInterval(function(){if(curMktTab===0&&Date.now()-dailyCache.t>=DAILY_TTL&&document.getElementById('pg-market').classList.contains('act'))loadDaily()},60000);
+async function loadMarket(){if(curMktTab===0)loadBTCChart();else loadETHChart()}
+setInterval(function(){var pgEl=document.getElementById('pg-market');if(pgEl&&pgEl.classList.contains('act')){if(curMktTab===0&&Date.now()-btcCache.t>=MKT_TTL)loadBTCChart();else if(curMktTab===1&&Date.now()-ethCache.t>=MKT_TTL)loadETHChart()}},60000);
 /* 🤖 DATA VALIDATOR + AUTO-REPAIR + CONNECTION QUALITY */
 var validatorLog=[];var lastDataTime=Date.now();var validatorStatus='ok';
 var connMetrics={apiOk:0,apiFail:0,wsUp:false,lastLatency:0,lastCheck:Date.now()};

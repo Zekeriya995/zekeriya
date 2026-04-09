@@ -849,7 +849,7 @@ function renderSmallCaps(res){var f=res;if(curSmallFilter!=='all')f=res.filter(f
 function onSrch(v){var el=document.getElementById('sRes');if(!v){el.classList.remove('show');return}v=v.toUpperCase();var m=Object.entries(T).filter(function(e){return e[0].includes(v)}).slice(0,8);if(!m.length){el.classList.remove('show');return}el.innerHTML=m.map(function(e){var s=e[0],d=e[1];return'<div class="sr-i" onclick="openCoin(\''+s+'\')"><span style="font-weight:700">'+s+'</span><span style="font-family:var(--fm);font-size:10px">'+fP(d.p)+' <span class="cr-ch '+(d.c>=0?'up':'dn')+'">'+(d.c>=0?'+':'')+d.c.toFixed(1)+'%</span></span></div>'}).join('');el.classList.add('show')}
 document.addEventListener('click',function(e){if(!e.target.closest('.srch'))document.getElementById('sRes').classList.remove('show')});
 /* WS */
-function initWS(){if(ws)ws.close();ws=new WebSocket('wss://stream.binance.com:9443/stream?streams='+WL.map(function(s){return s.toLowerCase()+'usdt@miniTicker'}).join('/'));ws.onmessage=function(e){var d=JSON.parse(e.data).data;if(!d)return;var s=d.s.replace('USDT','');var price=+d.c;var chg=+d.P;if(isNaN(chg))chg=0;T[s]=Object.assign(T[s]||{},{p:price,c:chg,v:+d.q,h:+d.h,l:+d.l,src:'BN'});if(!sparkHist[s])sparkHist[s]=[];sparkHist[s].push(price);if(sparkHist[s].length>12)sparkHist[s]=sparkHist[s].slice(-12)};ws.onclose=function(){setTimeout(initWS,3000)};ws.onerror=function(){ws.close()}}
+function initWS(){try{if(ws)ws.close()}catch(e){};ws=new WebSocket('wss://stream.binance.com:9443/stream?streams='+WL.map(function(s){return s.toLowerCase()+'usdt@miniTicker'}).join('/'));ws.onmessage=function(e){var d=JSON.parse(e.data).data;if(!d)return;var s=d.s.replace('USDT','');var price=+d.c;var chg=+d.P;if(isNaN(chg))chg=0;T[s]=Object.assign(T[s]||{},{p:price,c:chg,v:+d.q,h:+d.h,l:+d.l,src:'BN'});if(!sparkHist[s])sparkHist[s]=[];sparkHist[s].push(price);if(sparkHist[s].length>12)sparkHist[s]=sparkHist[s].slice(-12)};ws.onclose=function(){setTimeout(initWS,2000)};ws.onerror=function(){try{ws.close()}catch(e){}}}
 /* ═══ 🔌 FEATURE 1: MULTI-STREAM WEBSOCKET ═══ */
 var wsAgg=null,wsLiq=null,wsDepth=null,liquidationData={},depthSnapshots={};
 function initAggTradeWS(){
@@ -863,7 +863,7 @@ function initAggTradeWS(){
       var ic=isBuy?'🐋':'🐋🩸';var lb=isBuy?(lang==='ar'?'شراء حوت فوري!':'Whale buy!'):(lang==='ar'?'بيع حوت فوري!':'Whale sell!');
       showPopup(ic,sym+' — '+lb,'$'+fmt(val));addNotifHist(ic,sym,isBuy?'Whale':'WhaleSell','$'+fmt(val));
       if(val>=500000)sendTG('<b>'+ic+' '+sym+'/USDT</b>\n'+lb+'\n💰 $'+fmt(val)+'\n📍 Binance')}}}catch(ex){}};
-  wsAgg.onclose=function(){setTimeout(initAggTradeWS,5000)};wsAgg.onerror=function(){wsAgg.close()}}
+  wsAgg.onclose=function(){setTimeout(initAggTradeWS,3000)};wsAgg.onerror=function(){try{wsAgg.close()}catch(e){}}}
 function initLiqWS(){
   wsLiq=new WebSocket('wss://fstream.binance.com/ws/!forceOrder@arr');
   wsLiq.onmessage=function(e){try{var data=JSON.parse(e.data);var o=data.o;if(!o)return;
@@ -875,12 +875,12 @@ function initLiqWS(){
     if(liqEvents.length>100)liqEvents=liqEvents.slice(-100);
     if(val>=200000){var ic=o.S==='BUY'?'💥':'🔻';var lb=o.S==='BUY'?(lang==='ar'?'Short تصفّى!':'Short liquidated!'):(lang==='ar'?'Long تصفّى!':'Long liquidated!');
       showPopup(ic,sym+' — '+lb,'$'+fmt(val));addNotifHist(ic,sym,'Liquidation','$'+fmt(val))}}catch(ex){}};
-  wsLiq.onclose=function(){setTimeout(initLiqWS,5000)};wsLiq.onerror=function(){wsLiq.close()}}
+  wsLiq.onclose=function(){setTimeout(initLiqWS,3000)};wsLiq.onerror=function(){try{wsLiq.close()}catch(e){}}}
 function initDepthWS(){
-  var syms=['btc','eth','sol','bnb','xrp'].map(function(s){return s+'usdt@depth@100ms'}).join('/');
+  var syms=['btc','eth','sol','bnb','xrp','link','doge','ada'].map(function(s){return s+'usdt@depth@500ms'}).join('/');
   wsDepth=new WebSocket('wss://stream.binance.com:9443/stream?streams='+syms);
   wsDepth.onmessage=function(e){try{var d=JSON.parse(e.data).data;if(!d||!d.s)return;depthSnapshots[d.s.replace('USDT','')]={bids:d.b||[],asks:d.a||[],time:Date.now()}}catch(ex){}};
-  wsDepth.onclose=function(){setTimeout(initDepthWS,8000)};wsDepth.onerror=function(){wsDepth.close()}}
+  wsDepth.onclose=function(){setTimeout(initDepthWS,3000)};wsDepth.onerror=function(){try{wsDepth.close()}catch(e){}}}
 /* ═══ 🔗 FEATURE 2: ON-CHAIN TRACKING (no key) ═══ */
 var onChainData={};
 async function fetchOnChainBTC(){try{var data=await fj('https://mempool.space/api/mempool/recent');if(!data||!data.length)return;var whale=data.filter(function(tx){return tx.fee>50000});onChainData.BTC={count:whale.length,time:Date.now(),signal:whale.length>=3?'WHALE_RUSH':whale.length>=1?'MODERATE':'LOW'}}catch(e){}}
@@ -901,11 +901,30 @@ async function loadTk(){
   try{var cbR=await fj(CB+'/exchange-rates?currency=USD');if(cbR&&cbR.data&&cbR.data.rates){var rates=cbR.data.rates;Object.keys(rates).forEach(function(c){var r=+rates[c];if(r>0){var cbPrice=1/r;/* Validate: if Binance has this coin, check price is within 50% */var bnPrice=T[c]?T[c].p:0;if(bnPrice>0){var diff=Math.abs(cbPrice-bnPrice)/bnPrice;if(diff<0.5)CBP[c]=cbPrice}else{CBP[c]=cbPrice}}})}}catch(e){}
   var el=document.getElementById('tkrEl');var items=WL.filter(function(s){return T[s]}).slice(0,16);var h='';for(var r=0;r<2;r++)items.forEach(function(s){var d=T[s],up=d.c>=0;h+='<div class="tkr-i"><span class="tkr-sym">'+s+'</span><span style="font-family:var(--fm);font-size:9px;color:var(--t2)">'+fP(d.p)+'</span><div class="spark">'+mkSpark(s)+'</div><span class="tkr-c '+(up?'up':'dn')+'">'+(up?'+':'')+d.c.toFixed(1)+'%</span></div>'});el.innerHTML=h}
 async function loadFutures(){
-  var fd=await fj(BF+'/premiumIndex');if(fd)fd.filter(function(d){return d.symbol.endsWith('USDT')}).forEach(function(d){var s=d.symbol.replace('USDT','');FR[s]={rate:+d.lastFundingRate*100,mark:+d.markPrice}});if(FR.BTC)document.getElementById('pFR').textContent=(FR.BTC.rate>=0?'+':'')+FR.BTC.rate.toFixed(4)+'%';
+  /* Try Binance Futures first */
+  var fd=await fj(BF+'/premiumIndex');
+  /* Retry once if failed */
+  if(!fd){await new Promise(function(r){setTimeout(r,2000)});fd=await fj(BF+'/premiumIndex');}
+  /* Third attempt */
+  if(!fd){await new Promise(function(r){setTimeout(r,3000)});fd=await fj(BF+'/premiumIndex');}
+  if(fd)fd.filter(function(d){return d.symbol.endsWith('USDT')}).forEach(function(d){var s=d.symbol.replace('USDT','');FR[s]={rate:+d.lastFundingRate*100,mark:+d.markPrice}});
+  /* Bybit fallback for FR if Binance failed */
+  if(!Object.keys(FR).length){
+    try{var byFR=await fj('https://api.bybit.com/v5/market/tickers?category=linear');
+    if(byFR&&byFR.result&&byFR.result.list)byFR.result.list.filter(function(x){return x.symbol.endsWith('USDT')}).forEach(function(x){var s=x.symbol.replace('USDT','');if(!FR[s]&&x.fundingRate)FR[s]={rate:+x.fundingRate*100,mark:+x.markPrice||0}});}catch(e){}
+  }
+  var pfrE=document.getElementById('pFR');if(pfrE&&FR.BTC)pfrE.textContent=(FR.BTC.rate>=0?'+':'')+FR.BTC.rate.toFixed(4)+'%';
+  /* OI with retry */
   var p1=WL.slice(0,8).map(function(s){return fj(BF+'/openInterest?symbol='+s+'USDT').then(function(d){if(d)OI[s]=(+d.openInterest)*(T[s]?T[s].p:0)}).catch(function(){})});
   var p2=WL.map(function(s){return fj(BF+'/topLongShortPositionRatio?symbol='+s+'USDT&period=1h&limit=4').then(function(d){if(d&&d[0]){LS[s]={long:+d[0].longAccount*100,short:+d[0].shortAccount*100,ratio:+d[0].longShortRatio};lsHist[s]=d.map(function(x){return{long:+x.longAccount*100,short:+x.shortAccount*100,ratio:+x.longShortRatio,time:+x.timestamp}}).reverse()}}).catch(function(){})});
   await Promise.all(p1.concat(p2));
-  if(!Object.keys(LS).length)WL.forEach(function(s){var fr=FR[s];if(fr){var b=fr.rate>0?55+Math.min(20,fr.rate*200):45-Math.min(15,Math.abs(fr.rate)*200);LS[s]={long:Math.round(b),short:Math.round(100-b),ratio:+(b/(100-b)).toFixed(2)}}});}
+  /* Retry OI if empty */
+  if(!Object.keys(OI).length){await new Promise(function(r){setTimeout(r,2000)});var p1r=WL.slice(0,8).map(function(s){return fj(BF+'/openInterest?symbol='+s+'USDT').then(function(d){if(d)OI[s]=(+d.openInterest)*(T[s]?T[s].p:0)}).catch(function(){})});await Promise.all(p1r);}
+  /* LS fallback from FR */
+  if(!Object.keys(LS).length)WL.forEach(function(s){var fr=FR[s];if(fr){var b=fr.rate>0?55+Math.min(20,fr.rate*200):45-Math.min(15,Math.abs(fr.rate)*200);LS[s]={long:Math.round(b),short:Math.round(100-b),ratio:+(b/(100-b)).toFixed(2)}}});
+  /* Bybit OI fallback */
+  if(!Object.keys(OI).length){try{var byOI=await fj('https://api.bybit.com/v5/market/tickers?category=linear');if(byOI&&byOI.result&&byOI.result.list)byOI.result.list.filter(function(x){return x.symbol.endsWith('USDT')&&WL.includes(x.symbol.replace('USDT',''))}).forEach(function(x){var s=x.symbol.replace('USDT','');if(!OI[s]&&x.openInterestValue)OI[s]=+x.openInterestValue});}catch(e){}}
+}
 /* ═══ EARLY DETECTION SCANNER — catches coins BEFORE they pump ═══ */
 function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD'];var cands=[];Object.entries(T).forEach(function(e){var s=e[0],d=e[1];if(STABLES.includes(s))return;
   var tier=getCoinTier(s);
@@ -2817,7 +2836,16 @@ async function loadTakerVol(){
   var proms=WL.slice(0,15).map(function(s){return fj(BF+'/futures/data/takerlongshortRatio?symbol='+s+'USDT&period=5m&limit=6').then(function(d){
     if(!d||!d.length)return;var lat=d[d.length-1];var avg=d.reduce(function(sum,x){return sum+(+x.buySellRatio)},0)/d.length;
     takerData[s]={ratio:+lat.buySellRatio,avg:avg,trend:+lat.buySellRatio>avg?'INCREASING':'DECREASING',buyVol:+lat.buyVol,sellVol:+lat.sellVol}}).catch(function(){})});
-  await Promise.all(proms)}
+  await Promise.all(proms);
+  /* Retry if empty */
+  if(!Object.keys(takerData).length){
+    await new Promise(function(r){setTimeout(r,3000)});
+    var proms2=WL.slice(0,10).map(function(s){return fj(BF+'/futures/data/takerlongshortRatio?symbol='+s+'USDT&period=5m&limit=6').then(function(d){
+      if(!d||!d.length)return;var lat=d[d.length-1];var avg=d.reduce(function(sum,x){return sum+(+x.buySellRatio)},0)/d.length;
+      takerData[s]={ratio:+lat.buySellRatio,avg:avg,trend:+lat.buySellRatio>avg?'INCREASING':'DECREASING',buyVol:+lat.buyVol,sellVol:+lat.sellVol}}).catch(function(){})});
+    await Promise.all(proms2);
+  }
+}
 
 function analyzeLongShort(sym){
   var ls=LS[sym],hist=lsHist[sym],fr=FR[sym],oi=OI[sym],taker=takerData[sym],price=T[sym];
@@ -3183,9 +3211,20 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   /* On-Chain + Wallet check */
   setTimeout(fetchOnChainBTC,10000);setInterval(fetchOnChainBTC,120000);
   setTimeout(checkWallets,20000);setInterval(checkWallets,120000);
+  /* Delayed retry — if Futures data still empty after 15s, try again */
+  setTimeout(async function(){
+    try{
+      if(!Object.keys(FR).length||!Object.keys(OI).length){console.log('Retry loadFutures...');await loadFutures()}
+      if(!Object.keys(takerData).length){console.log('Retry loadTakerVol...');await loadTakerVol()}
+      if(!ws||ws.readyState!==1)initWS();
+      if(!wsAgg||wsAgg.readyState!==1)initAggTradeWS();
+      if(!wsLiq||wsLiq.readyState!==1)initLiqWS();
+      if(!wsDepth||wsDepth.readyState!==1)initDepthWS();
+    }catch(e){}
+  },15000);
   setInterval(async function(){try{await loadTk();await loadFutures();lastDataTime=Date.now();checkWatchlistAlerts();scanBybitGainers();updateConnStatus()}catch(e){connMetrics.apiFail++;updateConnStatus()}},30000);
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))try{await loadDash()}catch(e){}},120000);
-  setInterval(function(){if(!ws||ws.readyState!==1)initWS()},30000);
+  setInterval(function(){if(!ws||ws.readyState!==1)initWS();if(!wsAgg||wsAgg.readyState!==1)initAggTradeWS();if(!wsLiq||wsLiq.readyState!==1)initLiqWS();if(!wsDepth||wsDepth.readyState!==1)initDepthWS()},30000);
   setInterval(monitorTrades,10000);
   setInterval(function(){try{notifiedSet={};localStorage.setItem('nxnot10','{}')}catch(e){}},3600000);
   setTimeout(function(){runValidator()},10000);

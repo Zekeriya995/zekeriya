@@ -512,6 +512,31 @@ canvas{width:100%!important;border-radius:4px}
 @media(max-width:520px){.grid-2{grid-template-columns:1fr}.mst{grid-template-columns:repeat(2,1fr)}.mh-factors{grid-template-columns:repeat(2,1fr)}.u-conf{grid-template-columns:repeat(4,1fr)}}
 @media(min-width:768px){.mst{grid-template-columns:repeat(4,1fr)}.hm{grid-template-columns:repeat(6,1fr)}.main{padding:10px 24px 92px}}
 @media(min-width:1024px){.sidebar{display:flex;flex-direction:column;gap:2px;padding-top:16px}.bnv{display:none}.main{padding:10px 24px 24px}.hm{grid-template-columns:repeat(8,1fr)}}
+/* ═══ INDICATOR CARDS ═══ */
+.ind-card{background:var(--glass);border:1.5px solid var(--bdr);border-radius:14px;margin-bottom:8px;overflow:hidden}
+.ind-card.open{border-color:rgba(0,255,136,.12)}
+.ind-head{display:flex;align-items:center;justify-content:space-between;padding:12px 14px;cursor:pointer}
+.ind-left{display:flex;align-items:center;gap:10px}
+.ind-ic{width:38px;height:38px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.ind-nm{font-weight:800;font-size:12px;color:var(--t0)}
+.ind-sub{font-size:8px;color:var(--t3);margin-top:1px}
+.ind-right{display:flex;align-items:center;gap:8px}
+.ind-val{font-family:var(--fm);font-size:13px;font-weight:800}
+.ind-arr{font-size:12px;color:var(--t3);transition:transform .2s}
+.ind-card.open .ind-arr{transform:rotate(180deg);color:var(--up)}
+.ind-body{display:none;padding:0 14px 12px;border-top:1px solid var(--bdr)}
+.ind-card.open .ind-body{display:block}
+.ind-chips{display:flex;gap:4px;padding:8px 0;flex-wrap:wrap}
+.ind-chip{font-size:8px;padding:3px 7px;border-radius:5px;font-weight:700}
+.ind-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;font-size:11px}
+.ind-row+.ind-row{border-top:1px solid rgba(56,72,96,.04)}
+.ind-sym{font-weight:800;color:var(--t0);min-width:38px;font-size:11px}
+.ind-bar{flex:1;height:5px;background:rgba(56,72,96,.1);border-radius:3px;margin:0 6px;position:relative;overflow:hidden}
+.ind-fill{height:100%;border-radius:3px;position:absolute}
+.ind-tag{font-size:7px;font-weight:700;padding:2px 5px;border-radius:4px;text-align:center;min-width:36px}
+.ind-guide{padding:6px 8px;background:var(--bg2);border-radius:6px;margin-top:6px;font-size:8px;color:var(--t3);line-height:1.5}
+.ind-liq{display:flex;align-items:center;gap:6px;padding:5px 0;font-size:10px}
+.ind-liq+.ind-liq{border-top:1px solid rgba(56,72,96,.04)}
 </style>
 </head>
 <body data-theme="dark" data-lang="ar">
@@ -644,22 +669,9 @@ canvas{width:100%!important;border-radius:4px}
 <div id="mktETH" style="display:none"></div>
 </div>
 
-<!-- 📊 INDICATORS -->
+<!-- 📊 INDICATORS — 7 Pro Cards -->
 <div class="pg" id="pg-ind">
-<div class="big-tabs">
-<div class="big-tab t-green act" onclick="indTab(0,this)"><div class="bt-ic">📊</div>FR</div>
-<div class="big-tab t-orange" onclick="indTab(1,this)"><div class="bt-ic">📈</div>OI</div>
-<div class="big-tab t-purple" onclick="indTab(2,this)"><div class="bt-ic">🔗</div><span data-t="correlation">ارتباط</span></div>
-</div>
-<div class="big-tabs">
-<div class="big-tab t-red" onclick="indTab(3,this)"><div class="bt-ic">🗺️</div><span data-t="heatmap">خريطة حرارية</span></div>
-<div class="big-tab t-blue" onclick="indTab(4,this)"><div class="bt-ic">👁</div>Watchlist</div>
-</div>
-<div id="ind0"><div id="frList"></div></div>
-<div id="ind1" style="display:none"><div id="oiList"></div></div>
-<div id="ind2" style="display:none"><div id="corGrid"></div></div>
-<div id="ind3" style="display:none"><div class="hm" id="hmG"></div></div>
-<div id="ind4" style="display:none"><div class="muted" data-t="wl_desc">👁 أضف عملات لمراقبتها 24/7</div><div id="wlList"></div><div style="display:flex;gap:4px;margin-top:8px"><input class="mo-inp" id="wlInp" placeholder="BTC" style="flex:1;margin:0"><button class="rfr" onclick="addWL()" style="margin:0;width:auto;padding:9px 16px">➕</button></div></div>
+<div id="indCards"><div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div></div>
 <button class="rfr" onclick="loadInd()">🔄 <span data-t="refresh">تحديث</span></button>
 </div>
 

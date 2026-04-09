@@ -1845,21 +1845,84 @@ function renderAlerts(){
 /* 🤖 MONITOR */
 function renderMonPanel(){
   var el=document.getElementById('monPanel');if(!el)return;
+  var ar=lang==='ar';
   var q=getConnQuality();var qCol=q>=80?'var(--up)':q>=50?'var(--warn)':'var(--dn)';
   var wsOk=ws&&ws.readyState===1;
-  var tkAge=Date.now()-(typeof lastDataTime!=='undefined'?lastDataTime:Date.now());
   var total=connMetrics.apiOk+connMetrics.apiFail;var apiRate=total>0?Math.round(connMetrics.apiOk/total*100):0;
-  var perf=monitorState?monitorState.perf:{overallRate:0,totalTrades:0,totalWins:0};
-  var perfCol=perf.overallRate>=65?'var(--up)':perf.overallRate>=50?'var(--warn)':'var(--dn)';
-  el.innerHTML='<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:10px">'
-    +'<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:22px;font-weight:800;color:'+qCol+'">'+q+'%</div><div style="font-size:9px;color:var(--t2);margin-top:2px">'+(lang==='ar'?'جودة الاتصال':'Connection')+'</div></div>'
-    +'<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:22px;font-weight:800;color:'+perfCol+'">'+perf.overallRate+'%</div><div style="font-size:9px;color:var(--t2);margin-top:2px">'+(lang==='ar'?'نسبة النجاح':'Success Rate')+'</div><div style="font-size:8px;color:var(--t3)">'+perf.totalWins+'/'+perf.totalTrades+'</div></div>'
-    +'<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:22px;font-weight:800;color:var(--neon)">'+Object.keys(T).length+'</div><div style="font-size:9px;color:var(--t2);margin-top:2px">'+(lang==='ar'?'عملات محمّلة':'Coins Loaded')+'</div></div>'
-    +'<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:22px;font-weight:800;color:'+(wsOk?'var(--up)':'var(--dn)')+'">'+(wsOk?'✅':'❌')+'</div><div style="font-size:9px;color:var(--t2);margin-top:2px">WebSocket</div></div></div>'
-    +'<div class="cd" style="padding:10px;font-size:10px">'
-    +'<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--t2)">API</span><span style="font-family:var(--fm);font-weight:700;color:'+(apiRate>=90?'var(--up)':'var(--warn)')+'">'+apiRate+'% ('+connMetrics.apiOk+'/'+total+')</span></div>'
-    +'<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--t2)">'+(lang==='ar'?'عمر البيانات':'Data age')+'</span><span style="font-family:var(--fm);font-weight:700">'+Math.round(tkAge/1000)+'s</span></div>'
-    +'<div style="display:flex;justify-content:space-between;padding:4px 0"><span style="color:var(--t2)">FR</span><span style="font-family:var(--fm);font-weight:700">'+Object.keys(FR).length+' | OI: '+Object.keys(OI).length+'</span></div></div>';
+  var ms=monitorState||{perf:{overallRate:0,totalTrades:0,totalWins:0,bestHour:-1,worstHour:-1},factorStats:{},confCalib:{},hourStats:{},coinStats:{},coinBlacklist:[],weights:{},minConf:55};
+  var perf=ms.perf;var perfCol=perf.overallRate>=65?'var(--up)':perf.overallRate>=50?'var(--warn)':'var(--dn)';
+  var mkt;try{mkt=detectMarketDanger()}catch(e){mkt={level:'safe'}}
+  var mktCol=mkt.level==='safe'?'var(--up)':mkt.level==='caution'?'var(--warn)':'var(--dn)';
+  var mktIc=mkt.level==='safe'?'🟢':mkt.level==='caution'?'🟡':'🔴';
+  var h='';
+  /* Summary 4 cards */
+  h+='<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:12px">';
+  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:22px;font-weight:800;color:'+qCol+'">'+q+'%</div><div style="font-size:10px;color:var(--t2);margin-top:2px">'+(ar?'جودة الاتصال':'Connection')+'</div></div>';
+  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:22px;font-weight:800;color:'+perfCol+'">'+perf.overallRate+'%</div><div style="font-size:10px;color:var(--t2);margin-top:2px">'+(ar?'نسبة النجاح':'Success')+'</div><div style="font-size:9px;color:var(--t3)">'+perf.totalWins+'/'+perf.totalTrades+'</div></div>';
+  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-size:22px">'+mktIc+'</div><div style="font-size:10px;color:var(--t2);margin-top:2px">'+(ar?'حالة السوق':'Market')+'</div><div style="font-size:9px;color:'+mktCol+'">'+mkt.level+'</div></div>';
+  h+='<div class="cd" style="padding:12px;text-align:center"><div style="font-family:var(--fm);font-size:22px;font-weight:800;color:'+(wsOk?'var(--up)':'var(--dn)')+'">'+(wsOk?'✅':'❌')+'</div><div style="font-size:10px;color:var(--t2);margin-top:2px">WebSocket</div></div></div>';
+  /* API Details */
+  h+='<div class="cd" style="padding:10px;margin-bottom:12px;font-size:11px">';
+  h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--t2)">API</span><span style="font-family:var(--fm);font-weight:700;color:'+(apiRate>=90?'var(--up)':'var(--warn)')+'">'+apiRate+'% ('+connMetrics.apiOk+'/'+total+')</span></div>';
+  h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--t2)">'+(ar?'عملات':'Coins')+'</span><span style="font-family:var(--fm);font-weight:700;color:var(--neon)">'+Object.keys(T).length+'</span></div>';
+  h+='<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid var(--bdr)"><span style="color:var(--t2)">FR / OI</span><span style="font-family:var(--fm);font-weight:700">'+Object.keys(FR).length+' / '+Object.keys(OI).length+'</span></div>';
+  h+='<div style="display:flex;justify-content:space-between;padding:5px 0"><span style="color:var(--t2)">'+(ar?'حد أدنى ثقة':'Min Confidence')+'</span><span style="font-family:var(--fm);font-weight:700;color:var(--warn)">'+ms.minConf+'%</span></div></div>';
+  /* Factor Weights */
+  h+='<div style="font-weight:800;font-size:13px;color:var(--t0);margin:10px 0 6px">⚖️ '+(ar?'أوزان العوامل':'Factor Weights')+'</div>';
+  h+='<div class="cd" style="padding:10px;margin-bottom:12px">';
+  var keys=Object.keys(ms.factorStats);
+  keys.sort(function(a,b){return(ms.factorStats[b].winRate||0)-(ms.factorStats[a].winRate||0)});
+  if(keys.length){
+    keys.forEach(function(key){
+      var f=ms.factorStats[key];var wr=f.winRate||0;
+      var wCol=wr>=70?'var(--up)':wr>=50?'var(--warn)':'var(--dn)';
+      var wt=ms.weights[key]||0;var defW=(typeof DEFAULT_WEIGHTS!=='undefined'&&DEFAULT_WEIGHTS[key])?DEFAULT_WEIGHTS[key]:1;
+      var wtChg=defW>0?Math.round((wt/defW-1)*100):0;
+      var wtCol=wtChg>0?'var(--up)':wtChg<0?'var(--dn)':'var(--t3)';
+      h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--bdr);font-size:11px">';
+      h+='<span style="font-weight:700;min-width:55px">'+key+'</span>';
+      h+='<span style="font-family:var(--fm);font-weight:700;color:'+wCol+'">'+wr+'%</span>';
+      h+='<span style="font-family:var(--fm);font-size:9px;color:var(--t3)">'+f.wins+'W/'+f.total+'T</span>';
+      h+='<span style="font-family:var(--fm);font-size:9px;color:'+wtCol+'">'+(wtChg>=0?'+':'')+wtChg+'%</span></div>';
+    });
+  }else{h+='<div style="color:var(--t3);font-size:11px;text-align:center;padding:8px">'+(ar?'لا بيانات بعد — تحتاج صفقات':'No data yet — need trades')+'</div>';}
+  h+='</div>';
+  /* Confidence Calibration */
+  h+='<div style="font-weight:800;font-size:13px;color:var(--t0);margin:10px 0 6px">📊 '+(ar?'معايرة الثقة':'Confidence Calibration')+'</div>';
+  h+='<div class="cd" style="padding:10px;margin-bottom:12px">';
+  var buckets=Object.keys(ms.confCalib).sort();
+  if(buckets.length){
+    buckets.forEach(function(b){
+      var c=ms.confCalib[b];var col=c.realRate>=65?'var(--up)':c.realRate>=45?'var(--warn)':'var(--dn)';
+      h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:5px 0;font-size:11px;border-bottom:1px solid var(--bdr)">';
+      h+='<span style="color:var(--t2)">'+(ar?'ثقة ':'Conf ')+b+'%</span>';
+      h+='<span style="font-family:var(--fm);font-weight:700;color:'+col+'">'+(ar?'فعلياً ':'Actual ')+c.realRate+'%</span>';
+      h+='<span style="font-size:9px;color:var(--t3)">('+c.wins+'/'+c.total+')</span></div>';
+    });
+  }else{h+='<div style="color:var(--t3);font-size:11px;text-align:center;padding:8px">'+(ar?'تحتاج 5+ صفقات':'Need 5+ trades')+'</div>';}
+  h+='</div>';
+  /* Hour Stats */
+  h+='<div style="font-weight:800;font-size:13px;color:var(--t0);margin:10px 0 6px">🕐 '+(ar?'تحليل الساعات':'Hour Analysis')+'</div>';
+  h+='<div class="cd" style="padding:10px;margin-bottom:12px"><div style="display:flex;flex-wrap:wrap;gap:3px">';
+  for(var hr=0;hr<24;hr++){
+    var hs=ms.hourStats[String(hr)];var rate=hs?hs.rate:-1;
+    var bg=rate<0?'var(--bg2)':rate>=65?'rgba(0,255,136,.15)':rate>=45?'rgba(255,184,0,.15)':'rgba(255,56,96,.15)';
+    var col=rate<0?'var(--t3)':rate>=65?'var(--up)':rate>=45?'var(--warn)':'var(--dn)';
+    h+='<div style="width:28px;padding:4px 2px;background:'+bg+';border-radius:4px;text-align:center;font-size:7px"><div style="color:var(--t3)">'+String(hr).padStart(2,'0')+'</div><div style="font-weight:700;color:'+col+';font-family:var(--fm)">'+(rate>=0?rate+'%':'--')+'</div></div>';
+  }
+  h+='</div>';
+  if(perf.bestHour>=0){h+='<div style="font-size:10px;margin-top:6px;color:var(--t2)">'+(ar?'أفضل ساعة: ':'Best: ')+'<b style="color:var(--up)">'+perf.bestHour+':00</b>'+(perf.worstHour>=0?' — '+(ar?'أضعف: ':'Worst: ')+'<b style="color:var(--dn)">'+perf.worstHour+':00</b>':'')+'</div>';}
+  h+='</div>';
+  /* Coin Blacklist */
+  h+='<div style="font-weight:800;font-size:13px;color:var(--t0);margin:10px 0 6px">🚫 '+(ar?'العملات المحظورة':'Blacklisted Coins')+'</div>';
+  h+='<div class="cd" style="padding:10px;margin-bottom:12px">';
+  if(ms.coinBlacklist&&ms.coinBlacklist.length){
+    h+='<div style="display:flex;flex-wrap:wrap;gap:4px">';
+    ms.coinBlacklist.forEach(function(s){h+='<span style="padding:4px 10px;background:var(--dd);color:var(--dn);border-radius:6px;font-size:11px;font-weight:700">'+s+'</span>';});
+    h+='</div>';
+  }else{h+='<div style="color:var(--up);font-size:11px;text-align:center;padding:6px">✅ '+(ar?'لا عملات محظورة — كل شي نظيف':'No blacklisted coins — all clean')+'</div>';}
+  h+='</div>';
+  el.innerHTML=h;
 }
 /* DASHBOARD */
 async function loadDash(){
@@ -2485,7 +2548,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   var heroBdr=data.ts>=2?'rgba(0,255,136,.08)':data.ts<=-2?'rgba(255,56,96,.08)':'rgba(255,184,0,.08)';
   h+='<div class="mkt-hero" style="background:'+heroBg+';border:1px solid '+heroBdr+'">';
   h+='<div style="font-size:32px;color:'+coinColor+'">'+coinIcon+'</div>';
-  h+='<div style="font-size:14px;font-weight:800;color:var(--t0);margin:4px 0">'+cn+' <span style="color:var(--t2);font-size:10px">'+sym+'/USDT</span></div>';
+  h+='<div style="font-size:14px;font-weight:800;color:var(--t0);margin:4px 0">'+cn+' <span style="color:var(--t2);font-size:12px">'+sym+'/USDT</span></div>';
   h+='<div class="mkt-hero-price" style="direction:ltr">'+rP(data.price)+'</div>';
   h+='<div class="mkt-hero-ch" style="color:'+(data.ch.h24>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.ch.h24>=0?'+':'')+data.ch.h24.toFixed(1)+'% (24h)</div>';
   h+='<div class="mkt-hero-meta">'+(lang==='ar'?'\u0641\u0631\u064a\u0645: 4H \u2014 Binance':'Frame: 4H \u2014 Binance')+'</div>';
@@ -2582,13 +2645,13 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     h+='<div class="mkt-candle '+cls+'" style="padding:6px 3px">';
     h+='<div class="mkt-candle-tf">'+tf.n+'</div>';
     h+='<div style="font-size:16px;margin:2px 0">'+ic+'</div>';
-    h+='<div style="font-size:7px;color:'+col+';font-weight:700">'+(tf.d==='up'?(lang==='ar'?'\u0635\u0627\u0639\u062f':'Bull'):tf.d==='down'?(lang==='ar'?'\u0647\u0627\u0628\u0637':'Bear'):(lang==='ar'?'\u0645\u062d\u0627\u064a\u062f':'Flat'))+'</div>';
-    h+='<div style="font-size:6px;color:var(--t3);margin-top:1px">'+reason+'</div>';
+    h+='<div style="font-size:12px;color:'+col+';font-weight:700">'+(tf.d==='up'?(lang==='ar'?'\u0635\u0627\u0639\u062f':'Bull'):tf.d==='down'?(lang==='ar'?'\u0647\u0627\u0628\u0637':'Bear'):(lang==='ar'?'\u0645\u062d\u0627\u064a\u062f':'Flat'))+'</div>';
+    h+='<div style="font-size:11px;color:var(--t3);margin-top:1px">'+reason+'</div>';
     h+='</div>';
   });
   h+='</div>';
   var confCol=data.bullTFs>=3?'var(--up)':data.bullTFs<=1?'var(--dn)':'var(--warn)';
-  h+='<div style="text-align:center;padding:5px;border-radius:6px;margin-bottom:8px;font-size:10px;font-weight:700;background:'+(data.bullTFs>=3?'rgba(0,255,136,.04)':data.bullTFs<=1?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)')+';color:'+confCol+'">'+(lang==='ar'?'\u062a\u0648\u0627\u0641\u0642: ':'Confluence: ')+data.bullTFs+'/4 '+(data.bullTFs>=3?(lang==='ar'?'\u0635\u0627\u0639\u062f\u0629 = \u062a\u0648\u0627\u0641\u0642 \u0642\u0648\u064a':'Bullish = Strong'):data.bullTFs<=1?(lang==='ar'?'\u0647\u0627\u0628\u0637\u0629':'Bearish'):(lang==='ar'?'\u0645\u062e\u062a\u0644\u0637\u0629':'Mixed'))+'</div>';
+  h+='<div style="text-align:center;padding:5px;border-radius:6px;margin-bottom:8px;font-size:12px;font-weight:700;background:'+(data.bullTFs>=3?'rgba(0,255,136,.04)':data.bullTFs<=1?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)')+';color:'+confCol+'">'+(lang==='ar'?'\u062a\u0648\u0627\u0641\u0642: ':'Confluence: ')+data.bullTFs+'/4 '+(data.bullTFs>=3?(lang==='ar'?'\u0635\u0627\u0639\u062f\u0629 = \u062a\u0648\u0627\u0641\u0642 \u0642\u0648\u064a':'Bullish = Strong'):data.bullTFs<=1?(lang==='ar'?'\u0647\u0627\u0628\u0637\u0629':'Bearish'):(lang==='ar'?'\u0645\u062e\u062a\u0644\u0637\u0629':'Mixed'))+'</div>';
   h+='</div>';
 
   /* ════ Section 5: Market Structure (SMC) ════ */
@@ -2619,7 +2682,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     h+='</div>';
   }
   if((!data.orderBlocks||!data.orderBlocks.length)&&(!data.fvgs||!data.fvgs.length)){
-    h+='<div class="mkt-box" style="text-align:center;color:var(--t3);font-size:10px">'+(lang==='ar'?'\u0644\u0627 OB / FVG \u062d\u0627\u0644\u064a\u0627\u064b':'No active OB / FVG')+'</div>';
+    h+='<div class="mkt-box" style="text-align:center;color:var(--t3);font-size:12px">'+(lang==='ar'?'\u0644\u0627 OB / FVG \u062d\u0627\u0644\u064a\u0627\u064b':'No active OB / FVG')+'</div>';
   }
   h+='</div>';
 
@@ -2638,7 +2701,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   levels.forEach(function(lv){
     var bg=lv.highlight?'rgba(91,156,255,.06)':'transparent';
     h+='<div class="mkt-row" style="background:'+bg+';border-radius:4px;padding:5px 4px">';
-    h+='<span class="mkt-row-label"><span style="font-size:7px;padding:2px 5px;border-radius:3px;font-weight:700;background:'+lv.col+'15;color:'+lv.col+'">'+lv.tag+'</span> '+lv.label+'</span>';
+    h+='<span class="mkt-row-label"><span style="font-size:12px;padding:2px 5px;border-radius:3px;font-weight:700;background:'+lv.col+'15;color:'+lv.col+'">'+lv.tag+'</span> '+lv.label+'</span>';
     h+='<span class="mkt-row-val" style="direction:ltr;color:'+lv.col+'">'+rP(lv.price)+'</span>';
     h+='</div>';
   });
@@ -2720,7 +2783,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<div class="mkt-row"><span class="mkt-row-label">\u2696\uFE0F R:R</span><span class="mkt-row-val">1:'+rr.toFixed(1)+'</span></div>';
   h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u{1F4B0} \u062d\u062c\u0645 \u0627\u0644\u0645\u0631\u0643\u0632':'\u{1F4B0} Position Size')+'</span><span class="mkt-row-val">'+data.riskPct+'%</span></div>';
   h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u23F0 \u0627\u0644\u0645\u062f\u0629':'\u23F0 Duration')+'</span><span class="mkt-row-val">'+(lang==='ar'?'3-5 \u0623\u064a\u0627\u0645':'3-5 days')+'</span></div>';
-  h+='<div style="margin-top:6px;font-size:9px;color:var(--dn)">\u274C '+(lang==='ar'?'\u0634\u0631\u0637 \u0627\u0644\u0625\u0644\u063a\u0627\u0621: '+(data.ts>=0?data.bullInv:data.bearInv):'Cancel if: '+(data.ts>=0?data.bullInv:data.bearInv))+'</div>';
+  h+='<div style="margin-top:6px;font-size:11px;color:var(--dn)">\u274C '+(lang==='ar'?'\u0634\u0631\u0637 \u0627\u0644\u0625\u0644\u063a\u0627\u0621: '+(data.ts>=0?data.bullInv:data.bearInv):'Cancel if: '+(data.ts>=0?data.bullInv:data.bearInv))+'</div>';
   h+='</div></div>';
 
   /* ════ Section 11: 3 Scenarios ════ */
@@ -2733,13 +2796,13 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0627\u0644\u0645\u0631\u062d\u0644\u0629 1: ':'Stage 1: ')+rP(step1U)+' \u2192 '+rP(step2U)+'</div>';
   h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0627\u0644\u0645\u0631\u062d\u0644\u0629 2: ':'Stage 2: ')+rP(step2U)+' \u2192 '+rP(step3U)+'</div>';
   h+='<div class="mkt-scenario-inv">\u274C '+data.bullInv+'</div>';
-  h+='<div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+data.bullP+'%;background:var(--up)"></div></div><span style="font-size:8px;color:var(--up)">'+data.bullP+'%</span></div>';
+  h+='<div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+data.bullP+'%;background:var(--up)"></div></div><span style="font-size:11px;color:var(--up)">'+data.bullP+'%</span></div>';
   h+='</div>';
   /* Neutral scenario */
   h+='<div class="mkt-scenario neutral">';
   h+='<div class="mkt-scenario-t" style="color:var(--warn)"><span>\u27A1\uFE0F '+(lang==='ar'?'\u062c\u0627\u0646\u0628\u064a':'Sideways')+'</span><span class="mkt-badge" style="background:rgba(255,184,0,.08);color:var(--warn);margin:0">'+data.neutP+'%</span></div>';
   h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0646\u0637\u0627\u0642: ':'Range: ')+rP(data.supp)+' \u2194 '+rP(data.resist)+'</div>';
-  h+='<div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+data.neutP+'%;background:var(--warn)"></div></div><span style="font-size:8px;color:var(--warn)">'+data.neutP+'%</span></div>';
+  h+='<div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+data.neutP+'%;background:var(--warn)"></div></div><span style="font-size:11px;color:var(--warn)">'+data.neutP+'%</span></div>';
   h+='</div>';
   /* Bear scenario */
   var step1D=data.price;var step2D=data.f618D;var step3D=data.supp;

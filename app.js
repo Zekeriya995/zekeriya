@@ -67,7 +67,7 @@ if (!monitorState || monitorState.v !== MONITOR_VERSION) {
     coinStats: {},
     coinBlacklist: [],
     failPatterns: [],
-    minConf: 55,
+    minConf: 65,
     lastTune: 0,
     perf: {
       totalTrades: 0,
@@ -186,10 +186,10 @@ function processTradeOutcome(trade) {
   cs.rate = cs.total > 0 ? Math.round((cs.wins / cs.total) * 100) : 0;
 
   var bl = monitorState.coinBlacklist;
-  if (cs.total >= 5 && cs.rate < 40 && bl.indexOf(coinKey) === -1) {
+  if (cs.total >= 3 && cs.rate < 30 && bl.indexOf(coinKey) === -1) {
     bl.push(coinKey);
   }
-  if (cs.rate >= 50 && bl.indexOf(coinKey) !== -1) {
+  if (cs.rate >= 55 && bl.indexOf(coinKey) !== -1) {
     bl.splice(bl.indexOf(coinKey), 1);
   }
 
@@ -323,10 +323,12 @@ function autoTuneWeights() {
   });
 
   var overallRate = monitorState.perf.overallRate;
-  if (overallRate < 55 && monitorState.minConf < 70) {
-    monitorState.minConf = Math.min(70, monitorState.minConf + 3);
-  } else if (overallRate > 75 && monitorState.minConf > 50) {
-    monitorState.minConf = Math.max(50, monitorState.minConf - 2);
+  if (overallRate < 40 && monitorState.minConf < 80) {
+    monitorState.minConf = Math.min(80, monitorState.minConf + 5);
+  } else if (overallRate < 55 && monitorState.minConf < 75) {
+    monitorState.minConf = Math.min(75, monitorState.minConf + 3);
+  } else if (overallRate > 70 && monitorState.minConf > 60) {
+    monitorState.minConf = Math.max(60, monitorState.minConf - 2);
   }
 
   monitorState.perf.bestFactor = bestKey;
@@ -458,15 +460,15 @@ function signalQualityGate(sym, type, score) {
   results.push({name: lang === 'ar' ? 'سعر حقيقي' : 'Real price', pass: g1});
   if (!g1) pass = false;
 
-  var minVol = TIER1.has(sym) ? 500000 : 1000000;
+  var minVol = TIER1.has(sym) ? 2000000 : 5000000;
   var g2 = d && d.v >= minVol;
-  results.push({name: lang === 'ar' ? 'حجم كافي' : 'Volume OK', pass: g2, detail: d ? fmt(d.v) : '$0'});
+  results.push({name: lang === 'ar' ? 'حجم كافي (>$2M)' : 'Volume OK (>$2M)', pass: g2, detail: d ? fmt(d.v) : '$0'});
   if (!g2) pass = false;
 
   var mkt = detectMarketDanger();
   var g3 = !mkt.dangerous;
   results.push({name: lang === 'ar' ? 'السوق آمن' : 'Market safe', pass: g3, detail: mkt.level});
-  if (!g3 && type !== 'whale') pass = false;
+  if (!g3) pass = false;
 
   var g4 = !isCoinBlacklisted(sym);
   results.push({name: lang === 'ar' ? 'عملة غير محظورة' : 'Not blacklisted', pass: g4});
@@ -476,11 +478,28 @@ function signalQualityGate(sym, type, score) {
   var failPat = snap ? matchesFailPattern(snap.raw) : null;
   var g5 = !failPat;
   results.push({name: lang === 'ar' ? 'لا نمط فشل' : 'No fail pattern', pass: g5, detail: failPat ? failPat.label : ''});
-  if (!g5 && failPat && failPat.failRate >= 70) pass = false;
+  if (!g5 && failPat && failPat.failRate >= 60) pass = false;
+
+  var ww = whaleWaves[sym];
+  var hasWhale = ww && ww.waves && ww.waves.length > 0;
+  var g6 = hasWhale || type === 'whale';
+  results.push({name: lang === 'ar' ? 'دعم حيتان' : 'Whale support', pass: g6});
+  if (!g6 && type !== 'fast') pass = false;
+
+  var openCount = activeTrades ? activeTrades.filter(function(x){return x.status==='OPEN'}).length : 0;
+  var g7 = openCount < 5;
+  results.push({name: lang === 'ar' ? 'حد الصفقات (<5)' : 'Max trades (<5)', pass: g7, detail: openCount+'/5'});
+  if (!g7) pass = false;
+
+  var hr = new Date().getUTCHours();
+  var hourStat = monitorState && monitorState.hourStats ? monitorState.hourStats[String(hr)] : null;
+  var g8 = !hourStat || hourStat.rate >= 30 || hourStat.total < 3;
+  results.push({name: lang === 'ar' ? 'ساعة مناسبة' : 'Good hour', pass: g8, detail: hourStat ? hourStat.rate+'%' : '--'});
+  if (!g8) pass = false;
 
   try {
     addVLog(pass ? '✅' : '🚫',
-      (pass ? '' : '⛔ ') + sym + ' ' + type + ' — Gate: ' + results.filter(function(r) { return r.pass; }).length + '/5 ' +
+      (pass ? '' : '⛔ ') + sym + ' ' + type + ' — Gate: ' + results.filter(function(r) { return r.pass; }).length + '/8 ' +
       (pass ? (lang === 'ar' ? 'مرّ' : 'PASS') : (lang === 'ar' ? 'مرفوض: ' + results.filter(function(r) { return !r.pass; }).map(function(r) { return r.name; }).join(', ') : 'BLOCKED: ' + results.filter(function(r) { return !r.pass; }).map(function(r) { return r.name; }).join(', ')))
     );
   } catch(e) {}
@@ -522,11 +541,11 @@ function runAutoImprove() {
   Object.keys(monitorState.coinStats).forEach(function(coin) {
     var cs = monitorState.coinStats[coin];
     var inBL = monitorState.coinBlacklist.indexOf(coin) !== -1;
-    if (cs.total >= 5 && cs.rate < 40 && !inBL) {
+    if (cs.total >= 3 && cs.rate < 30 && !inBL) {
       monitorState.coinBlacklist.push(coin);
       addedToBL.push(coin);
     }
-    if (cs.total >= 5 && cs.rate >= 50 && inBL) {
+    if (cs.total >= 5 && cs.rate >= 55 && inBL) {
       monitorState.coinBlacklist.splice(monitorState.coinBlacklist.indexOf(coin), 1);
       removedFromBL.push(coin);
     }
@@ -789,18 +808,19 @@ async function loadTrading(){document.getElementById('tradeList').innerHTML='<di
   sigs.sort(function(a,b){return b.conf-a.conf});renderTrading(sigs)}
 function filterTrade(f,btn){curTradeFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadTrading()}
 function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter(function(x){return x.type==='fast'});else if(curTradeFilter==='daily')f=sigs.filter(function(x){return x.type==='daily'});else if(curTradeFilter!=='all'){f=sigs.filter(function(x){return x.sec===curTradeFilter})}
-  /* Part B: Quality filter — min 55% confidence, max 10 */
-  f=f.filter(function(s){return s.conf>=55}).slice(0,10);
+  /* Part B: Quality filter — min 65% confidence, max 8 */
+  f=f.filter(function(s){return s.conf>=65}).slice(0,8);
   document.getElementById('scanI').innerHTML='📊 '+f.length+' '+t('scan_signals')+' | '+t('scan_updated')+': '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
-  if(!f.length){document.getElementById('tradeList').innerHTML='<div class="sc-empty"><div class="sc-empty-ic">📡</div><div style="font-size:13px;font-weight:700;color:var(--t0);margin-bottom:4px">'+(lang==='ar'?'السوق هادئ — لا فرص قوية الحين':'Market quiet — No strong signals')+'</div><div style="font-size:11px;color:var(--t2)">'+(lang==='ar'?'الانتظار أفضل من صفقة ضعيفة':'Waiting is better than a weak trade')+'</div></div>';return}
+  if(!f.length){document.getElementById('tradeList').innerHTML='<div class="sc-empty"><div class="sc-empty-ic">📡</div><div style="font-size:13px;font-weight:700;color:var(--t0);margin-bottom:4px">'+(lang==='ar'?'السوق هادئ — لا فرص قوية الحين':'Market quiet — No strong signals')+'</div><div style="font-size:11px;color:var(--t2)">'+(lang==='ar'?'البوابة الذكية ترفض الإشارات الضعيفة — الانتظار أفضل':'Smart gate blocks weak signals — Waiting is better')+'</div></div>';return}
   var h='';f.forEach(function(s,i){
     var tCol=s.type==='fast'?'var(--blue)':'var(--up)';var tLbl=s.type==='fast'?t('scan_fast'):t('scan_daily');
     var tb=getTierBadge(s.s);var ta=timeAgo(s.detectedAt||Date.now());
     /* Verdict (Part B) */
     var verdict,vCol,vBg;
-    if(s.conf>=85&&s.ultra){verdict=lang==='ar'?'🟢 شراء قوي — ادخل بثقة':'🟢 Strong Buy';vCol='var(--up)';vBg='rgba(0,255,136,.06)'}
-    else if(s.conf>=70){verdict=lang==='ar'?'🟢 فرصة جيدة — ادخل':'🟢 Good — Enter';vCol='var(--up)';vBg='rgba(0,255,136,.04)'}
-    else{verdict=lang==='ar'?'🟡 فرصة محتملة — حذر':'🟡 Possible — Caution';vCol='var(--warn)';vBg='rgba(255,184,0,.04)'}
+    if(s.conf>=85&&s.ultra){verdict=lang==='ar'?'🟢 إشارة ممتازة — ادخل بثقة':'🟢 Excellent — Enter Now';vCol='var(--up)';vBg='rgba(0,255,136,.08)'}
+    else if(s.conf>=80){verdict=lang==='ar'?'🟢 إشارة قوية — فرصة حقيقية':'🟢 Strong Signal';vCol='var(--up)';vBg='rgba(0,255,136,.06)'}
+    else if(s.conf>=70){verdict=lang==='ar'?'🟡 فرصة جيدة — ادخل بحذر':'🟡 Good — Enter Carefully';vCol='var(--warn)';vBg='rgba(255,184,0,.04)'}
+    else{verdict=lang==='ar'?'⚪ فرصة محتملة — راقب فقط':'⚪ Watch Only';vCol='var(--t2)';vBg='rgba(56,72,96,.04)'}
     var wConf=0;var ww=whaleWaves[s.s];if(ww&&ww.engine)wConf=ww.engine.confidence||0;
     var btcChg=T.BTC?T.BTC.c:0;var btcCol=btcChg>=1?'var(--up)':btcChg<=-1?'var(--dn)':'var(--t2)';
     h+='<div class="scan-card"><div class="scan-card-bar" style="background:'+(s.ultra?'var(--ultra)':s.type==='fast'?'var(--blue)':'var(--up)')+'"></div><div class="scan-card-body">'

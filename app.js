@@ -608,7 +608,7 @@ var notifHist=[];try{notifHist=JSON.parse(localStorage.getItem('nxnh10')||'[]')}
 function addNotifHist(icon,sym,type,body){notifHist.unshift({icon:icon,sym:sym,type:type,body:body,time:Date.now()});if(notifHist.length>50)notifHist=notifHist.slice(0,50);try{localStorage.setItem('nxnh10',JSON.stringify(notifHist))}catch(e){}}
 function renderNotifHist(){var el=document.getElementById('notifHistList');if(!el)return;el.innerHTML=notifHist.length?notifHist.slice(0,20).map(function(n){return'<div class="al-i" style="cursor:pointer" onclick="openCoin(\''+n.sym+'\')"><div class="al-l"><div style="font-size:18px">'+n.icon+'</div><div><div style="font-weight:600;font-size:11px">'+n.sym+' — '+n.type+'</div><div style="font-size:8px;color:var(--t3)">'+n.body+'</div></div></div><div style="font-size:8px;font-family:var(--fm);color:var(--t2)">'+timeBadge(n.time)+'</div></div>'}).join(''):'<div class="empty"><div class="empty-ic">🔔</div><div class="empty-tx">'+(lang==='ar'?'لا إشعارات':'No notifications')+'</div></div>'}
 /* WATCHLIST ALERTS — check every update */
-function checkWatchlistAlerts(){var wl=[];try{wl=JSON.parse(localStorage.getItem('nxwl10')||'[]')}catch(e){};wl.forEach(function(sym){var d=T[sym];if(!d)return;if(d.c>=5){var k='wl_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};playSound('whale');showPopup('👁',sym+' — '+(lang==='ar'?'عملة مراقبة تحركت!':'Watchlist coin moved!'),'+'+d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('👁',sym,'Watchlist','+'+d.c.toFixed(1)+'%')}}if(d.c<=-5){var k='wl_dn_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};playSound('whale');showPopup('⚠️',sym+' — '+(lang==='ar'?'عملة مراقبة هبطت!':'Watchlist coin dropped!'),d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('⚠️',sym,'Watchlist Drop',d.c.toFixed(1)+'%')}}})}/* SOUND NOTIFICATIONS — respects user tone preference */
+function checkWatchlistAlerts(){var wl=[];try{wl=JSON.parse(localStorage.getItem('nxwl10')||'[]')}catch(e){};wl.forEach(function(sym){var d=T[sym];if(!d)return;if(d.c>=3){var k='wl_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};playSound('whale');showPopup('👁',sym+' — '+(lang==='ar'?'عملة مراقبة تحركت!':'Watchlist coin moved!'),'+'+d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('👁',sym,'Watchlist','+'+d.c.toFixed(1)+'%')}}if(d.c<=-3){var k='wl_dn_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};playSound('whale');showPopup('⚠️',sym+' — '+(lang==='ar'?'عملة مراقبة هبطت!':'Watchlist coin dropped!'),d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('⚠️',sym,'Watchlist Drop',d.c.toFixed(1)+'%')}}})}/* SOUND NOTIFICATIONS — respects user tone preference */
 function playSound(type){if(!soundEnabled||soundPref==='silent')return;previewTone(soundPref)}
 /* 📲 TELEGRAM — SECURE PROXY (no token exposed!) */
 var TG_PROXY='https://your-nexus-proxy.workers.dev/notify';
@@ -662,12 +662,16 @@ function tgNotify(sym,type,data){
 /* ON-SCREEN POPUP NOTIFICATION */
 function showPopup(icon,title,body){var el=document.getElementById('notifPopup');document.getElementById('npIcon').textContent=icon;document.getElementById('npTitle').textContent=title;document.getElementById('npBody').textContent=body;document.getElementById('npTime').textContent='🆕';el.style.top='12px';setTimeout(function(){el.style.top='-80px'},4000)}
 function notify(sym,type,score,extra){var k=sym+'_'+type+'_'+new Date().getHours();if(notifiedSet[k])return;
+  /* Block small coin (gem) notifications */
+  if(type==='gem')return;
+  /* Whale: only notify if total buy volume > $100,000 */
+  if(type==='whale'){var ww=whaleWaves[sym];if(!ww||!ww.engine||!ww.totalBuy||ww.totalBuy<100000)return}
   /* === QUALITY GATE === */
   try{var gate=signalQualityGate(sym,type,score);if(!gate.pass){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){}return}}catch(e){}
   notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){}playSound(type);
   if(type==='ultra'){showPopup('⭐',sym+' — ULTRA Signal!','Score: '+score+' | '+(lang==='ar'?'ادخل الآن!':'Enter now!'));addNotifHist('⭐',sym,'ULTRA','Score: '+score);tgNotify(sym,'ultra',extra||{score:score});if(T[sym])openTrade(sym,T[sym].p,'ultra',score,extra)}
-  else if(type==='whale'){showPopup('🐋',sym+' — '+(lang==='ar'?'تجميع حيتان!':'Whale detected!'),(lang==='ar'?'نشاط غير عادي':'Unusual activity'));addNotifHist('🐋',sym,lang==='ar'?'حوت':'Whale',fP(T[sym]?T[sym].p:0));tgNotify(sym,'whale',{});if(T[sym])openTrade(sym,T[sym].p,'whale',score)}
-  else if(type==='gem'){showPopup('💎',sym+' — '+(lang==='ar'?'جوهرة مكتشفة!':'Gem found!'),(lang==='ar'?'عملة صغيرة بحركة قوية':'Small cap with strong move'));addNotifHist('💎',sym,lang==='ar'?'جوهرة':'Gem','+'+(T[sym]?T[sym].c.toFixed(1):0)+'%');tgNotify(sym,'gem',{});if(T[sym])openTrade(sym,T[sym].p,'gem',score)}}
+  else if(type==='whale'){var wVol=whaleWaves[sym]?whaleWaves[sym].totalBuy:0;showPopup('🐋',sym+' — '+(lang==='ar'?'تجميع حيتان!':'Whale detected!'),'$'+fmt(wVol));addNotifHist('🐋',sym,lang==='ar'?'حوت':'Whale','$'+fmt(wVol));tgNotify(sym,'whale',{});if(T[sym])openTrade(sym,T[sym].p,'whale',score)}
+}
 /* LANG/THEME/NAV */
 function togLang(){lang=lang==='ar'?'en':'ar';try{localStorage.setItem('nxlang',lang)}catch(e){};document.documentElement.lang=lang;document.documentElement.dir=lang==='ar'?'rtl':'ltr';document.body.dataset.lang=lang;var sI=document.getElementById('sInp');if(sI)sI.placeholder=t('search_ph');document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(TR[k])el.textContent=TR[k][lang]});updateMenuLang()}
 function togTh(){var d=document.body.dataset.theme==='dark'?'light':'dark';document.body.dataset.theme=d;if(tg){try{tg.setHeaderColor(d==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(d==='dark'?'#020408':'#f0f4f8')}catch(e){}}try{localStorage.setItem('nxt10',d)}catch(e){};updateMenuTheme()}
@@ -769,7 +773,7 @@ function renderMySettings(){
   h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:0 0 10px">🔊 '+(ar?'الصوت':'Sound')+'</div>';
   h+='<div class="al-i"><div class="al-l"><div style="font-size:18px">🔊</div><div><div style="font-weight:600;font-size:12px">'+(ar?'تفعيل الصوت':'Enable Sound')+'</div></div></div><div class="tgl '+(soundEnabled?'on':'')+'" onclick="this.classList.toggle(\'on\');soundEnabled=!soundEnabled;try{localStorage.setItem(\'nxsnd\',soundEnabled?\'1\':\'0\')}catch(e){}"><div class="tgl-k"></div></div></div>';
   h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:14px 0 10px">🔔 '+(ar?'التنبيهات':'Alerts')+'</div>';
-  var alerts=[{key:'ultra',ic:'⭐',nm:'ULTRA',sub:ar?'إشارات قوية':'Strong signals'},{key:'whale',ic:'🐋',nm:ar?'حيتان':'Whales',sub:ar?'شراء حيتان':'Whale buys'},{key:'breakout',ic:'💥',nm:ar?'انفجار':'Breakout',sub:'Score 60+'},{key:'warning',ic:'⚠️',nm:ar?'تحذيرات':'Warnings',sub:'FR + OI'},{key:'watchlist',ic:'👁',nm:'Watchlist',sub:'±5%'}];
+  var alerts=[{key:'ultra',ic:'⭐',nm:'ULTRA',sub:ar?'إشارات ≥85% ثقة':'Signals ≥85%'},{key:'whale',ic:'🐋',nm:ar?'حيتان':'Whales',sub:ar?'فوق $100K':'Above $100K'},{key:'breakout',ic:'💥',nm:ar?'انفجار':'Breakout',sub:'Score 60+'},{key:'warning',ic:'⚠️',nm:ar?'تحذيرات':'Warnings',sub:'FR + OI'},{key:'watchlist',ic:'👁',nm:'Watchlist',sub:ar?'تحرك ±3%':'Move ±3%'}];
   alerts.forEach(function(a){
     var isOn=alertPrefs[a.key]!==false;
     h+='<div class="al-i"><div class="al-l"><div style="font-size:18px">'+a.ic+'</div><div><div style="font-weight:600;font-size:12px">'+a.nm+'</div><div style="font-size:9px;color:var(--t3)">'+a.sub+'</div></div></div><div class="tgl '+(isOn?'on':'')+'" onclick="this.classList.toggle(\'on\');saveAlertPref(\''+a.key+'\',this.classList.contains(\'on\'))"><div class="tgl-k"></div></div></div>';
@@ -1142,7 +1146,8 @@ function monitorTrades(){
     if(Date.now()-lastSnap>=300000){tr.snapshots.push({p:d.p,pnl:tr.pnl,t:Date.now()});if(tr.snapshots.length>200)tr.snapshots=tr.snapshots.slice(-200)}
     /* Part B: Whale profit-taking detection */
     var wpt=detectWhaleProfitTaking(tr.sym);
-    if(wpt.taking&&tr.pnl>0){showPopup('🐋🩸',tr.sym+' — '+(lang==='ar'?'حيتان تجني أرباح!':'Whales taking profit!'),(tr.pnl>=0?'+':'')+tr.pnl.toFixed(1)+'%');addNotifHist('🐋🩸',tr.sym,lang==='ar'?'جني أرباح':'Profit Taking',wpt.signals[0]||'');
+    var wSellVol=whaleWaves[tr.sym]?whaleWaves[tr.sym].totalBuy:0;
+    if(wpt.taking&&tr.pnl>0&&wSellVol>=100000){showPopup('🐋🩸',tr.sym+' — '+(lang==='ar'?'حيتان تجني أرباح!':'Whales taking profit!'),'$'+fmt(wSellVol)+' | '+(tr.pnl>=0?'+':'')+tr.pnl.toFixed(1)+'%');addNotifHist('🐋🩸',tr.sym,lang==='ar'?'جني أرباح':'Profit Taking','$'+fmt(wSellVol));
       if(tr.pnl>=3){closeTrade(tr,d.p,lang==='ar'?'🐋🩸 حيتان تجني أرباح':'🐋🩸 Whale profit-taking');return}}
     /* Exit 1: Target 1 hit → move stop to breakeven */
     if(!tr.t1Hit&&d.p>=tr.target1){tr.t1Hit=true;tr.trailingStop=tr.entry*1.005;

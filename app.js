@@ -634,7 +634,7 @@ function renderAdminPanel(){try{renderMonPanel()}catch(e){}}
 /* CACHE */
 var cache={scan:null,scanTime:0,whale:null,whaleTime:0,fr:null,frTime:0};
 var CACHE_TTL=60000;
-const TR={nav_home:{ar:'الرئيسية',en:'Home'},nav_scan:{ar:'السكانر',en:'Scanner'},nav_whale:{ar:'حيتان',en:'Whales'},nav_ind:{ar:'مؤشرات',en:'Indicators'},nav_me:{ar:'حسابي',en:'Profile'},breakout:{ar:'بداية صعود',en:'Rising'},whales:{ar:'شراء حيتان',en:'Whale Buying'},scanning:{ar:'جاري المسح...',en:'Scanning...'},all:{ar:'الكل',en:'All'},full_scan:{ar:'مسح شامل',en:'Full Scan'},refresh:{ar:'تحديث',en:'Refresh'},total:{ar:'إجمالي',en:'Total'},buying:{ar:'شراء',en:'Buying'},selling:{ar:'بيع',en:'Selling'},success:{ar:'النجاح',en:'Success'},portfolio:{ar:'المحفظة',en:'Portfolio'},risk_calc:{ar:'حاسبة المخاطر',en:'Risk Calc'},alerts:{ar:'تنبيهات',en:'Alerts'},add_coins:{ar:'أضف عملات',en:'Add coins'},add_coin:{ar:'إضافة عملة',en:'Add Coin'},add:{ar:'إضافة',en:'Add'},cancel:{ar:'إلغاء',en:'Cancel'},back:{ar:'رجوع',en:'Back'},capital:{ar:'رأس المال',en:'Capital'},risk_pct:{ar:'المخاطرة',en:'Risk'},entry_price:{ar:'سعر الدخول',en:'Entry'},enter_data:{ar:'ادخل البيانات',en:'Enter data'},search_ph:{ar:'ابحث عن أي عملة...',en:'Search any coin...'},no_ultra:{ar:'لا ULTRA حالياً',en:'No ULTRA'},no_whale:{ar:'لا تجميع حيتان',en:'No whales'},confirmed:{ar:'مؤكدة',en:'Confirmed'},buy_strong:{ar:'شراء قوي',en:'Strong Buy'},buy:{ar:'شراء',en:'Buy'},sell:{ar:'بيع',en:'Sell'},hold:{ar:'انتظار',en:'Hold'},risk_amt:{ar:'💰 المخاطرة',en:'💰 Risk'},pos_size:{ar:'📦 الحجم',en:'📦 Size'},pos_val:{ar:'💵 القيمة',en:'💵 Value'},leverage:{ar:'📊 الرافعة',en:'📊 Leverage'},exp_profit:{ar:'🎯 الربح',en:'🎯 Profit'},sl_loss:{ar:'🛑 الخسارة',en:'🛑 Loss'},no_data:{ar:'لا بيانات',en:'No data'},empty_port:{ar:'فارغة',en:'Empty'},market_health:{ar:'🏥 صحة السوق',en:'🏥 Market Health'},smart_warn:{ar:'تحذيرات ذكية',en:'Smart Warnings'},sec_accuracy:{ar:'📈 نسبة النجاح',en:'📈 Accuracy'},scan_desc:{ar:'صيد مبكر — 6 فحوصات — 🏆 Top 100 Focus','en':'Early detection — 6 checks — 🏆 Top 100 Focus'},days:{ar:'يوم',en:'days'},today:{ar:'اليوم!',en:'Today!'},instant:{ar:'فوري',en:'Instant'},strong_signal:{ar:'شراء/بيع قوي',en:'Strong signal'},before_unlock:{ar:'قبل الفك',en:'Before unlock'},gems:{ar:'جواهر',en:'Gems'},gem_desc:{ar:'💎 عملات صغيرة بحركة غير عادية — فرص أرباح كبيرة',en:'💎 Small caps with unusual moves — big profit potential'},wl_desc:{ar:'👁 أضف عملات لمراقبتها 24/7',en:'👁 Add coins to watch 24/7'},stable_flow:{ar:'حركة الأموال',en:'Money Flow'},sf_index:{ar:'مؤشر التدفق',en:'Flow Index'},sf_buy:{ar:'شراء كريبتو',en:'Buying Crypto'},sf_sell:{ar:'بيع كريبتو',en:'Selling Crypto'},sf_neutral:{ar:'متوازن',en:'Balanced'},online:{ar:'متصل',en:'online'},settings:{ar:'الإعدادات',en:'Settings'},profile:{ar:'👤 الملف الشخصي',en:'👤 Profile'},general:{ar:'⚙️ عام',en:'⚙️ General'},language:{ar:'اللغة',en:'Language'},theme:{ar:'الثيم',en:'Theme'},sound:{ar:'الصوت',en:'Sound'},tone:{ar:'🔔 نغمة الإشعار',en:'🔔 Notification Tone'},t_bell:{ar:'جرس',en:'Bell'},t_horn:{ar:'بوق',en:'Horn'},t_pulse:{ar:'نبض',en:'Pulse'},t_silent:{ar:'صامت',en:'Silent'},about:{ar:'عن المنصة',en:'About'},clear_data:{ar:'مسح البيانات',en:'Clear Data'},mkt_dir:{ar:'اتجاه السوق',en:'Market Direction'},mkt_dir_sub:{ar:'تقرير مفصل — BTC & ETH — كل 4 ساعات',en:'Detailed Report — BTC & ETH — Every 4h'},nav_market:{ar:'حركة السوق',en:'Market'},top3:{ar:'أفضل 3 فرص الآن',en:'Top 3 Opportunities Now'},scan_trade:{ar:'صفقات مضاربة',en:'Trading'},scan_trend:{ar:'ترند القطاعات',en:'Sector Trends'},scan_gems:{ar:'صيد الجواهر',en:'Gem Hunter'},scan_all:{ar:'الكل',en:'All'},scan_fast:{ar:'⚡ سريع',en:'⚡ Fast'},scan_daily:{ar:'📊 يومي',en:'📊 Daily'},scan_early:{ar:'🟢 مبكر',en:'🟢 Early'},scan_still:{ar:'🟡 فرصة',en:'🟡 Still'},scan_late:{ar:'🔴 متأخر',en:'🔴 Late'},scan_signals:{ar:'إشارة',en:'signals'},scan_sectors:{ar:'قطاعات',en:'sectors'},scan_gems_found:{ar:'جواهر مكتشفة',en:'gems found'},scan_updated:{ar:'آخر تحديث',en:'Updated'},scan_enter:{ar:'▶ ادخل',en:'▶ Enter'},scan_chart:{ar:'📈 شارت',en:'📈 Chart'},scan_duration:{ar:'مدة متوقعة',en:'Duration'},scan_warn_small:{ar:'⚠️ ربح عالي + مخاطرة عالية — لا تدخل أكثر من 5% من رأس مالك!',en:'⚠️ High profit + High risk — max 5% of capital!'},mkt_daily:{ar:'تحليل يومي',en:'Daily Analysis'},mkt_full:{ar:'تقرير شامل',en:'Full Report'},mkt_hourly:{ar:'كل ساعة',en:'Hourly'},mkt_4h:{ar:'كل 4 ساعات — 12 طبقة',en:'Every 4h — 12 layers'},mkt_fresh:{ar:'بيانات طازجة',en:'Fresh data'},mkt_stale:{ar:'بيانات قديمة — حدّث!',en:'Stale — Refresh!'}};
+const TR={nav_home:{ar:'الرئيسية',en:'Home'},nav_scan:{ar:'السكانر',en:'Scanner'},nav_whale:{ar:'حيتان',en:'Whales'},nav_ind:{ar:'مؤشرات',en:'Indicators'},nav_me:{ar:'حسابي',en:'Profile'},breakout:{ar:'بداية صعود',en:'Rising'},whales:{ar:'شراء حيتان',en:'Whale Buying'},scanning:{ar:'جاري المسح...',en:'Scanning...'},all:{ar:'الكل',en:'All'},full_scan:{ar:'مسح شامل',en:'Full Scan'},refresh:{ar:'تحديث',en:'Refresh'},total:{ar:'إجمالي',en:'Total'},buying:{ar:'شراء',en:'Buying'},selling:{ar:'بيع',en:'Selling'},success:{ar:'النجاح',en:'Success'},portfolio:{ar:'المحفظة',en:'Portfolio'},risk_calc:{ar:'حاسبة المخاطر',en:'Risk Calc'},alerts:{ar:'تنبيهات',en:'Alerts'},add_coins:{ar:'أضف عملات',en:'Add coins'},add_coin:{ar:'إضافة عملة',en:'Add Coin'},add:{ar:'إضافة',en:'Add'},cancel:{ar:'إلغاء',en:'Cancel'},back:{ar:'رجوع',en:'Back'},capital:{ar:'رأس المال',en:'Capital'},risk_pct:{ar:'المخاطرة',en:'Risk'},entry_price:{ar:'سعر الدخول',en:'Entry'},enter_data:{ar:'ادخل البيانات',en:'Enter data'},search_ph:{ar:'ابحث عن أي عملة...',en:'Search any coin...'},no_ultra:{ar:'لا ULTRA حالياً',en:'No ULTRA'},no_whale:{ar:'لا تجميع حيتان',en:'No whales'},confirmed:{ar:'مؤكدة',en:'Confirmed'},buy_strong:{ar:'شراء قوي',en:'Strong Buy'},buy:{ar:'شراء',en:'Buy'},sell:{ar:'بيع',en:'Sell'},hold:{ar:'انتظار',en:'Hold'},risk_amt:{ar:'💰 المخاطرة',en:'💰 Risk'},pos_size:{ar:'📦 الحجم',en:'📦 Size'},pos_val:{ar:'💵 القيمة',en:'💵 Value'},leverage:{ar:'📊 الرافعة',en:'📊 Leverage'},exp_profit:{ar:'🎯 الربح',en:'🎯 Profit'},sl_loss:{ar:'🛑 الخسارة',en:'🛑 Loss'},no_data:{ar:'لا بيانات',en:'No data'},empty_port:{ar:'فارغة',en:'Empty'},market_health:{ar:'🏥 صحة السوق',en:'🏥 Market Health'},smart_warn:{ar:'تحذيرات ذكية',en:'Smart Warnings'},sec_accuracy:{ar:'📈 نسبة النجاح',en:'📈 Accuracy'},scan_desc:{ar:'صيد مبكر — 6 فحوصات — 🏆 Top 100 Focus','en':'Early detection — 6 checks — 🏆 Top 100 Focus'},days:{ar:'يوم',en:'days'},today:{ar:'اليوم!',en:'Today!'},instant:{ar:'فوري',en:'Instant'},strong_signal:{ar:'شراء/بيع قوي',en:'Strong signal'},before_unlock:{ar:'قبل الفك',en:'Before unlock'},gems:{ar:'جواهر',en:'Gems'},gem_desc:{ar:'💎 عملات صغيرة بحركة غير عادية — فرص أرباح كبيرة',en:'💎 Small caps with unusual moves — big profit potential'},wl_desc:{ar:'👁 أضف عملات لمراقبتها 24/7',en:'👁 Add coins to watch 24/7'},stable_flow:{ar:'حركة الأموال',en:'Money Flow'},sf_index:{ar:'مؤشر التدفق',en:'Flow Index'},sf_buy:{ar:'شراء كريبتو',en:'Buying Crypto'},sf_sell:{ar:'بيع كريبتو',en:'Selling Crypto'},sf_neutral:{ar:'متوازن',en:'Balanced'},online:{ar:'متصل',en:'online'},settings:{ar:'الإعدادات',en:'Settings'},profile:{ar:'👤 الملف الشخصي',en:'👤 Profile'},general:{ar:'⚙️ عام',en:'⚙️ General'},language:{ar:'اللغة',en:'Language'},theme:{ar:'الثيم',en:'Theme'},sound:{ar:'الصوت',en:'Sound'},tone:{ar:'🔔 نغمة الإشعار',en:'🔔 Notification Tone'},t_bell:{ar:'جرس',en:'Bell'},t_horn:{ar:'بوق',en:'Horn'},t_pulse:{ar:'نبض',en:'Pulse'},t_silent:{ar:'صامت',en:'Silent'},about:{ar:'عن المنصة',en:'About'},clear_data:{ar:'مسح البيانات',en:'Clear Data'},mkt_dir:{ar:'اتجاه السوق',en:'Market Direction'},mkt_dir_sub:{ar:'تقرير مفصل — BTC & ETH — كل 4 ساعات',en:'Detailed Report — BTC & ETH — Every 4h'},nav_market:{ar:'حركة السوق',en:'Market'},top3:{ar:'🏆 أقوى 3 صفقات مضاربة VIP',en:'🏆 Top 3 VIP Trades'},scan_trade:{ar:'صفقات مضاربة',en:'Trading'},scan_trend:{ar:'ترند القطاعات',en:'Sector Trends'},scan_gems:{ar:'صيد الجواهر',en:'Gem Hunter'},scan_all:{ar:'الكل',en:'All'},scan_fast:{ar:'⚡ سريع',en:'⚡ Fast'},scan_daily:{ar:'📊 يومي',en:'📊 Daily'},scan_early:{ar:'🟢 مبكر',en:'🟢 Early'},scan_still:{ar:'🟡 فرصة',en:'🟡 Still'},scan_late:{ar:'🔴 متأخر',en:'🔴 Late'},scan_signals:{ar:'إشارة',en:'signals'},scan_sectors:{ar:'قطاعات',en:'sectors'},scan_gems_found:{ar:'جواهر مكتشفة',en:'gems found'},scan_updated:{ar:'آخر تحديث',en:'Updated'},scan_enter:{ar:'▶ ادخل',en:'▶ Enter'},scan_chart:{ar:'📈 شارت',en:'📈 Chart'},scan_duration:{ar:'مدة متوقعة',en:'Duration'},scan_warn_small:{ar:'⚠️ ربح عالي + مخاطرة عالية — لا تدخل أكثر من 5% من رأس مالك!',en:'⚠️ High profit + High risk — max 5% of capital!'},mkt_daily:{ar:'تحليل يومي',en:'Daily Analysis'},mkt_full:{ar:'تقرير شامل',en:'Full Report'},mkt_hourly:{ar:'كل ساعة',en:'Hourly'},mkt_4h:{ar:'كل 4 ساعات — 12 طبقة',en:'Every 4h — 12 layers'},mkt_fresh:{ar:'بيانات طازجة',en:'Fresh data'},mkt_stale:{ar:'بيانات قديمة — حدّث!',en:'Stale — Refresh!'}};
 function t(k){return TR[k]?TR[k][lang]:(k||'')}
 function fmt(n){if(n>=1e9)return'$'+(n/1e9).toFixed(1)+'B';if(n>=1e6)return'$'+(n/1e6).toFixed(1)+'M';if(n>=1e3)return'$'+(n/1e3).toFixed(1)+'K';return'$'+n.toFixed(0)}
 function fP(p){if(!p||isNaN(p))return'$0';if(p>=1e3)return'$'+p.toLocaleString('en',{maximumFractionDigits:2});if(p>=1)return'$'+p.toFixed(2);if(p>=.01)return'$'+p.toFixed(4);return'$'+p.toFixed(6)}
@@ -3126,56 +3126,90 @@ function renderTopCoins(){
       /* Row 9: Exchanges */
       +'<div class="cc-exchanges"><span>Binance</span>'+(d.by?'<span>Bybit:<b>'+fP(d.by)+'</b></span>':'')+(CBP[s]?'<span>CB:<b>'+fP(CBP[s])+'</b></span>':'')+'</div>'
       +'</div>'}).join('')}
-/* 🎯 TOP 3 BEST OPPORTUNITIES */
+/* 🎯 TOP 3 VIP TRADES — Smart Ranking + Auto-update */
 function renderTop3(){
   var el=document.getElementById('top3List');if(!el||!cache.scan)return;
-  var opps=[];
+  var ar=lang==='ar';var opps=[];
   cache.scan.forEach(function(r){
-    var priority=r.score;var type='';var icon='';var reason='';var conf=0;
-    /* ULTRA signals get highest priority */
-    if(r.ultra){type='ULTRA';icon='⭐';priority+=30;
-      reason=lang==='ar'?'إشارة مؤكدة — '+r.passed+'/6 فحوصات':'Confirmed — '+r.passed+'/6 checks'}
-    else if(r.confirmed){type=lang==='ar'?'إشارة قوية':'Strong Signal';icon='🟢';priority+=15;
-      reason=lang==='ar'?'إشارة قوية — '+r.passed+'/6 فحوصات':'Strong — '+r.passed+'/6 checks'}
-    else if(r.tags.some(function(t){return t.includes('EARLY')||t.includes('STEALTH')})){
-      type=lang==='ar'?'صيد مبكر':'Early Catch';icon='💎';priority+=20;
-      reason=lang==='ar'?'تجميع قبل الانفجار':'Accumulation before pump'}
-    else if(r.c>=3&&r.c<10&&r.score>=40){type=lang==='ar'?'انفجار':'Breakout';icon='💥';
-      reason=lang==='ar'?'بداية انفجار — لسا فيه فرصة':'Early breakout — still time'}
-    else return;
-    /* Whale wave bonus */
-    var waves=whaleWaves[r.s]?whaleWaves[r.s].waves.length:0;
-    if(waves>=3){priority+=20;reason+=(lang==='ar'?' | 🐋 3 موجات حيتان':' | 🐋 3 whale waves')}
-    else if(waves>=2){priority+=10;reason+=(lang==='ar'?' | 🐋 موجتين':' | 🐋 2 waves')}
-    /* FR bonus */
-    if(FR[r.s]&&FR[r.s].rate<-0.01){priority+=8;reason+=(lang==='ar'?' | FR سلبي 🟢':' | Neg FR 🟢')}
-    /* Late penalty */
-    if(r.c>=10){priority-=15}
-    if(r.c>=15){priority-=20}
-    /* Confidence */
-    conf=Math.min(99,Math.max(50,Math.round(50+priority*0.4)));
+    if(!TIER1.has(r.s))return; /* TOP 100 only */
+    if(!T[r.s]||T[r.s].v<2000000)return; /* Volume > $2M */
+    var d=T[r.s];var priority=0;var type='';var icon='';var reasons=[];
+    /* === 1. WHALE SCORE (30%) === */
+    var ww=whaleWaves[r.s];var wConf=ww&&ww.engine?ww.engine.confidence:0;var wBuy=ww?ww.totalBuy||0:0;var wWaves=ww&&ww.waves?ww.waves.length:0;
+    var whaleScore=Math.min(30,wConf*0.2+wWaves*5+(wBuy>100000?10:0));
+    if(wWaves>=3)reasons.push('🐋 '+wWaves+(ar?' موجات حيتان':' whale waves'));
+    else if(wBuy>=100000)reasons.push('🐋 $'+fmt(wBuy));
+    /* === 2. TECHNICAL SCORE (25%) === */
+    var ext=top4Ext[r.s]||null;var techScore=0;
+    if(ext){
+      if(ext.rsi<30)techScore+=10; else if(ext.rsi<45)techScore+=5;
+      if(ext.macd&&ext.macd.pos)techScore+=8; if(ext.macd&&ext.macd.cross)techScore+=7;
+      if(ext.rsi<30)reasons.push('RSI '+ext.rsi.toFixed(0)+' '+(ar?'تشبع بيع':'Oversold'));
+      if(ext.macd&&ext.macd.cross)reasons.push('MACD '+(ar?'تقاطع':'Cross'));
+    }
+    techScore=Math.min(25,techScore+r.passed*2);
+    /* === 3. FR/OI/LS SCORE (20%) === */
+    var fundScore=0;var fr=FR[r.s];var oi=OI[r.s];var ls=LS[r.s];
+    if(fr&&fr.rate<-0.01){fundScore+=8;reasons.push('FR '+(ar?'سلبي 🟢':'Neg 🟢'))}
+    if(fr&&fr.rate<-0.03){fundScore+=5}
+    if(oi&&oi>0){fundScore+=4}
+    if(ls&&ls.ratio>1.3){fundScore+=3;reasons.push('L/S '+(ar?'شورت كثير':'Heavy short'))}
+    fundScore=Math.min(20,fundScore);
+    /* === 4. VOLUME SCORE (15%) === */
+    var volScore=0;
+    if(d.v>1e9){volScore=15;reasons.push((ar?'حجم ضخم':'Mega Vol'))} 
+    else if(d.v>1e8){volScore=10} 
+    else if(d.v>5e7){volScore=7} 
+    else{volScore=3}
+    /* === 5. TIMING SCORE (5%) === */
+    var timeScore=0;
+    if(r.tags.some(function(t){return t.includes('EARLY')||t.includes('STEALTH')})){timeScore=5;type=ar?'صيد مبكر':'Early Catch';icon='💎';reasons.unshift(ar?'تجميع قبل الانفجار':'Pre-pump accumulation')}
+    else if(r.c>=3&&r.c<8){timeScore=3;type=ar?'انفجار':'Breakout';icon='💥';reasons.unshift(ar?'بداية انفجار':'Early breakout')}
+    else if(r.c>=0.5&&r.c<3){timeScore=4;type=ar?'تجميع':'Accumulation';icon='📊'}
+    else{timeScore=1;type=ar?'فرصة':'Opportunity';icon='📈'}
+    if(r.ultra){type='ULTRA';icon='⭐';timeScore=5;reasons.unshift(ar?'إشارة ULTRA مؤكدة':'Confirmed ULTRA')}
+    else if(r.confirmed){type=ar?'إشارة قوية':'Strong';icon='🟢';timeScore=4}
+    if(r.c>=10){timeScore=0} /* Late penalty */
+    /* === 6. HISTORY SCORE (5%) === */
+    var histScore=0;
+    if(monitorState&&monitorState.coinStats&&monitorState.coinStats[r.s]){
+      var cs=monitorState.coinStats[r.s];if(cs.rate>=60)histScore=5;else if(cs.rate>=40)histScore=3;
+      if(cs.rate>=60)reasons.push((ar?'تاريخ ':'Hist ')+cs.rate+'%')
+    }
+    /* === TOTAL PRIORITY === */
+    priority=whaleScore+techScore+fundScore+volScore+timeScore+histScore;
+    var conf=Math.min(99,Math.max(50,Math.round(50+priority*0.5)));
+    /* Gate check */
+    try{var gate=signalQualityGate(r.s,'top3',r.score);if(!gate.pass)return}catch(e){}
     /* Recommendation */
     var rec,recCol;
-    if(conf>=90){rec=lang==='ar'?'💡 شراء قوي':'💡 Strong Buy';recCol='var(--up)'}
-    else if(conf>=80){rec=lang==='ar'?'💡 فرصة ذهبية':'💡 Golden Opp';recCol='var(--neon)'}
-    else if(conf>=70){rec=lang==='ar'?'💡 راقب':'💡 Watch';recCol='var(--warn)'}
-    else{rec=lang==='ar'?'💡 حذر':'💡 Caution';recCol='var(--t2)'}
-    opps.push({s:r.s,p:r.p,c:r.c,v:r.v,score:r.score,priority:priority,type:type,icon:icon,reason:reason,conf:conf,rec:rec,recCol:recCol,checks:r.checks,passed:r.passed,waves:waves,detectedAt:r.detectedAt})});
-  opps=opps.filter(function(o){return o.c<8&&o.score>=45});
-  opps.sort(function(a,b){var aw=whaleWaves[a.s]&&whaleWaves[a.s].engine?whaleWaves[a.s].engine.confidence:0;var bw=whaleWaves[b.s]&&whaleWaves[b.s].engine?whaleWaves[b.s].engine.confidence:0;if(bw!==aw)return bw-aw;return b.priority-a.priority});
+    if(conf>=90){rec=ar?'💡 شراء قوي':'💡 Strong Buy';recCol='var(--up)'}
+    else if(conf>=80){rec=ar?'💡 فرصة ذهبية':'💡 Golden';recCol='var(--neon)'}
+    else if(conf>=70){rec=ar?'💡 ادخل بحذر':'💡 Enter Carefully';recCol='var(--warn)'}
+    else{rec=ar?'💡 راقب فقط':'💡 Watch Only';recCol='var(--t2)'}
+    /* Smart targets from S/R */
+    var sup=ext?ext.sup:d.p*0.93;var res=ext?ext.res:d.p*1.08;
+    var tp1=d.p+(res-d.p)*0.5;var tp2=res;var sl=sup-(d.p-sup)*0.3;
+    if(sl>=d.p*0.99)sl=d.p*0.95;if(tp1<=d.p*1.01)tp1=d.p*1.05;if(tp2<=tp1)tp2=d.p*1.1;
+    var rr=sl<d.p?((tp1-d.p)/(d.p-sl)):0;
+    opps.push({s:r.s,p:d.p,c:r.c,v:d.v,score:r.score,priority:priority,type:type,icon:icon,reasons:reasons,conf:conf,rec:rec,recCol:recCol,passed:r.passed,total:r.total||6,waves:wWaves,wBuy:wBuy,detectedAt:r.detectedAt||Date.now(),tp1:tp1,tp2:tp2,sl:sl,rr:rr,whaleScore:whaleScore,techScore:techScore,fundScore:fundScore})});
+  opps.sort(function(a,b){return b.priority-a.priority});
   var top=opps.slice(0,3);
   var ranks=['gold','silver','bronze'];var rankIcons=['1️⃣','2️⃣','3️⃣'];
-  el.innerHTML=top.length?top.map(function(o,i){
-    var up=o.c>=0;var src=[];if(T[o.s])src.push(T[o.s].src==='BY'?'Bybit':'Binance');if(T[o.s]&&T[o.s].by)src.push('Bybit');if(CBP[o.s])src.push('Coinbase');
+  if(!top.length){el.innerHTML='<div class="muted">'+(ar?'لا صفقات مضاربة VIP حالياً — البوابة الذكية ترفض الضعيف':'No VIP trades — Smart gate filters weak signals')+'</div>';return}
+  el.innerHTML=top.map(function(o,i){
+    var up=o.c>=0;var ta=timeAgo(o.detectedAt);
+    var src=[];if(T[o.s]&&T[o.s].src)src.push(T[o.s].src);if(FR[o.s])src.push('FR');if(OI[o.s])src.push('OI');
     return'<div class="top3-card '+ranks[i]+'" onclick="openCoin(\''+o.s+'\')">'
     +'<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">'
-    +'<div style="display:flex;align-items:center;gap:8px"><div class="top3-rank" style="background:'+(i===0?'linear-gradient(135deg,#ffd700,#ff8c00)':i===1?'linear-gradient(135deg,#c0c0c0,#808080)':'linear-gradient(135deg,#cd7f32,#8b4513)')+';color:#fff">'+rankIcons[i]+'</div><div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">'+o.icon+' '+o.s+'/USDT</div><div style="font-size:8px;font-family:var(--fm);color:var(--t2)">'+o.type+'</div></div></div>'
-    +'<div class="top3-conf" style="background:'+(o.conf>=90?'var(--ud)':o.conf>=80?'var(--nd)':'var(--wd)')+';color:'+(o.conf>=90?'var(--up)':o.conf>=80?'var(--neon)':'var(--warn)')+'">'+(lang==='ar'?'ثقة':'Conf')+' '+o.conf+'%</div></div>'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-family:var(--fm);font-size:18px;font-weight:800;color:var(--t0)">'+fP(o.p)+'</span><span style="font-family:var(--fm);font-size:13px;font-weight:800;color:var(--'+(up?'up':'dn')+')">'+(up?'+':'')+o.c.toFixed(1)+'%</span></div>'
-    +'<div style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap"><span style="font-size:7px;font-family:var(--fm);padding:2px 5px;border-radius:3px;background:var(--bg2);color:var(--t1)">Score:'+o.score+'</span><span style="font-size:7px;font-family:var(--fm);padding:2px 5px;border-radius:3px;background:var(--bg2);color:var(--t1)">'+o.passed+'/6✅</span>'+(o.waves>0?'<span style="font-size:7px;font-family:var(--fm);padding:2px 5px;border-radius:3px;background:var(--nd);color:var(--neon)">🐋'+o.waves+'</span>':'')+'<span style="font-size:7px;font-family:var(--fm);padding:2px 5px;border-radius:3px;background:var(--bg2);color:var(--t2)">'+src.join('·')+'</span></div>'
-    +'<div style="display:flex;justify-content:space-between;align-items:center"><div style="font-size:9px;color:var(--t2);flex:1">'+o.reason+'</div><div style="font-size:10px;font-weight:700;color:'+o.recCol+'">'+o.rec+'</div></div>'
-    +'<div style="margin-top:4px;display:flex;gap:8px;font-size:8px;font-family:var(--fm)"><span style="color:var(--up)">🎯 '+fP(o.p*1.08)+' — '+fP(o.p*1.15)+'</span><span style="color:var(--dn)">🛑 '+fP(o.p*0.93)+'</span></div>'
-    +'</div>'}).join(''):'<div class="muted">'+(lang==='ar'?'لا فرص قوية حالياً — السوق هادئ':'No strong opportunities — Market quiet')+'</div>'}
+    +'<div style="display:flex;align-items:center;gap:8px"><div class="top3-rank" style="background:'+(i===0?'linear-gradient(135deg,#ffd700,#ff8c00)':i===1?'linear-gradient(135deg,#c0c0c0,#808080)':'linear-gradient(135deg,#cd7f32,#8b4513)')+';color:#fff">'+rankIcons[i]+'</div><div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">'+o.icon+' '+o.s+'/USDT</div><div style="display:flex;align-items:center;gap:6px"><span style="font-size:8px;font-family:var(--fm);color:var(--t2)">'+o.type+'</span><span style="font-size:7px;padding:2px 6px;border-radius:4px;background:'+(ta.cls==='fresh'?'rgba(0,255,136,.1)':'var(--bg2)')+';color:'+(ta.cls==='fresh'?'var(--up)':'var(--t3)')+'">'+(ta.cls==='fresh'?'🆕 ':'')+ta.text+'</span></div></div></div>'
+    +'<div class="top3-conf" style="background:'+(o.conf>=90?'var(--ud)':o.conf>=80?'var(--nd)':'var(--wd)')+';color:'+(o.conf>=90?'var(--up)':o.conf>=80?'var(--neon)':'var(--warn)')+'">'+(ar?'ثقة':'Conf')+' '+o.conf+'%</div></div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-family:var(--fm);font-size:18px;font-weight:800;color:var(--t0);direction:ltr">'+fP(o.p)+'</span><span style="font-family:var(--fm);font-size:13px;font-weight:800;color:var(--'+(up?'up':'dn')+');direction:ltr">'+(up?'+':'')+o.c.toFixed(1)+'%</span></div>'
+    +'<div style="display:flex;gap:4px;margin-bottom:6px;flex-wrap:wrap"><span style="font-size:7px;font-family:var(--fm);padding:2px 5px;border-radius:3px;background:var(--bg2);color:var(--t1)">'+o.passed+'/'+o.total+'✅</span>'+(o.waves>0?'<span style="font-size:7px;font-family:var(--fm);padding:2px 5px;border-radius:3px;background:var(--nd);color:var(--neon)">🐋'+o.waves+'</span>':'')+(o.wBuy>0?'<span style="font-size:7px;font-family:var(--fm);padding:2px 5px;border-radius:3px;background:rgba(0,212,255,.08);color:var(--blue)">$'+fmt(o.wBuy)+'</span>':'')+'<span style="font-size:7px;font-family:var(--fm);padding:2px 5px;border-radius:3px;background:var(--bg2);color:var(--t2)">'+src.join('·')+'</span>'+(o.rr>=1.5?'<span style="font-size:7px;font-family:var(--fm);padding:2px 5px;border-radius:3px;background:rgba(0,255,136,.08);color:var(--up)">R/R 1:'+o.rr.toFixed(1)+'</span>':'')+'</div>'
+    +'<div style="font-size:9px;color:var(--t2);margin-bottom:4px">'+o.reasons.slice(0,3).join(' | ')+'</div>'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="display:flex;gap:3px"><span style="font-size:7px;padding:1px 4px;border-radius:3px;background:rgba(0,212,255,.06);color:var(--blue)">'+(ar?'حوت':'W')+':'+o.whaleScore+'</span><span style="font-size:7px;padding:1px 4px;border-radius:3px;background:rgba(139,92,246,.06);color:#8b5cf6">'+(ar?'فنّي':'T')+':'+o.techScore+'</span><span style="font-size:7px;padding:1px 4px;border-radius:3px;background:rgba(0,255,136,.06);color:var(--up)">'+(ar?'أساسي':'F')+':'+o.fundScore+'</span></div><div style="font-size:10px;font-weight:700;color:'+o.recCol+'">'+o.rec+'</div></div>'
+    +'<div style="display:flex;justify-content:space-between;font-size:8px;font-family:var(--fm);padding:6px 8px;background:var(--bg2);border-radius:6px"><span style="color:var(--up)">🎯 '+fP(o.tp1)+'</span><span style="color:var(--up)">🎯🎯 '+fP(o.tp2)+'</span><span style="color:var(--dn)">🛑 '+fP(o.sl)+'</span></div>'
+    +'</div>'}).join('')}
 /* 📈 MARKET MOVEMENT PAGE */
 async function loadMarket(){if(curMktTab===0)loadBTCChart();else loadETHChart()}
 setInterval(function(){var pgEl=document.getElementById('pg-market');if(pgEl&&pgEl.classList.contains('act')){if(curMktTab===0&&Date.now()-btcCache.t>=MKT_TTL)loadBTCChart();else if(curMktTab===1&&Date.now()-ethCache.t>=MKT_TTL)loadETHChart()}},60000);
@@ -3270,6 +3304,7 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   setInterval(async function(){try{await loadTk();checkWatchlistAlerts();updateConnStatus()}catch(e){connMetrics.apiFail++;updateConnStatus()}},5000);
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))try{await loadDash()}catch(e){}},120000);
   setInterval(monitorTrades,10000);
+  setInterval(function(){try{renderTop3()}catch(e){}},60000); /* Auto-update VIP trades every minute */
   setInterval(function(){try{notifiedSet={};localStorage.setItem('nxnot10','{}')}catch(e){}},3600000);
   setTimeout(function(){runValidator()},10000);
   setInterval(function(){runValidator()},90000);

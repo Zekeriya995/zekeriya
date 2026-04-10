@@ -2215,15 +2215,17 @@ function drawChartFrame(){
     if(tr.stop){var sY=yS(tr.stop);ctx.strokeStyle=dnCa+'.3)';ctx.setLineDash([3,3]);ctx.lineWidth=.6;ctx.beginPath();ctx.moveTo(0,sY);ctx.lineTo(W-priceW,sY);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=dnCa+'.6)';ctx.fillText('🛑Stop '+fP(tr.stop),4,sY+8)}ctx.textAlign='right'});
   /* CANDLES — HD rendering: filled green + thick wicks */
   var bw=Math.max(5,cw*0.75);var wickW=Math.max(1.8,Math.min(3,bw*0.25));
+  var upFill=isDark?'#00b368':'#059669'; /* Dark solid green fill */
+  var upBorder=isDark?'#00ff88':'#10b981'; /* Bright green border */
   data.forEach(function(d,i){var x=2+i*cw+cw/2,up=d.c>=d.o;var col=up?upC:dnC;var top=yS(Math.max(d.o,d.c)),bot=yS(Math.min(d.o,d.c));var bodyH=bot-top;var isDoji=Math.abs(d.c-d.o)/Math.max(d.h-d.l,0.0001)<0.1;
     /* Wick */
     ctx.strokeStyle=col;ctx.lineWidth=wickW;ctx.beginPath();ctx.moveTo(x,yS(d.h));ctx.lineTo(x,yS(d.l));ctx.stroke();
     /* Body */
     if(isDoji){var dy=yS((d.o+d.c)/2);ctx.strokeStyle=col;ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x-bw/2,dy);ctx.lineTo(x+bw/2,dy);ctx.stroke()}
-    else if(up){ctx.fillStyle=col;ctx.fillRect(x-bw/2,top,bw,Math.max(3,bodyH))}
+    else if(up){ctx.fillStyle=upFill;ctx.fillRect(x-bw/2,top,bw,Math.max(3,bodyH));ctx.strokeStyle=upBorder;ctx.lineWidth=1;ctx.strokeRect(x-bw/2,top,bw,Math.max(3,bodyH))}
     else{ctx.fillStyle=col;ctx.fillRect(x-bw/2,top,bw,Math.max(3,bodyH))}
     /* Last candle glow */
-    if(i===data.length-1){ctx.shadowColor=col;ctx.shadowBlur=8;ctx.fillStyle=col;ctx.fillRect(x-bw/2-1,top-1,bw+2,Math.max(5,bodyH+2));ctx.shadowBlur=0}});
+    if(i===data.length-1){ctx.shadowColor=col;ctx.shadowBlur=8;ctx.fillStyle=up?upFill:col;ctx.fillRect(x-bw/2-1,top-1,bw+2,Math.max(5,bodyH+2));ctx.shadowBlur=0}});
   /* PATTERNS */
   if(inds.pat){for(var i=2;i<data.length;i++){var c=data[i],p=data[i-1],pp=data[i-2];var body=Math.abs(c.c-c.o);var rng=c.h-c.l;var lw=Math.min(c.c,c.o)-c.l;var uw=c.h-Math.max(c.c,c.o);var isUp=c.c>c.o;var pB=Math.abs(p.c-p.o);var x=2+i*cw+cw/2;
     if(lw>=body*2&&uw<body*.5&&rng>0&&p.c<pp.c){ctx.font='9px serif';ctx.textAlign='center';ctx.fillText('🔨',x,yS(c.l)+14)}

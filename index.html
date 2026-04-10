@@ -598,6 +598,45 @@ canvas{width:100%!important;border-radius:4px}
 <div style="text-align:center;margin:6px 0"><span style="font-size:11px;font-weight:800;padding:4px 12px;border-radius:8px" id="sfSignal">--</span></div>
 <div style="font-size:10px;text-align:center;margin-top:6px" id="sfAdvice">--</div>
 </div>
+
+<!-- ═══ NEW: LIVE PnL + MARKET REGIME + PORTFOLIO RISK ═══ -->
+<div id="livePnL" style="margin:8px 0"></div>
+<div id="regimeBadge" style="margin:8px 0"></div>
+<div id="portRisk" style="margin:8px 0"></div>
+<div id="sentimentBadge" style="margin:8px 0"></div>
+
+<!-- ═══ NEW: AI MARKET BRIEFING ═══ -->
+<div style="display:flex;align-items:center;gap:8px;margin:14px 0 8px"><span style="font-size:18px">🤖</span><span style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">AI Briefing</span></div>
+<div class="cd" style="padding:12px" id="aiBriefing"><div class="muted">Loading...</div></div>
+
+<!-- ═══ NEW: MTF CONFLUENCE ═══ -->
+<div style="display:flex;align-items:center;gap:8px;margin:14px 0 8px"><span style="font-size:18px">📊</span><span style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">MTF Confluence</span></div>
+<div id="mtfPanel"><div class="muted">Loading...</div></div>
+
+<!-- ═══ NEW: CHART PATTERNS ═══ -->
+<div style="display:flex;align-items:center;gap:8px;margin:14px 0 8px"><span style="font-size:18px">🔍</span><span style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">Chart Patterns</span></div>
+<div class="cd" style="padding:10px" id="patternList"><div class="muted">Scanning...</div></div>
+
+<!-- ═══ NEW: PREDICTIVE SCORES ═══ -->
+<div style="display:flex;align-items:center;gap:8px;margin:14px 0 8px"><span style="font-size:18px">🧠</span><span style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">AI Prediction</span></div>
+<div class="cd" style="padding:10px" id="predScores"><div class="muted">Loading...</div></div>
+
+<!-- ═══ NEW: BTC CORRELATION MAP ═══ -->
+<div style="display:flex;align-items:center;gap:8px;margin:14px 0 8px"><span style="font-size:18px">🔗</span><span style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">BTC Correlation</span></div>
+<div class="cd" style="padding:10px" id="corrMap"><div class="muted">Loading...</div></div>
+
+<!-- ═══ NEW: LIQUIDATION HEATMAP ═══ -->
+<div style="display:flex;align-items:center;gap:8px;margin:14px 0 8px"><span style="font-size:18px">🔥</span><span style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">Liq Heatmap</span></div>
+<div class="cd" style="padding:10px" id="liqHeatmap"><div class="muted">Loading...</div></div>
+
+<!-- ═══ NEW: ORDER FLOW ═══ -->
+<div style="display:flex;align-items:center;gap:8px;margin:14px 0 8px"><span style="font-size:18px">📗</span><span style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">Order Flow</span></div>
+<div id="orderFlowList"><div class="muted">Scanning...</div></div>
+
+<!-- ═══ NEW: ARBITRAGE DETECTOR ═══ -->
+<div style="display:flex;align-items:center;gap:8px;margin:14px 0 8px"><span style="font-size:18px">⚡</span><span style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">Arbitrage</span></div>
+<div class="cd" style="padding:10px" id="arbList"><div class="muted">Scanning...</div></div>
+
 <div id="ultraL" style="display:none"></div>
 </div>
 
@@ -714,7 +753,7 @@ canvas{width:100%!important;border-radius:4px}
 </div>
 <div id="p0"><div class="cd"><div class="port-tot"><div class="port-val" id="pVal">$0</div><div class="port-ch" id="pCh" style="color:var(--t3)" data-t="add_coins">أضف عملات</div></div></div><div id="pList"></div><button class="add-btn" onclick="openMo('addMo')">➕ <span data-t="add_coin">إضافة عملة</span></button></div>
 <div id="p1" style="display:none"><div id="myTradesPanel"></div></div>
-<div id="p2" style="display:none"><div id="myStatsPanel"></div></div>
+<div id="p2" style="display:none"><div id="myStatsPanel"></div><div style="margin-top:12px" id="tradeJournal"></div></div>
 <div id="p3" style="display:none"><div id="mySettingsPanel"></div></div>
 <div id="p4" style="display:none">
 <div class="sec"><span class="sec-t">📜 <span data-t="notif_log">سجل الإشعارات</span></span></div>

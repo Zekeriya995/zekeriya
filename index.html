@@ -670,7 +670,7 @@ canvas{width:100%!important;border-radius:4px}
 <div class="pg" id="pg-whale">
 <div class="big-tabs">
 <div class="big-tab t-green act" data-w="0" onclick="whTab(0,this)"><div class="bt-ic">🐋</div><span data-t="whales">شراء حيتان</span></div>
-<div class="big-tab t-red" data-w="2" onclick="whTab(2,this)"><div class="bt-ic">🐋📉</div><span>بيع حيتان</span></div>
+<div class="big-tab t-red" data-w="2" onclick="whTab(2,this)"><div class="bt-ic">🐋📉</div><span data-t="whale_sell">بيع حيتان</span></div>
 <div class="big-tab t-blue" data-w="1" onclick="whTab(1,this)"><div class="bt-ic">💧</div><span data-t="liquidity">سيولة</span></div>
 </div>
 <div id="wh0"><div class="sts"><div class="st"><div class="st-l" data-t="total">إجمالي</div><div class="st-v" id="whT" style="color:var(--neon)">--</div></div><div class="st"><div class="st-l" data-t="buying">شراء</div><div class="st-v" id="whB" style="color:var(--up)">--</div></div><div class="st"><div class="st-l" data-t="selling">بيع</div><div class="st-v" id="whS" style="color:var(--dn)">--</div></div></div><div id="whAL"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div><div class="sec"><span class="sec-t" data-t="sec_accuracy">📈 نسبة النجاح</span></div><div id="whAccCard"></div></div>
@@ -705,21 +705,21 @@ canvas{width:100%!important;border-radius:4px}
 <div class="pg" id="pg-me">
 <div class="big-tabs">
 <div class="big-tab t-green act" onclick="pTab(0,this)"><div class="bt-ic">💼</div><span data-t="portfolio">محفظتي</span></div>
-<div class="big-tab t-orange" onclick="pTab(1,this)"><div class="bt-ic">📋</div><span>صفقاتي</span></div>
-<div class="big-tab t-purple" onclick="pTab(2,this)"><div class="bt-ic">📊</div><span>إحصائياتي</span></div>
+<div class="big-tab t-orange" onclick="pTab(1,this)"><div class="bt-ic">📋</div><span data-t="my_trades">صفقاتي</span></div>
+<div class="big-tab t-purple" onclick="pTab(2,this)"><div class="bt-ic">📊</div><span data-t="my_stats">إحصائياتي</span></div>
 </div>
 <div class="big-tabs">
-<div class="big-tab t-blue" onclick="pTab(3,this)"><div class="bt-ic">⚙️</div><span>إعداداتي</span></div>
-<div class="big-tab t-red" onclick="pTab(4,this)"><div class="bt-ic">📜</div><span>سجل</span></div>
+<div class="big-tab t-blue" onclick="pTab(3,this)"><div class="bt-ic">⚙️</div><span data-t="my_settings">إعداداتي</span></div>
+<div class="big-tab t-red" onclick="pTab(4,this)"><div class="bt-ic">📜</div><span data-t="my_log">سجل</span></div>
 </div>
 <div id="p0"><div class="cd"><div class="port-tot"><div class="port-val" id="pVal">$0</div><div class="port-ch" id="pCh" style="color:var(--t3)" data-t="add_coins">أضف عملات</div></div></div><div id="pList"></div><button class="add-btn" onclick="openMo('addMo')">➕ <span data-t="add_coin">إضافة عملة</span></button></div>
 <div id="p1" style="display:none"><div id="myTradesPanel"></div></div>
 <div id="p2" style="display:none"><div id="myStatsPanel"></div></div>
 <div id="p3" style="display:none"><div id="mySettingsPanel"></div></div>
 <div id="p4" style="display:none">
-<div class="sec"><span class="sec-t">📜 سجل الإشعارات</span></div>
+<div class="sec"><span class="sec-t">📜 <span data-t="notif_log">سجل الإشعارات</span></span></div>
 <div id="notifHistList"><div class="muted">لا إشعارات بعد</div></div>
-<button class="rfr" onclick="notifHist=[];localStorage.setItem('nxnh10','[]');renderNotifHist()" style="margin-top:8px">🗑 مسح السجل</button>
+<button class="rfr" onclick="notifHist=[];try{localStorage.setItem('nxnh10','[]')}catch(e){};renderNotifHist()" style="margin-top:8px">🗑 <span data-t="clear_log">مسح السجل</span></button>
 </div>
 </div>
 

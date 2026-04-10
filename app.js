@@ -3737,7 +3737,7 @@ function generateTradeJournal(){
   var h='<div style="font-weight:800;font-size:13px;color:var(--t0);margin-bottom:10px">'+(ar?'📓 مذكرة التداول الذكية':'📓 AI Trade Journal')+'</div>';
   h+='<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:6px;margin-bottom:10px">';
   h+='<div class="cd" style="padding:10px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:'+(wins>losses?'var(--up)':'var(--dn)')+'">'+Math.round(wins/closed.length*100)+'%</div><div style="font-size:9px;color:var(--t2)">'+(ar?'نسبة النجاح':'Win Rate')+'</div></div>';
-  h+='<div class="cd" style="padding:10px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:'+(totalPnl>=0?'var(--up)':'var(--dn)');direction:ltr">'+(totalPnl>=0?'+':'')+totalPnl.toFixed(1)+'%</div><div style="font-size:9px;color:var(--t2)">'+(ar?'إجمالي':'Total PnL')+'</div></div></div>';
+  h+='<div class="cd" style="padding:10px;text-align:center"><div style="font-family:var(--fm);font-size:20px;font-weight:800;color:'+(totalPnl>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(totalPnl>=0?'+':'')+totalPnl.toFixed(1)+'%</div><div style="font-size:9px;color:var(--t2)">'+(ar?'إجمالي':'Total PnL')+'</div></div></div>';
   h+='<div style="font-size:10px;color:var(--t1);margin-bottom:8px;padding:8px;background:var(--bg2);border-radius:8px;line-height:1.6">';
   if(wins>losses){h+='✅ '+(ar?'أداءك جيد! '+wins+' فوز من '+closed.length+' صفقة.':'Good performance! '+wins+' wins from '+closed.length+' trades.')+'<br>'}
   else{h+='⚠️ '+(ar?'تحتاج تحسين — '+losses+' خسارة من '+closed.length+' صفقة.':'Needs improvement — '+losses+' losses from '+closed.length+' trades.')+'<br>'}
@@ -3973,6 +3973,5 @@ function bootNewFeatures(){
   /* MTF panel every 5 min */
   setTimeout(function(){try{renderMTFPanel()}catch(e){}},15000);
   setInterval(function(){try{renderMTFPanel()}catch(e){}},300000);
-}
 }
 init();

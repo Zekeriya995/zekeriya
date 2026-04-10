@@ -74,6 +74,9 @@ function calcVPIN(sym){
 var COL={BTC:'#f7931a',ETH:'#627eea',SOL:'#9945ff',BNB:'#f0b90b',XRP:'#23292f',LINK:'#2a5ada',AVAX:'#e84142',DOGE:'#c2a633',ADA:'#0033ad',DOT:'#e6007a',MATIC:'#8247e5',UNI:'#ff007a',ATOM:'#2e3148',ARB:'#28a0f0',OP:'#ff0420',INJ:'#00f2fe',SUI:'#4da2ff',SEI:'#9b1c1c',TIA:'#7c3aed',FTM:'#1969ff',NEAR:'#00c08b',APT:'#00bfa6',LTC:'#bfbbbb',PEPE:'#4c8c2f',WIF:'#8b5cf6'};
 var T={},FR={},OI={},LS={},CBP={},ws=null,curCoin='BTC',curTF='1h',inds={vol:1,sma:0,rsi:0,sr:0,bb:0,macd:0,ema:0,pat:0};
 var lsHist={},takerData={}; /* L/S Intelligence v2.0 */
+var frHistory={},oiHistory={},topTradersLS={},globalLS={},aggCVD={},bookTickers={}; /* Binance Advanced */
+var defiTVL={},stablecoinData={},tokenUnlocks=[]; /* DeFiLlama + Tokenomist */
+var defiCache={t:0},unlockCache={t:0};
 var sparkHist={}; /* Real sparkline data per coin */
 var whaleWaves={};try{whaleWaves=JSON.parse(localStorage.getItem('nxww10')||'{}')}catch(e){}
 var prevOB={}; /* Previous Order Book snapshots */
@@ -748,7 +751,7 @@ function sp(id){document.querySelectorAll('.pg').forEach(function(p){p.classList
 function openMo(id){var e=document.getElementById(id);if(e)e.classList.add('show')}
 function closeMo(id){var e=document.getElementById(id);if(e)e.classList.remove('show')}
 document.querySelectorAll('.mo').forEach(function(m){m.onclick=function(e){if(e.target===m)m.classList.remove('show')}});
-function indTab(){} /* removed — accordion cards */
+/* indTab removed — accordion cards */
 function whTab(i,btn){document.getElementById('pg-whale').querySelectorAll('.big-tab').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');['wh0','wh1','wh2'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=([0,1,2].indexOf(i)===j)?'block':'none'});if(i===0)loadWhales();if(i===1)loadLiq();if(i===2)loadWhaleSells()}
 function pTab(i,btn){document.getElementById('pg-me').querySelectorAll('.big-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');['p0','p1','p2','p3','p4'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=j===i?'block':'none'});if(i===1)renderMyTrades();if(i===2)renderMyStats();if(i===3)renderMySettings();if(i===4)renderNotifHist()}
 /* ═══ 📋 MY TRADES ═══ */
@@ -978,7 +981,205 @@ async function loadTk(){
   var pfrE=document.getElementById('pFR');if(pfrE&&FR.BTC)pfrE.textContent=(FR.BTC.rate>=0?'+':'')+FR.BTC.rate.toFixed(4)+'%';
 }
 async function loadFutures(){/* FR/OI/LS now loaded via PROXY in loadTk() */await loadTk()}
-/* ═══ EARLY DETECTION SCANNER — catches coins BEFORE they pump ═══ */
+
+/* ═══ BINANCE ADVANCED — 8 FREE ENDPOINTS ═══ */
+var BN_ADV_COINS=['BTC','ETH','SOL','BNB','XRP','DOGE','ADA','AVAX','LINK','DOT'];
+var bnAdvCache={t:0};
+async function fetchBinanceAdvanced(){
+  if(Date.now()-bnAdvCache.t<120000)return; /* Cache 2 min */
+  try{
+  /* 1. Premium Index — FR + Mark Price for ALL coins at once */
+  var pi=await fj(BF+'/premiumIndex');
+  if(pi&&pi.length){pi.forEach(function(x){var s=x.symbol.replace('USDT','');if(!s||!T[s])return;
+    FR[s]={rate:+x.lastFundingRate||0,mark:+x.markPrice||0,nextTime:+x.nextFundingTime||0,predicted:+x.estimatedSettlePrice||0};
+  })}
+
+  /* 2. FR History — last 100 periods for top coins */
+  var frProms=BN_ADV_COINS.map(function(s){return fj(BF+'/fundingRate?symbol='+s+'USDT&limit=50').then(function(d){if(d&&d.length)frHistory[s]=d.map(function(x){return{rate:+x.fundingRate,time:+x.fundingTime}})}).catch(function(){})});
+
+  /* 3. Top Traders L/S (Accounts) — what big players do */
+  var topProms=BN_ADV_COINS.slice(0,6).map(function(s){return fj('https://fapi.binance.com/futures/data/topLongShortAccountRatio?symbol='+s+'USDT&period=1h&limit=24').then(function(d){if(d&&d.length)topTradersLS[s]={accounts:d.map(function(x){return{long:+x.longAccount,short:+x.shortAccount,ratio:+x.longShortRatio,time:+x.timestamp}})}}).catch(function(){})});
+
+  /* 4. Top Traders L/S (Positions) — by position size */
+  var posProms=BN_ADV_COINS.slice(0,6).map(function(s){return fj('https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol='+s+'USDT&period=1h&limit=24').then(function(d){if(d&&d.length){if(!topTradersLS[s])topTradersLS[s]={};topTradersLS[s].positions=d.map(function(x){return{long:+x.longAccount,short:+x.shortAccount,ratio:+x.longShortRatio,time:+x.timestamp}})}}).catch(function(){})});
+
+  /* 5. Global L/S Ratio */
+  var glProms=BN_ADV_COINS.slice(0,6).map(function(s){return fj('https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol='+s+'USDT&period=1h&limit=24').then(function(d){if(d&&d.length)globalLS[s]=d.map(function(x){return{long:+x.longAccount,short:+x.shortAccount,ratio:+x.longShortRatio,time:+x.timestamp}})}).catch(function(){})});
+
+  /* 6. OI History — change over time */
+  var oiProms=BN_ADV_COINS.slice(0,6).map(function(s){return fj('https://fapi.binance.com/futures/data/openInterestHist?symbol='+s+'USDT&period=1h&limit=24').then(function(d){if(d&&d.length)oiHistory[s]=d.map(function(x){return{oi:+x.sumOpenInterest,val:+x.sumOpenInterestValue,time:+x.timestamp}})}).catch(function(){})});
+
+  /* 7. AggTrades for real CVD — top 5 coins */
+  var cvdProms=BN_ADV_COINS.slice(0,5).map(function(s){return fj(BF+'/aggTrades?symbol='+s+'USDT&limit=500').then(function(d){if(d&&d.length){var buyV=0,sellV=0;d.forEach(function(t){var v=+t.q*+t.p;if(t.m)sellV+=v;else buyV+=v});aggCVD[s]={buyVol:buyV,sellVol:sellV,delta:buyV-sellV,ratio:sellV>0?buyV/sellV:1,trend:buyV>sellV*1.1?'BUYING':sellV>buyV*1.1?'SELLING':'NEUTRAL',count:d.length,time:Date.now()}}}).catch(function(){})});
+
+  /* 8. Book Tickers — best bid/ask spread */
+  var bt=await fj(BF+'/ticker/bookTicker');
+  if(bt&&bt.length){bt.forEach(function(x){var s=x.symbol.replace('USDT','');if(!s||!T[s])return;
+    var bid=+x.bidPrice,ask=+x.askPrice,mid=(bid+ask)/2;
+    bookTickers[s]={bid:bid,ask:ask,spread:mid>0?((ask-bid)/mid*100):0,bidQty:+x.bidQty,askQty:+x.askQty}
+  })}
+
+  await Promise.all(frProms.concat(topProms,posProms,glProms,oiProms,cvdProms));
+  bnAdvCache.t=Date.now();
+  }catch(e){}
+}
+
+/* ═══ HELPER: FR History mini-chart (8 bars) ═══ */
+function frHistBars(sym){
+  var h=frHistory[sym];if(!h||h.length<4)return'';
+  var last8=h.slice(-8);var mx=Math.max.apply(null,last8.map(function(x){return Math.abs(x.rate)}))||0.001;
+  var bars='';last8.forEach(function(x){var pct=Math.min(100,Math.abs(x.rate)/mx*100);var col=x.rate>0.03?'var(--dn)':x.rate<-0.01?'var(--up)':'var(--warn)';bars+='<div style="width:8px;background:'+col+';border-radius:2px;min-height:2px;height:'+pct+'%"></div>'});
+  return'<div style="display:flex;align-items:flex-end;gap:1px;height:20px">'+bars+'</div>'
+}
+
+/* ═══ HELPER: OI History mini-chart (8 bars) ═══ */
+function oiHistBars(sym){
+  var h=oiHistory[sym];if(!h||h.length<4)return'';
+  var last8=h.slice(-8);var mn=Math.min.apply(null,last8.map(function(x){return x.val}));var mx=Math.max.apply(null,last8.map(function(x){return x.val}))-mn;if(mx===0)mx=1;
+  var bars='';last8.forEach(function(x,i){var pct=20+((x.val-mn)/mx*80);var prev=i>0?last8[i-1].val:x.val;var col=x.val>=prev?'var(--up)':'var(--dn)';bars+='<div style="width:8px;background:'+col+';border-radius:2px;min-height:2px;height:'+pct+'%"></div>'});
+  return'<div style="display:flex;align-items:flex-end;gap:1px;height:20px">'+bars+'</div>'
+}
+
+/* ═══ DeFiLlama — FREE: Stablecoin Flows + TVL ═══ */
+async function fetchDeFiLlama(){
+  if(Date.now()-defiCache.t<300000)return; /* Cache 5 min */
+  try{
+  /* 1. Stablecoins — total supply + changes */
+  var sc=await fj('https://stablecoins.llama.fi/stablecoins?includePrices=true');
+  if(sc&&sc.peggedAssets){
+    sc.peggedAssets.forEach(function(s){
+      if(!s.symbol||!s.chains)return;
+      var sym=s.symbol.toUpperCase();
+      var totalNow=0,total7d=0;
+      s.chains.forEach(function(c){
+        if(s.chainCirculating&&s.chainCirculating[c]&&s.chainCirculating[c].current)totalNow+=(+s.chainCirculating[c].current.peggedUSD||0);
+      });
+      if(s.circulatingPrevDay)total7d=+s.circulatingPrevDay.peggedUSD||0;
+      var change7d=total7d>0?((totalNow-total7d)/total7d*100):0;
+      stablecoinData[sym]={supply:totalNow||+s.circulating||0,change7d:change7d,name:s.name||sym,chains:s.chains?s.chains.length:0};
+    });
+  }
+  /* 2. TVL per Chain */
+  var chains=await fj('https://api.llama.fi/v2/chains');
+  if(chains&&chains.length){
+    chains.forEach(function(c){
+      if(!c.name)return;
+      defiTVL[c.name]={tvl:+c.tvl||0,change1d:+c.tokenSymbol?0:(c.change_1d||0),change7d:c.change_7d||0};
+    });
+  }
+  defiCache.t=Date.now();
+  }catch(e){}
+}
+
+/* ═══ Tokenomist — FREE: Token Unlocks ═══ */
+async function fetchTokenUnlocks(){
+  if(Date.now()-unlockCache.t<3600000)return; /* Cache 1 hour */
+  try{
+  /* Try Tokenomist free endpoint (no key needed for basic) */
+  var data=await fj('https://api.tokenomist.ai/v1/unlocks/upcoming?limit=15');
+  if(data&&data.length){
+    tokenUnlocks=data.map(function(u){return{
+      sym:(u.symbol||u.token||'').toUpperCase(),
+      date:u.date||u.unlock_date||'',
+      amount:+u.value_usd||+u.amount||0,
+      tokens:+u.token_amount||+u.tokens||0,
+      pct:+u.pct_of_supply||+u.percent||0,
+      type:u.category||u.type||'',
+      name:u.name||u.project||''
+    }}).filter(function(u){return u.sym&&u.amount>100000});
+    /* Update TOKEN_UNLOCKS for getUpcomingEvents */
+    TOKEN_UNLOCKS=tokenUnlocks.map(function(u){return{sym:u.sym,date:u.date,amount:u.amount}});
+  }
+  unlockCache.t=Date.now();
+  }catch(e){
+    /* Fallback: hardcoded major unlocks (updated monthly) */
+    if(!tokenUnlocks.length){
+      TOKEN_UNLOCKS=[
+        {sym:'ARB',date:'2026-04-16',amount:92650000},
+        {sym:'APT',date:'2026-04-12',amount:81000000},
+        {sym:'OP',date:'2026-04-30',amount:35000000},
+        {sym:'SUI',date:'2026-05-01',amount:120000000},
+        {sym:'TIA',date:'2026-04-20',amount:85000000},
+        {sym:'SEI',date:'2026-04-15',amount:45000000},
+        {sym:'STRK',date:'2026-04-25',amount:60000000}
+      ];
+      tokenUnlocks=TOKEN_UNLOCKS.map(function(u){return{sym:u.sym,date:u.date,amount:u.amount,tokens:0,pct:0,type:'team/investor',name:u.sym}});
+    }
+  }
+}
+
+/* ═══ DeFiLlama Indicator Card — Stablecoin Flows ═══ */
+function buildStablecoinCard(){
+  var coins=['USDT','USDC','DAI','FDUSD','TUSD'];
+  var entries=coins.filter(function(s){return stablecoinData[s]}).map(function(s){return{sym:s,data:stablecoinData[s]}});
+  if(!entries.length)return'';
+  var totalSupply=entries.reduce(function(s,e){return s+e.data.supply},0);
+  var usdtData=stablecoinData['USDT'];
+  var usdcData=stablecoinData['USDC'];
+  var rows='';
+  entries.forEach(function(e){
+    var d=e.data;var pct=totalSupply>0?(d.supply/totalSupply*100):0;
+    var cls=d.change7d>1?'up':d.change7d<-1?'dn':'warn';
+    var bar='<div style="flex:1;height:6px;background:var(--bg2);border-radius:3px;overflow:hidden;min-width:50px"><div style="width:'+Math.min(100,pct).toFixed(0)+'%;height:100%;background:var(--'+cls+');border-radius:3px"></div></div>';
+    rows+='<div class="ind-row"><span class="ind-sym">'+e.sym+'</span>'
+      +bar
+      +'<span style="font-size:9px;color:var(--t1);min-width:52px;font-family:var(--fm)">$'+fmt(d.supply)+'</span>'
+      +'<span style="font-size:9px;color:var(--'+cls+');min-width:42px;font-family:var(--fm);direction:ltr">'+(d.change7d>=0?'+':'')+d.change7d.toFixed(1)+'%</span></div>';
+  });
+  /* Interpretation */
+  var usdtChg=usdtData?usdtData.change7d:0;
+  var signal=usdtChg>2?(lang==='ar'?'🟢 USDT يُطبع — أموال جديدة تدخل!':'🟢 USDT minting — New money entering!'):usdtChg<-2?(lang==='ar'?'🔴 USDT يُحرق — أموال تخرج!':'🔴 USDT burning — Money leaving!'):lang==='ar'?'🟡 مستقر':'🟡 Stable';
+  var signalCol=usdtChg>2?'var(--up)':usdtChg<-2?'var(--dn)':'var(--warn)';
+  var guide='<div class="ind-guide" style="color:'+signalCol+';font-weight:700">'+signal+'</div>'
+    +'<div class="ind-guide">📖 '+(lang==='ar'?'USDT يُطبع = صعود قريب | يُحرق = هبوط قريب — يسبق السعر 24-48h':'USDT mint = pump soon | burn = dump soon — leads price 24-48h')+'</div>';
+  return indCardWrap('💵','rgba(0,255,136,.06)','rgba(0,255,136,.12)',lang==='ar'?'تدفق Stablecoins الحقيقي':'Real Stablecoin Flow',lang==='ar'?'DeFiLlama — بيانات حقيقية':'DeFiLlama — real data','$'+fmt(totalSupply),'var(--neon)',rows+guide);
+}
+
+/* ═══ DeFiLlama Indicator Card — TVL ═══ */
+function buildTVLCard(){
+  var topChains=['Ethereum','Solana','BSC','Arbitrum','Base','Polygon','Avalanche','Optimism'];
+  var entries=topChains.filter(function(c){return defiTVL[c]}).map(function(c){return{name:c,data:defiTVL[c]}});
+  if(!entries.length)return'';
+  entries.sort(function(a,b){return b.data.tvl-a.data.tvl});
+  var totalTVL=entries.reduce(function(s,e){return s+e.data.tvl},0);
+  var rows='';
+  entries.slice(0,8).forEach(function(e,i){
+    var d=e.data;var pct=totalTVL>0?(d.tvl/totalTVL*100):0;
+    var ch=d.change7d||0;var cls=ch>5?'up':ch<-5?'dn':'warn';
+    var icons={Ethereum:'⟠',Solana:'◎',BSC:'⬡',Arbitrum:'🔵',Base:'🔷',Polygon:'🟣',Avalanche:'🔺',Optimism:'🔴'};
+    rows+='<div class="ind-row"><span class="ind-sym">'+(icons[e.name]||'●')+' '+e.name+'</span>'
+      +'<span style="font-size:9px;color:var(--neon);min-width:52px;font-family:var(--fm)">$'+fmt(d.tvl)+'</span>'
+      +'<span style="font-size:9px;color:var(--'+cls+');min-width:42px;font-family:var(--fm);direction:ltr">'+(ch>=0?'+':'')+ch.toFixed(1)+'%</span></div>';
+  });
+  var ethTVL=defiTVL['Ethereum']?defiTVL['Ethereum'].tvl:0;var ethDom=totalTVL>0?(ethTVL/totalTVL*100):0;
+  var guide='<div class="ind-guide">📖 '+(lang==='ar'?'TVL ينزل = الناس تسحب أموالها = هبوط | يزيد = ثقة = صعود':'TVL drops = money leaving = bearish | TVL rises = confidence = bullish')+'</div>';
+  return indCardWrap('🏦','rgba(98,126,234,.06)','rgba(98,126,234,.12)','DeFi TVL',lang==='ar'?'القيمة المقفلة — '+entries.length+' chains':'Total Value Locked — '+entries.length+' chains','$'+fmt(totalTVL),'var(--neon)',rows+guide);
+}
+
+/* ═══ Token Unlocks Indicator Card ═══ */
+function buildUnlocksCard(){
+  if(!tokenUnlocks.length)return'';
+  var now=new Date();
+  var upcoming=tokenUnlocks.filter(function(u){return new Date(u.date)>=now}).sort(function(a,b){return new Date(a.date)-new Date(b.date)});
+  if(!upcoming.length)return'';
+  var rows='';var dangerCount=0;
+  upcoming.slice(0,8).forEach(function(u){
+    var dt=new Date(u.date);var days=Math.ceil((dt-now)/86400000);
+    var cls=days<=3?'dn':days<=7?'warn':'t2';
+    if(days<=7&&u.amount>50000000)dangerCount++;
+    var urgency=days<=1?(lang==='ar'?'🔴 اليوم!':'🔴 Today!'):days<=3?(lang==='ar'?'🟠 قريب':'🟠 Soon'):days<=7?(lang==='ar'?'🟡 هذا الأسبوع':'🟡 This week'):(lang==='ar'?days+' يوم':days+'d');
+    rows+='<div class="ind-row"><span class="ind-sym">'+u.sym+'</span>'
+      +'<span style="font-size:9px;color:var(--t1);min-width:52px;font-family:var(--fm)">$'+fmt(u.amount)+'</span>'
+      +(u.pct?'<span style="font-size:8px;color:var(--warn);min-width:32px">'+u.pct.toFixed(1)+'%</span>':'')
+      +'<span style="font-size:9px;color:var(--'+cls+');min-width:55px;font-weight:700">'+urgency+'</span></div>';
+  });
+  var guide='<div class="ind-guide">📖 '+(lang==='ar'?'فك توكنات = ضغط بيع محتمل — تجنب الشراء قبل الفك بـ 3 أيام':'Token unlock = sell pressure — avoid buying 3 days before unlock')+'</div>';
+  var verdict=dangerCount>0?(lang==='ar'?'⚠️ '+dangerCount+' خطر':'⚠️ '+dangerCount+' danger'):(lang==='ar'?'✅ آمن':'✅ Safe');
+  var vCol=dangerCount>0?'var(--dn)':'var(--up)';
+  return indCardWrap('🔓','rgba(255,184,0,.06)','rgba(255,184,0,.12)',lang==='ar'?'فك التوكنات القادمة':'Upcoming Token Unlocks',lang==='ar'?upcoming.length+' حدث قادم':upcoming.length+' upcoming events',verdict,vCol,rows+guide);
+}
+
+
 function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD'];var cands=[];Object.entries(T).forEach(function(e){var s=e[0],d=e[1];if(STABLES.includes(s))return;
   /* TOP 100 ONLY — skip unknown coins */
   if(!TIER1.has(s))return;
@@ -1211,13 +1412,19 @@ function monitorTrades(){
 /* 💰 STABLECOIN FLOW INDICATOR — uses already-loaded T data (no extra API calls) */
 async function loadStableFlow(){
   try{
-    /* Calculate from already-loaded ticker data — NO duplicate API call */
+    /* Use REAL DeFiLlama data if available */
     var usdtVol=0,usdcVol=0,totalVol=0;
-    Object.entries(T).forEach(function(e){var d=e[1];if(d.src==='BN'){totalVol+=d.v}});
-    /* Estimate USDC volume from known USDC-heavy coins */
-    var stableCoins=['USDC','TUSD','FDUSD','DAI','BUSD'];
-    stableCoins.forEach(function(s){if(T[s])usdcVol+=T[s].v});
-    usdtVol=totalVol-usdcVol;
+    var realData=stablecoinData['USDT']&&stablecoinData['USDT'].supply>0;
+    if(realData){
+      usdtVol=stablecoinData['USDT'].supply;
+      usdcVol=stablecoinData['USDC']?stablecoinData['USDC'].supply:0;
+      totalVol=usdtVol+usdcVol+(stablecoinData['DAI']?stablecoinData['DAI'].supply:0)+(stablecoinData['FDUSD']?stablecoinData['FDUSD'].supply:0);
+    }else{
+      Object.entries(T).forEach(function(e){var d=e[1];if(d.src==='BN'){totalVol+=d.v}});
+      var stableCoins=['USDC','TUSD','FDUSD','DAI','BUSD'];
+      stableCoins.forEach(function(s){if(T[s])usdcVol+=T[s].v});
+      usdtVol=totalVol-usdcVol;
+    }
     /* Calculate flow index based on market behavior */
     var btcChange=T['BTC']?T['BTC'].c:0;
     var ethChange=T['ETH']?T['ETH'].c:0;
@@ -1922,6 +2129,9 @@ function renderMonPanel(){
 /* DASHBOARD */
 async function loadDash(){
   try{ await loadTk(); }catch(e){ console.error('loadTk:',e); }
+  try{ fetchBinanceAdvanced(); }catch(e){} /* non-blocking — data loads in background */
+  try{ fetchDeFiLlama(); }catch(e){} /* DeFiLlama — stablecoins + TVL */
+  try{ fetchTokenUnlocks(); }catch(e){} /* Token Unlocks */
   try{ refreshTiers(); }catch(e){}
   try{ checkVolSpikes(); }catch(e){}
   try{ await loadTop4Ext(); }catch(e){}
@@ -1974,14 +2184,25 @@ async function loadInd(){
   var el=document.getElementById('indCards');if(!el)return;
   el.innerHTML='<div style="text-align:center;padding:20px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div>';
   if(!Object.keys(FR).length||!Object.keys(takerData).length)try{await loadTk()}catch(e){}
+  try{await fetchBinanceAdvanced()}catch(e){}
+  try{await fetchDeFiLlama()}catch(e){}
+  try{await fetchTokenUnlocks()}catch(e){}
   var h='';
+  try{h+=buildStablecoinCard()}catch(e){h+=''}
+  try{h+=buildTVLCard()}catch(e){h+=''}
+  try{h+=buildUnlocksCard()}catch(e){h+=''}
   try{h+=buildFRCard()}catch(e){h+=''}
+  try{h+=buildFRHistCard()}catch(e){h+=''}
   try{h+=buildOICard()}catch(e){h+=''}
+  try{h+=buildOIHistCard()}catch(e){h+=''}
+  try{h+=buildTopTradersCard()}catch(e){h+=''}
   try{h+=buildLiqCard()}catch(e){h+=''}
   try{h+=buildWhaleCard()}catch(e){h+=''}
+  try{h+=buildRealCVDCard()}catch(e){h+=''}
   try{h+=buildCVDCard()}catch(e){h+=''}
   try{h+=buildOBCard()}catch(e){h+=''}
   try{h+=buildTakerCard()}catch(e){h+=''}
+  try{h+=buildSpreadCard()}catch(e){h+=''}
   el.innerHTML=h||'<div class="empty"><div class="empty-ic">📊</div><div class="empty-tx">'+(lang==='ar'?'لا بيانات':'No data')+'</div></div>';
 }
 function indCardWrap(ic,icBg,icBdr,name,sub,val,valCol,bodyHTML){
@@ -2141,10 +2362,140 @@ function buildTakerCard(){
   var avgCol=bullish>bearish?'var(--up)':bearish>bullish?'var(--dn)':'var(--warn)';
   return indCardWrap('⚡','rgba(255,215,0,.06)','rgba(255,215,0,.12)','Taker Buy/Sell',lang==='ar'?'الشراء العدواني':'Aggressive trading',avg,avgCol,chips+tRows+guide);
 }
-/* old functions removed */
-function loadFR(){}function loadOI(){}function loadCor(){}
+
+/* ═══ NEW CARD: FR History (Binance Free) ═══ */
+function buildFRHistCard(){
+  var coins=BN_ADV_COINS.filter(function(s){return frHistory[s]&&frHistory[s].length>=4});
+  if(!coins.length)return'';
+  var rows='';
+  coins.slice(0,8).forEach(function(s){
+    var h=frHistory[s];var last=h[h.length-1];var prev=h[h.length-2];
+    var avg8=h.slice(-8).reduce(function(a,x){return a+x.rate},0)/Math.min(8,h.length);
+    var trend=last.rate>prev.rate?'📈':'📉';
+    var cls=last.rate>0.03?'dn':last.rate<-0.01?'up':'warn';
+    rows+='<div class="ind-row"><span class="ind-sym">'+s+'</span>'
+      +'<span style="font-size:9px;color:var(--'+cls+');min-width:55px;direction:ltr;font-family:var(--fm)">'+(last.rate>=0?'+':'')+last.rate.toFixed(4)+'%</span>'
+      +frHistBars(s)
+      +'<span style="font-size:8px;color:var(--t2);min-width:50px;direction:ltr;font-family:var(--fm)">avg:'+(avg8>=0?'+':'')+avg8.toFixed(4)+'%</span>'
+      +'<span style="font-size:10px">'+trend+'</span></div>';
+  });
+  var guide='<div class="ind-guide">📖 '+(lang==='ar'?'تاريخ FR آخر 50 فترة — الأعمدة = آخر 8':'FR history last 50 periods — bars = last 8')+'</div>';
+  return indCardWrap('📉','rgba(176,124,255,.06)','rgba(176,124,255,.12)',lang==='ar'?'تاريخ FR':'FR History',lang==='ar'?'آخر 50 فترة — '+coins.length+' عملة':coins.length+' coins — last 50 periods','','',(rows||'<div style="text-align:center;color:var(--t3);font-size:10px;padding:8px">Loading...</div>')+guide);
+}
+
+/* ═══ NEW CARD: OI History (Binance Free) ═══ */
+function buildOIHistCard(){
+  var coins=BN_ADV_COINS.filter(function(s){return oiHistory[s]&&oiHistory[s].length>=4});
+  if(!coins.length)return'';
+  var rows='';
+  coins.slice(0,8).forEach(function(s){
+    var h=oiHistory[s];var last=h[h.length-1];var first=h[0];
+    var change=first.val>0?((last.val-first.val)/first.val*100):0;
+    var cls=change>5?'up':change<-5?'dn':'warn';
+    var d=T[s];var pChg=d?d.c:0;
+    /* OI interpretation */
+    var interp='';
+    if(change>3&&pChg>0)interp=lang==='ar'?'🟢 Long جديد':'🟢 New Longs';
+    else if(change>3&&pChg<0)interp=lang==='ar'?'🔴 Short جديد':'🔴 New Shorts';
+    else if(change<-3&&pChg>0)interp=lang==='ar'?'🟡 Short Squeeze':'🟡 Short Squeeze';
+    else if(change<-3&&pChg<0)interp=lang==='ar'?'🟡 Long Squeeze':'🟡 Long Squeeze';
+    else interp=lang==='ar'?'— مستقر':'— Stable';
+    rows+='<div class="ind-row"><span class="ind-sym">'+s+'</span>'
+      +oiHistBars(s)
+      +'<span style="font-size:9px;color:var(--'+cls+');min-width:48px;direction:ltr;font-family:var(--fm)">'+(change>=0?'+':'')+change.toFixed(1)+'%</span>'
+      +'<span style="font-size:8px;color:var(--t1);min-width:80px">'+interp+'</span></div>';
+  });
+  var guide='<div class="ind-guide">📖 OI↑+Price↑ = '+(lang==='ar'?'أموال جديدة Long':'New Long money')+' | OI↓+Price↑ = '+(lang==='ar'?'Short Squeeze':'Short Squeeze')+'</div>';
+  return indCardWrap('📊','rgba(0,255,136,.06)','rgba(0,255,136,.12)',lang==='ar'?'تاريخ OI':'OI History',lang==='ar'?'تغير 24 ساعة — '+coins.length+' عملة':'24h change — '+coins.length+' coins','','',rows+guide);
+}
+
+/* ═══ NEW CARD: Top Traders L/S (Binance Free) ═══ */
+function buildTopTradersCard(){
+  var coins=BN_ADV_COINS.filter(function(s){return topTradersLS[s]&&topTradersLS[s].accounts&&topTradersLS[s].accounts.length});
+  if(!coins.length)return'';
+  var bullCount=0,bearCount=0;
+  var rows='';
+  coins.slice(0,8).forEach(function(s){
+    var acc=topTradersLS[s].accounts;var pos=topTradersLS[s].positions;
+    var lastAcc=acc[acc.length-1];var prevAcc=acc.length>=2?acc[acc.length-2]:lastAcc;
+    var lastPos=pos&&pos.length?pos[pos.length-1]:null;
+    var accLong=(lastAcc.long*100).toFixed(0);var accShort=(lastAcc.short*100).toFixed(0);
+    var trend=lastAcc.long>prevAcc.long?'📈':'📉';
+    var cls=lastAcc.long>0.55?'up':lastAcc.long<0.45?'dn':'warn';
+    if(lastAcc.long>0.55)bullCount++;if(lastAcc.long<0.45)bearCount++;
+    /* L/S bar */
+    var barW=Math.round(lastAcc.long*100);
+    var bar='<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;flex:1;min-width:60px">'
+      +'<div style="width:'+barW+'%;background:var(--up)"></div>'
+      +'<div style="width:'+(100-barW)+'%;background:var(--dn)"></div></div>';
+    rows+='<div class="ind-row"><span class="ind-sym">'+s+'</span>'
+      +bar
+      +'<span style="font-size:9px;color:var(--up);min-width:28px;font-family:var(--fm)">'+accLong+'%</span>'
+      +'<span style="font-size:9px;color:var(--dn);min-width:28px;font-family:var(--fm)">'+accShort+'%</span>'
+      +'<span style="font-size:10px">'+trend+'</span></div>';
+  });
+  var chips='<div class="ind-chips">'
+    +'<span class="ind-chip" style="background:var(--ud);color:var(--up)">🟢 '+bullCount+' Long</span>'
+    +'<span class="ind-chip" style="background:var(--dd);color:var(--dn)">🔴 '+bearCount+' Short</span></div>';
+  var guide='<div class="ind-guide">📖 '+(lang==='ar'?'أكبر 20% متداولين على Binance — ماذا يفعلون الآن':'Top 20% Binance traders — what they\'re doing now')+'</div>';
+  var verdict=bullCount>bearCount?(lang==='ar'?'الكبار Long':'Pros: Long'):bearCount>bullCount?(lang==='ar'?'الكبار Short':'Pros: Short'):(lang==='ar'?'منقسمين':'Split');
+  var vCol=bullCount>bearCount?'var(--up)':bearCount>bullCount?'var(--dn)':'var(--warn)';
+  return indCardWrap('🏆','rgba(255,215,0,.06)','rgba(255,215,0,.12)',lang==='ar'?'كبار المتداولين':'Top Traders L/S',lang==='ar'?'أكبر 20% على Binance — '+coins.length+' عملة':'Top 20% Binance — '+coins.length+' coins',verdict,vCol,chips+rows+guide);
+}
+
+/* ═══ NEW CARD: Real CVD from aggTrades (Binance Free) ═══ */
+function buildRealCVDCard(){
+  var coins=BN_ADV_COINS.filter(function(s){return aggCVD[s]});
+  if(!coins.length)return'';
+  var rows='';var bullCount=0,bearCount=0;
+  coins.slice(0,8).forEach(function(s){
+    var c=aggCVD[s];
+    var cls=c.trend==='BUYING'?'up':c.trend==='SELLING'?'dn':'warn';
+    if(c.trend==='BUYING')bullCount++;if(c.trend==='SELLING')bearCount++;
+    var deltaFmt=c.delta>=0?'+$'+fmt(c.delta):'-$'+fmt(Math.abs(c.delta));
+    /* Buy/Sell pressure bar */
+    var total=c.buyVol+c.sellVol;var buyPct=total>0?Math.round(c.buyVol/total*100):50;
+    var bar='<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;flex:1;min-width:50px">'
+      +'<div style="width:'+buyPct+'%;background:var(--up)"></div>'
+      +'<div style="width:'+(100-buyPct)+'%;background:var(--dn)"></div></div>';
+    var label=c.trend==='BUYING'?(lang==='ar'?'شراء مخفي':'Hidden buy'):c.trend==='SELLING'?(lang==='ar'?'بيع مخفي':'Hidden sell'):(lang==='ar'?'متوازن':'Balanced');
+    rows+='<div class="ind-row"><span class="ind-sym">'+s+'</span>'
+      +bar
+      +'<span style="font-size:9px;color:var(--'+cls+');min-width:55px;font-family:var(--fm);direction:ltr">'+deltaFmt+'</span>'
+      +'<span style="font-size:8px;color:var(--'+cls+')">'+label+'</span></div>';
+  });
+  var chips='<div class="ind-chips">'
+    +'<span class="ind-chip" style="background:var(--ud);color:var(--up)">🟢 '+bullCount+' '+(lang==='ar'?'شراء':'Buy')+'</span>'
+    +'<span class="ind-chip" style="background:var(--dd);color:var(--dn)">🔴 '+bearCount+' '+(lang==='ar'?'بيع':'Sell')+'</span></div>';
+  var guide='<div class="ind-guide">📖 '+(lang==='ar'?'CVD حقيقي من آخر 500 صفقة Futures — يكشف الشراء/البيع المخفي':'Real CVD from last 500 Futures trades — reveals hidden buying/selling')+'</div>';
+  var verdict=bullCount>bearCount?(lang==='ar'?'شراء مسيطر':'Buying dominant'):bearCount>bullCount?(lang==='ar'?'بيع مسيطر':'Selling dominant'):(lang==='ar'?'متوازن':'Balanced');
+  var vCol=bullCount>bearCount?'var(--up)':bearCount>bullCount?'var(--dn)':'var(--warn)';
+  return indCardWrap('🔬','rgba(0,212,255,.06)','rgba(0,212,255,.12)',lang==='ar'?'CVD حقيقي (Futures)':'Real CVD (Futures)',lang==='ar'?'آخر 500 صفقة — '+coins.length+' عملة':'Last 500 trades — '+coins.length+' coins',verdict,vCol,chips+rows+guide);
+}
+
+/* ═══ NEW CARD: Spread Analysis (Binance Free) ═══ */
+function buildSpreadCard(){
+  var coins=Object.keys(bookTickers).filter(function(s){return WL.includes(s)}).sort(function(a,b){return bookTickers[b].spread-bookTickers[a].spread});
+  if(!coins.length)return'';
+  var rows='';var wideCount=0;
+  coins.slice(0,12).forEach(function(s){
+    var bk=bookTickers[s];
+    var cls=bk.spread>0.05?'dn':bk.spread<0.01?'up':'warn';
+    if(bk.spread>0.05)wideCount++;
+    var pressure=bk.bidQty>bk.askQty*1.3?(lang==='ar'?'🟢 ضغط شراء':'🟢 Buy pressure'):bk.askQty>bk.bidQty*1.3?(lang==='ar'?'🔴 ضغط بيع':'🔴 Sell pressure'):'';
+    rows+='<div class="ind-row"><span class="ind-sym">'+s+'</span>'
+      +'<span style="font-size:9px;color:var(--'+cls+');min-width:52px;font-family:var(--fm);direction:ltr">'+bk.spread.toFixed(3)+'%</span>'
+      +'<span style="font-size:8px;color:var(--t2);min-width:50px;font-family:var(--fm)">Bid:'+fmt(bk.bid*bk.bidQty)+'</span>'
+      +(pressure?'<span style="font-size:8px">'+pressure+'</span>':'')+'</div>';
+  });
+  var guide='<div class="ind-guide">📖 '+(lang==='ar'?'Spread واسع = سيولة ضعيفة = حذر | ضيق = سيولة جيدة':'Wide spread = low liquidity = caution | Tight = good liquidity')+'</div>';
+  return indCardWrap('📐','rgba(91,156,255,.06)','rgba(91,156,255,.12)','Bid/Ask Spread',lang==='ar'?'فرق السعر — سيولة السوق':'Price gap — Market liquidity',(wideCount>3?(lang==='ar'?'حذر':'Caution'):(lang==='ar'?'جيد':'Good')),wideCount>3?'var(--dn)':'var(--up)',rows+guide);
+}
+
+
+/* legacy stubs removed */
 /* COIN DETAIL */
-async function openCoin(sym){curCoin=sym;curTF='1h';document.getElementById('sRes').classList.remove('show');document.getElementById('sInp').value='';var d=T[sym]||{p:0,c:0,v:0,h:0,l:0};document.getElementById('cmT').textContent=sym+'/USDT';document.getElementById('cmP').textContent=fP(d.p);document.getElementById('cmC').style.color=d.c>=0?'var(--up)':'var(--dn)';document.getElementById('cmC').textContent=(d.c>=0?'+':'')+d.c.toFixed(2)+'%';document.getElementById('cmSts').innerHTML='<div class="st"><div class="st-l">VOL</div><div class="st-v" style="color:var(--neon)">'+fmt(d.v)+'</div></div><div class="st"><div class="st-l">HIGH</div><div class="st-v" style="color:var(--up)">'+fP(d.h)+'</div></div><div class="st"><div class="st-l">LOW</div><div class="st-v" style="color:var(--dn)">'+fP(d.l)+'</div></div>';var ex='';var fr=FR[sym];if(fr)ex+='<div class="fr-row" style="margin-top:6px"><span>📊 FR</span><span class="fr-val" style="color:'+(fr.rate>0.05?'var(--dn)':fr.rate<-0.01?'var(--up)':'var(--warn)')+'">'+(fr.rate>=0?'+':'')+fr.rate.toFixed(4)+'%</span></div>';if(OI[sym])ex+='<div class="fr-row"><span>📈 OI</span><span class="fr-val" style="color:var(--neon)">'+fmt(OI[sym])+'</span></div>';if(LS[sym])ex+='<div class="fr-row"><span>⚖️ L/S</span><span class="fr-val">'+LS[sym].long.toFixed(0)+'%/'+LS[sym].short.toFixed(0)+'%</span></div>';if(d.by)ex+='<div class="fr-row"><span>Bybit</span><span class="fr-val">'+fP(d.by)+'</span></div>';if(CBP[sym])ex+='<div class="fr-row"><span>Coinbase</span><span class="fr-val">'+fP(CBP[sym])+'</span></div>';document.getElementById('cmExtra').innerHTML=ex;openMo('coinMo');document.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act');if(b.dataset.t2==='1h')b.classList.add('act')});drawChart(sym,'1h')}
+async function openCoin(sym){curCoin=sym;curTF='1h';document.getElementById('sRes').classList.remove('show');document.getElementById('sInp').value='';var d=T[sym]||{p:0,c:0,v:0,h:0,l:0};document.getElementById('cmT').textContent=sym+'/USDT';document.getElementById('cmP').textContent=fP(d.p);document.getElementById('cmC').style.color=d.c>=0?'var(--up)':'var(--dn)';document.getElementById('cmC').textContent=(d.c>=0?'+':'')+d.c.toFixed(2)+'%';document.getElementById('cmSts').innerHTML='<div class="st"><div class="st-l">VOL</div><div class="st-v" style="color:var(--neon)">'+fmt(d.v)+'</div></div><div class="st"><div class="st-l">HIGH</div><div class="st-v" style="color:var(--up)">'+fP(d.h)+'</div></div><div class="st"><div class="st-l">LOW</div><div class="st-v" style="color:var(--dn)">'+fP(d.l)+'</div></div>';var ex='';var fr=FR[sym];if(fr)ex+='<div class="fr-row" style="margin-top:6px"><span>📊 FR</span><span class="fr-val" style="color:'+(fr.rate>0.05?'var(--dn)':fr.rate<-0.01?'var(--up)':'var(--warn)')+'">'+(fr.rate>=0?'+':'')+fr.rate.toFixed(4)+'%</span></div>';if(OI[sym])ex+='<div class="fr-row"><span>📈 OI</span><span class="fr-val" style="color:var(--neon)">'+fmt(OI[sym])+'</span></div>';if(LS[sym])ex+='<div class="fr-row"><span>⚖️ L/S</span><span class="fr-val">'+LS[sym].long.toFixed(0)+'%/'+LS[sym].short.toFixed(0)+'%</span></div>';if(d.by)ex+='<div class="fr-row"><span>Bybit</span><span class="fr-val">'+fP(d.by)+'</span></div>';if(CBP[sym])ex+='<div class="fr-row"><span>Coinbase</span><span class="fr-val">'+fP(CBP[sym])+'</span></div>';if(topTradersLS[sym]&&topTradersLS[sym].accounts&&topTradersLS[sym].accounts.length){var tla=topTradersLS[sym].accounts[topTradersLS[sym].accounts.length-1];ex+='<div class="fr-row"><span>🏆 Top L/S</span><span class="fr-val" style="color:'+(tla.long>0.55?'var(--up)':tla.long<0.45?'var(--dn)':'var(--warn)')+'">'+(tla.long*100).toFixed(0)+'%/'+(tla.short*100).toFixed(0)+'%</span></div>'}if(aggCVD[sym]){var cv=aggCVD[sym];ex+='<div class="fr-row"><span>🔬 CVD</span><span class="fr-val" style="color:'+(cv.trend==='BUYING'?'var(--up)':cv.trend==='SELLING'?'var(--dn)':'var(--warn)')+'">'+(cv.trend==='BUYING'?(lang==='ar'?'شراء':'Buy'):cv.trend==='SELLING'?(lang==='ar'?'بيع':'Sell'):(lang==='ar'?'متوازن':'Balanced'))+'</span></div>'}if(bookTickers[sym]){ex+='<div class="fr-row"><span>📐 Spread</span><span class="fr-val" style="color:'+(bookTickers[sym].spread>0.05?'var(--dn)':'var(--t2)')+'">'+bookTickers[sym].spread.toFixed(3)+'%</span></div>'}if(frHistory[sym]&&frHistory[sym].length>=4){ex+='<div class="fr-row" style="justify-content:space-between"><span>📉 FR Hist</span>'+frHistBars(sym)+'</div>'}document.getElementById('cmExtra').innerHTML=ex;openMo('coinMo');document.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act');if(b.dataset.t2==='1h')b.classList.add('act')});drawChart(sym,'1h')}
 function cTF(tf,btn){curTF=tf;document.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');drawChart(curCoin,tf)}
 function tgI(ind,btn){inds[ind]=inds[ind]?0:1;btn.classList.toggle('act');drawChart(curCoin,curTF)}
 var chartData=null,chartCtx=null,chartW=0,crosshair={active:false,x:0,y:0};
@@ -2277,7 +2628,7 @@ async function renderPerfStats(sym){var el=document.getElementById('perfStats');
   h+='</div>';el.innerHTML=h}
 
 /* HEATMAP */
-async function loadHM(){} /* removed — accordion cards */
+async function loadHM(){}
 /* LIQUIDITY + ORDER BOOK */
 async function loadLiq(){if(!Object.keys(T).length)await loadTk();document.getElementById('liqL').innerHTML=Object.entries(T).sort(function(a,b){return b[1].v-a[1].v}).slice(0,12).map(function(e,i){return coinRow(e[0],e[1],i+1)}).join('');var h='';var syms=['BTC','ETH','SOL','BNB','XRP'];var proms=syms.map(function(s){return fj(BN+'/depth?symbol='+s+'USDT&limit=10')});var obs=await Promise.all(proms);syms.forEach(function(s,si){var ob=obs[si];if(!ob)return;var bids=ob.bids.map(function(b){return+b[0]*+b[1]}),asks=ob.asks.map(function(a){return+a[0]*+a[1]});var bT=bids.reduce(function(a,b){return a+b},0),aT=asks.reduce(function(a,b){return a+b},0);var r=aT>0?bT/aT:1;var mx=Math.max.apply(null,bids.concat(asks));h+='<div class="cd" style="padding:8px"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-weight:700;font-family:var(--fd)">'+s+'</span><span style="font-size:9px;font-family:var(--fm);color:var(--'+(r>1.3?'up':r<.7?'dn':'warn')+')">'+(r>1.3?'BUY':r<.7?'SELL':'NEUTRAL')+' '+r.toFixed(2)+'x</span></div><div class="ob-v">'+bids.reverse().map(function(v){return'<div class="ob-b bid" style="height:'+Math.max(3,v/mx*100)+'%"></div>'}).join('')+'<div style="width:1px;background:var(--t3);height:100%"></div>'+asks.map(function(v){return'<div class="ob-b ask" style="height:'+Math.max(3,v/mx*100)+'%"></div>'}).join('')+'</div></div>'});document.getElementById('obS').innerHTML=h}
 /* GEM FINDER — small caps with unusual activity */
@@ -2342,10 +2693,10 @@ async function loadGems(){
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div><span style="font-family:var(--fm);font-size:9px;color:var(--t2)">Vol:'+fmt(g.v)+'</span></div>'
     +'</div>'}).join(''):'<div class="empty"><div class="empty-ic">💎</div><div class="empty-tx">'+(lang==='ar'?'لا جواهر حالياً — السوق هادئ':'No gems now — Market quiet')+'</div></div>'}/* WATCHLIST */
 var watchlist=[];try{watchlist=JSON.parse(localStorage.getItem('nxwl10')||'[]')}catch(e){}
-function addWL(){}function rmWL(){}function renderWL(){} /* removed — watchlist UI deleted */
+function addWL(){}function rmWL(){}function renderWL(){}
 /* 📊 MARKET DIRECTION REPORT — Parallel + Error-Safe */
 /* ═══ MARKET REPORT v2.0 ═══ */
-function calcEMA(arr,p){if(!arr||arr.length<p)return arr?arr[arr.length-1]:0;var k=2/(p+1),e=arr[0];for(var i=1;i<arr.length;i++)e=arr[i]*k+e*(1-k);return e}
+/* calcEMA — defined earlier */
 /* ═══ MARKET CHARTS v2.0 ═══ */
 var curMktTab=0;
 var btcCache={h:null,t:0};
@@ -3330,3 +3681,5 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   }, 6 * 3600000);
 }
 init();
+/* PWA Service Worker */
+if('serviceWorker' in navigator){try{navigator.serviceWorker.register('./sw.js')}catch(e){}}

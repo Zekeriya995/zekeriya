@@ -2,9 +2,52 @@
 const tg=window.Telegram?.WebApp;if(tg){tg.ready();tg.expand();tg.setHeaderColor('#060b14');tg.setBackgroundColor('#020408')}
 const BN='https://api.binance.com/api/v3',BF='https://fapi.binance.com/fapi/v1',CG='https://api.coingecko.com/api/v3',CB='https://api.coinbase.com/v2';
 const PROXY='https://incidents-reviewer-ordering-pursuant.trycloudflare.com';
-const WL=['BTC','ETH','SOL','BNB','XRP','LINK','AVAX','DOGE','ADA','DOT','MATIC','UNI','ATOM','ARB','OP','INJ','SUI','SEI','TIA','FTM','NEAR','APT','LTC','PEPE','WIF'];
+var WL=['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','LINK','AVAX','DOT','MATIC','UNI','ATOM','LTC','NEAR','APT','ARB','OP','INJ','SUI','SEI','TIA','FTM','PEPE','WIF','FIL','HBAR','ICP','IMX','STX','MKR','AAVE','RENDER','GRT','FET','TAO','THETA','LDO','BONK','FLOKI','AR','ALGO','FLOW','MINA','AXS','SAND','MANA','GALA','ENJ','CRV','SNX','COMP','DYDX','GMX','SUSHI','PENDLE','JUP','ENA','W','STRK','TRX','TON','VET','RUNE','KAS','EOS','XLM','EGLD','ROSE','ONE','ZIL','CHZ','IOTA','ENS','WLD','PYTH','ONDO','JTO','PIXEL','BEAM','ORDI','TWT','CAKE','1INCH','BAL','YFI','ASTR','CFX','ANKR','IOTX','RVN','ZEC','QTUM','XEM','WAVES','NEO','KAVA','CKB','XTZ','CELO'];
+/* ═══ 🏆 AUTO TOP 100 — updates every hour from CoinGecko + trending from exchanges ═══ */
+async function updateTop100(){
+  try{
+    var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD','USD','UST'];
+    var newWL=[];
+    /* Part 1: Top 100 by market cap from CoinGecko */
+    var data=await fj(CG+'/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=120&page=1');
+    if(data&&data.length){
+      data.forEach(function(c){
+        if(!c.symbol)return;
+        var sym=c.symbol.toUpperCase();
+        if(STABLES.includes(sym))return;
+        if(newWL.length<100&&newWL.indexOf(sym)===-1)newWL.push(sym);
+      });
+    }
+    /* Part 2: Rising coins from exchange data (before pump detection) */
+    if(Object.keys(T).length>50){
+      var rising=Object.entries(T).filter(function(e){
+        var s=e[0],d=e[1];
+        if(STABLES.includes(s)||newWL.indexOf(s)!==-1)return false;
+        /* Strong rise + high volume = potential pump */
+        return(d.c>=5&&d.v>=5000000)||(d.c>=3&&d.v>=50000000)||(d.v>=200000000);
+      }).sort(function(a,b){return b[1].v-a[1].v}).slice(0,10);
+      rising.forEach(function(e){
+        if(newWL.indexOf(e[0])===-1){newWL.push(e[0]);console.log('[TOP100] 🔥 Rising added: '+e[0]+' +'+e[1].c.toFixed(1)+'% Vol:'+fmt(e[1].v))}
+      });
+    }
+    /* Part 3: Coins with whale activity */
+    Object.keys(whaleWaves).forEach(function(s){
+      if(STABLES.includes(s)||newWL.indexOf(s)!==-1)return;
+      var ww=whaleWaves[s];
+      if(ww&&ww.totalBuy>=100000&&newWL.indexOf(s)===-1){
+        newWL.push(s);
+        console.log('[TOP100] 🐋 Whale added: '+s+' $'+fmt(ww.totalBuy));
+      }
+    });
+    if(newWL.length>=50){
+      WL=newWL;
+      TIER1=new Set(WL);
+      console.log('[TOP100] Updated: '+WL.length+' coins (100 mcap + '+Math.max(0,WL.length-100)+' rising/whale)');
+    }
+  }catch(e){console.log('[TOP100] Failed — using cached list')}
+}
 /* ═══ 🏆 3-TIER SYSTEM — Smart Coin Focus ═══ */
-var TIER1=new Set(WL); /* Top 25 — Full Power */
+var TIER1=new Set(WL); /* Top 100 — Auto-updates hourly */
 var tier2Coins=[],tier3Coins=[];var tierLastRefresh=0;
 function getCoinTier(s){if(TIER1.has(s))return 1;if(tier2Coins.includes(s))return 2;if(tier3Coins.includes(s))return 3;return 0}
 function getTierBadge(s){var t=getCoinTier(s);return t===1?'🏆':t===2?'🥈':t===3?'🔍':''}
@@ -14,7 +57,7 @@ async function refreshTiers(){if(Date.now()-tierLastRefresh<4*3600000&&tier2Coin
   console.log('[Tiers] T1:'+TIER1.size+' T2:'+tier2Coins.length+' T3:'+tier3Coins.length)}
 /* Volume Spike: T3 → T2 auto-promote */
 var volBaselines={};
-function checkVolSpikes(){tier3Coins.forEach(function(s){var d=T[s];if(!d)return;if(!volBaselines[s]){volBaselines[s]=d.v;return}var spike=d.v/Math.max(volBaselines[s],1);if(spike>=5){tier2Coins.push(s);tier3Coins=tier3Coins.filter(function(x){return x!==s});notify(s,'gem',0);setTimeout(function(){if(!TIER1.has(s)){tier2Coins=tier2Coins.filter(function(x){return x!==s});tier3Coins.push(s)}},7200000)}volBaselines[s]=volBaselines[s]*0.95+d.v*0.05})}
+function checkVolSpikes(){/* Disabled — TOP 100 focus only */}
 /* VPIN Calculator — simple version using REST trades */
 var vpinBuckets={};
 function updateVPIN(sym,price,qty,isBuyerMaker){
@@ -934,21 +977,16 @@ async function loadTk(){
 async function loadFutures(){/* FR/OI/LS now loaded via PROXY in loadTk() */await loadTk()}
 /* ═══ EARLY DETECTION SCANNER — catches coins BEFORE they pump ═══ */
 function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD'];var cands=[];Object.entries(T).forEach(function(e){var s=e[0],d=e[1];if(STABLES.includes(s))return;
+  /* TOP 100 ONLY — skip unknown coins */
+  if(!TIER1.has(s))return;
   var tier=getCoinTier(s);
-  /* Smart volume filter: tier-aware */
-  var minVol=200000;
-  if(tier===1)minVol=100000; /* T1: lower bar — always worth checking */
-  else if(tier===2)minVol=500000; /* T2: higher bar — need real volume */
-  else if(tier===3||tier===0){minVol=1000000; /* T3/unknown: much higher bar */
-    if(d.p<0.01)minVol=2000000} /* Micro caps need massive volume to be real */
-  if(d.p<0.1&&d.c>=3)minVol=Math.min(minVol,50000);
-  else if(d.p<1&&d.c>=2)minVol=Math.min(minVol,100000);
+  /* Smart volume filter: strict for quality */
+  var minVol=2000000;
+  /* TOP 100 — minimum $2M volume */
   if(d.v<minVol)return;
   var sc=0,tags=[];
-  /* TIER BONUS: Top coins get priority — small coins penalized */
-  if(tier===1){sc+=8;tags.push('🏆T1')}
-  else if(tier===2){sc+=3;tags.push('🥈T2')}
-  else if(tier===0&&d.v<5e6){sc-=5} /* Unknown tiny coin = penalty */
+  /* TOP 100 coin — quality signal */
+  sc+=8;tags.push('🏆TOP100');
   /* EARLY DETECTION: low change + high volume = accumulation before pump */
   if(d.c>=0.5&&d.c<3&&d.v>5e7){sc+=25;tags.push('🔍EARLY')}
   if(d.c>=0.5&&d.c<5&&d.v>1e8){sc+=20;tags.push('🔍STEALTH')}
@@ -3221,6 +3259,8 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
       if(!Object.keys(FR).length||!Object.keys(OI).length||!Object.keys(takerData).length){console.log('Retry loadTk from proxy...');await loadTk()}
     }catch(e){}
   },15000);
+  /* ═══ TOP 100 AUTO-UPDATE: CoinGecko every hour ═══ */
+  setTimeout(updateTop100,5000);setInterval(updateTop100,3600000);
   /* ═══ MAIN POLLING: fetch /api/all every 5 seconds ═══ */
   setInterval(async function(){try{await loadTk();checkWatchlistAlerts();updateConnStatus()}catch(e){connMetrics.apiFail++;updateConnStatus()}},5000);
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))try{await loadDash()}catch(e){}},120000);

@@ -1,3 +1,4717 @@
+/* ═══════════════════════════════════════════════════════════════════════
+ *  NEXUS PRO V10 — UNIFIED BUILD
+ *  All modules merged into single file
+ *  ═══════════════════════════════════════════════════════════════════════
+ *  Modules included:
+ *   1. NexusSecurity — تشفير + حماية XSS + CSP
+ *   2. NexusMonitor — تتبع الأخطاء + Web Vitals + FPS
+ *   3. NexusWS — WebSocket المتقدم + Fallback Chain
+ *   4. SignalEngineV2 — Bayesian + MTF + Market Regime + Position Sizing
+ *   5. Backtester — Backtesting + A/B Testing + Walk-Forward
+ *   6. NexusAI — ML + Anomaly Detection + Ensemble + K-Means
+ *   7. Core App — الكود الأصلي مع التكامل
+ *  ═══════════════════════════════════════════════════════════════════════ */
+
+
+/* ╔══════════════════════════════════════════════════════════════╗ */
+/* ║  MODULE 1: SECURITY — وحدة الأمان                          ║ */
+/* ╚══════════════════════════════════════════════════════════════╝ */
+/**
+ * ═══════════════════════════════════════════════════════════════════
+ *  NEXUS PRO V10 — وحدة الأمان (Client-Side)
+ *  Security Module: Encryption + XSS Protection + Sanitization
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ *  ✅ تشفير localStorage بـ Web Crypto API (AES-GCM)
+ *  ✅ حماية XSS لـ innerHTML
+ *  ✅ تنقية المدخلات (Sanitize)
+ *  ✅ CSP injection
+ *  ✅ Subresource Integrity checker
+ *
+ *  الاستخدام: يُحمّل قبل app.js
+ *  @version 1.0
+ */
+
+var NexusSecurity = (function () {
+
+  /* ═══ تشفير Web Crypto API ═══ */
+
+  /** @type {CryptoKey|null} مفتاح التشفير */
+  var _key = null;
+  /** المعرّف الفريد للجهاز */
+  var _deviceId = null;
+
+  /**
+   * توليد أو استرجاع مفتاح التشفير
+   * يعتمد على بصمة الجهاز كـ seed
+   * @returns {Promise<CryptoKey>}
+   */
+  async function _getKey() {
+    if (_key) return _key;
+
+    /* بصمة الجهاز — ثابتة لكل جهاز */
+    _deviceId = _deviceId || _generateDeviceId();
+
+    var enc = new TextEncoder();
+    var keyMaterial = await crypto.subtle.importKey(
+      'raw', enc.encode(_deviceId),
+      { name: 'PBKDF2' }, false, ['deriveBits', 'deriveKey']
+    );
+
+    _key = await crypto.subtle.deriveKey(
+      { name: 'PBKDF2', salt: enc.encode('NexusPro_V10_Salt'), iterations: 100000, hash: 'SHA-256' },
+      keyMaterial,
+      { name: 'AES-GCM', length: 256 },
+      false,
+      ['encrypt', 'decrypt']
+    );
+
+    return _key;
+  }
+
+  /**
+   * توليد بصمة جهاز فريدة
+   * @returns {string}
+   */
+  function _generateDeviceId() {
+    var parts = [
+      navigator.userAgent,
+      navigator.language,
+      screen.width + 'x' + screen.height,
+      new Date().getTimezoneOffset()
+    ];
+    /* Hash بسيط */
+    var hash = 0;
+    var str = parts.join('|');
+    for (var i = 0; i < str.length; i++) {
+      hash = ((hash << 5) - hash) + str.charCodeAt(i);
+      hash |= 0;
+    }
+    return 'NX_' + Math.abs(hash).toString(36);
+  }
+
+  /**
+   * تشفير نص
+   * @param {string} plaintext
+   * @returns {Promise<string>} base64 encrypted
+   */
+  async function _encrypt(plaintext) {
+    try {
+      var key = await _getKey();
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      var enc = new TextEncoder();
+      var encrypted = await crypto.subtle.encrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        enc.encode(plaintext)
+      );
+      /* iv + encrypted → base64 */
+      var combined = new Uint8Array(iv.length + encrypted.byteLength);
+      combined.set(iv, 0);
+      combined.set(new Uint8Array(encrypted), iv.length);
+      return btoa(String.fromCharCode.apply(null, combined));
+    } catch (e) {
+      console.error('[Security] تشفير فشل:', e);
+      return plaintext; /* fallback */
+    }
+  }
+
+  /**
+   * فك تشفير
+   * @param {string} ciphertext — base64
+   * @returns {Promise<string>}
+   */
+  async function _decrypt(ciphertext) {
+    try {
+      var key = await _getKey();
+      var raw = Uint8Array.from(atob(ciphertext), function (c) { return c.charCodeAt(0); });
+      var iv = raw.slice(0, 12);
+      var data = raw.slice(12);
+      var decrypted = await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: iv },
+        key,
+        data
+      );
+      return new TextDecoder().decode(decrypted);
+    } catch (e) {
+      /* ربما بيانات غير مشفرة (من قبل) — أعدها كما هي */
+      return ciphertext;
+    }
+  }
+
+
+  /* ═══ SECURE STORAGE — localStorage مشفّر ═══ */
+
+  var SecureStorage = {
+    /**
+     * تخزين مشفّر
+     * @param {string} key
+     * @param {*} value
+     */
+    set: async function (key, value) {
+      try {
+        var json = JSON.stringify(value);
+        var encrypted = await _encrypt(json);
+        localStorage.setItem('nx_sec_' + key, encrypted);
+      } catch (e) {
+        /* fallback: تخزين عادي */
+        try { localStorage.setItem(key, JSON.stringify(value)); } catch (e2) {}
+      }
+    },
+
+    /**
+     * استرجاع مشفّر
+     * @param {string} key
+     * @param {*} defaultVal
+     * @returns {Promise<*>}
+     */
+    get: async function (key, defaultVal) {
+      try {
+        var raw = localStorage.getItem('nx_sec_' + key);
+        if (!raw) {
+          /* تحقق من المفتاح القديم (غير مشفّر) وهاجره */
+          var oldRaw = localStorage.getItem(key);
+          if (oldRaw) {
+            var val = JSON.parse(oldRaw);
+            await SecureStorage.set(key, val); /* هجرة: شفّر وخزّن */
+            localStorage.removeItem(key); /* احذف القديم */
+            return val;
+          }
+          return defaultVal !== undefined ? defaultVal : null;
+        }
+        var decrypted = await _decrypt(raw);
+        return JSON.parse(decrypted);
+      } catch (e) {
+        return defaultVal !== undefined ? defaultVal : null;
+      }
+    },
+
+    /**
+     * حذف
+     * @param {string} key
+     */
+    remove: function (key) {
+      localStorage.removeItem('nx_sec_' + key);
+      localStorage.removeItem(key); /* أيضاً القديم */
+    }
+  };
+
+
+  /* ═══ XSS PROTECTION ═══ */
+
+  /**
+   * تنقية HTML — يزيل السكربتات والأحداث الخطرة
+   * @param {string} html
+   * @returns {string} HTML آمن
+   */
+  function sanitizeHTML(html) {
+    if (!html || typeof html !== 'string') return '';
+
+    return html
+      /* إزالة script tags */
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      /* إزالة on* events */
+      .replace(/\s+on\w+\s*=\s*["'][^"']*["']/gi, '')
+      .replace(/\s+on\w+\s*=\s*\S+/gi, '')
+      /* إزالة javascript: URLs */
+      .replace(/javascript\s*:/gi, '')
+      /* إزالة data: URLs خطرة */
+      .replace(/data\s*:\s*text\/html/gi, '')
+      /* إزالة iframe */
+      .replace(/<iframe[\s\S]*?<\/iframe>/gi, '')
+      .replace(/<iframe[\s\S]*?\/?>/gi, '')
+      /* إزالة object/embed */
+      .replace(/<object[\s\S]*?<\/object>/gi, '')
+      .replace(/<embed[\s\S]*?\/?>/gi, '');
+  }
+
+  /**
+   * ترميز HTML entities
+   * @param {string} str
+   * @returns {string}
+   */
+  function escapeHTML(str) {
+    if (!str || typeof str !== 'string') return '';
+    var div = document.createElement('div');
+    div.appendChild(document.createTextNode(str));
+    return div.innerHTML;
+  }
+
+  /**
+   * تنقية مدخل المستخدم
+   * @param {string} input
+   * @returns {string}
+   */
+  function sanitizeInput(input) {
+    if (!input || typeof input !== 'string') return '';
+    return input.replace(/[<>&"'`]/g, function (c) {
+      return { '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;', '`': '&#96;' }[c] || c;
+    });
+  }
+
+  /**
+   * تنقية عنوان محفظة
+   * @param {string} addr
+   * @returns {string|null}
+   */
+  function sanitizeAddress(addr) {
+    if (!addr || typeof addr !== 'string') return null;
+    /* Ethereum: 0x + 40 hex chars */
+    if (/^0x[a-fA-F0-9]{40}$/.test(addr)) return addr;
+    /* Bitcoin: base58 or bech32 */
+    if (/^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$/.test(addr)) return addr;
+    if (/^bc1[a-zA-HJ-NP-Z0-9]{39,59}$/.test(addr)) return addr;
+    return null;
+  }
+
+
+  /* ═══ SAFE innerHTML ═══ */
+
+  /**
+   * تعيين innerHTML بأمان — ينقّي المحتوى قبل الإدراج
+   * استبدل innerHTML المباشر بهذه الدالة
+   * @param {HTMLElement} el
+   * @param {string} html
+   */
+  function safeSetHTML(el, html) {
+    if (!el) return;
+    el.innerHTML = sanitizeHTML(html);
+  }
+
+
+  /* ═══ CSP META TAG ═══ */
+
+  /**
+   * إضافة Content Security Policy عبر meta tag
+   * (للبيئات التي لا تدعم CSP headers)
+   */
+  function injectCSP() {
+    var existing = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+    if (existing) return;
+
+    var meta = document.createElement('meta');
+    meta.httpEquiv = 'Content-Security-Policy';
+    meta.content = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' https://telegram.org",
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+      "font-src https://fonts.gstatic.com",
+      "connect-src 'self' https://api.binance.com https://fapi.binance.com wss://stream.binance.com wss://fstream.binance.com https://api.bybit.com wss://stream.bybit.com https://api.coingecko.com https://api.alternative.me https://api.coinbase.com https://api.etherscan.io https://mempool.space https://api.llama.fi",
+      "img-src 'self' data: https:",
+      "worker-src 'self' blob:",
+      "frame-ancestors 'none'"
+    ].join('; ');
+    document.head.appendChild(meta);
+  }
+
+
+  /* ═══ API ═══ */
+
+  return {
+    /** التخزين المشفّر */
+    Storage: SecureStorage,
+
+    /** تنقية HTML */
+    sanitizeHTML: sanitizeHTML,
+
+    /** ترميز HTML */
+    escapeHTML: escapeHTML,
+
+    /** تنقية مدخل */
+    sanitizeInput: sanitizeInput,
+
+    /** تنقية عنوان محفظة */
+    sanitizeAddress: sanitizeAddress,
+
+    /** تعيين innerHTML بأمان */
+    safeSetHTML: safeSetHTML,
+
+    /** تشفير نص */
+    encrypt: _encrypt,
+
+    /** فك تشفير */
+    decrypt: _decrypt,
+
+    /**
+     * تهيئة كل وسائل الحماية
+     * يُستدعى عند بدء التطبيق
+     */
+    init: function () {
+      /* إضافة CSP */
+      injectCSP();
+
+      /* تهيئة مفتاح التشفير */
+      _getKey().then(function () {
+        console.log('[Security] ✅ مفتاح التشفير جاهز');
+      }).catch(function () {
+        console.log('[Security] ⚠️ Web Crypto غير متاح');
+      });
+
+      console.log('[Security] ✅ وحدة الأمان نشطة');
+    }
+  };
+})();
+
+window.NexusSecurity = NexusSecurity;
+
+/* ╔══════════════════════════════════════════════════════════════╗ */
+/* ║  MODULE 2: MONITORING — المراقبة والتتبع                   ║ */
+/* ╚══════════════════════════════════════════════════════════════╝ */
+/**
+ * ═══════════════════════════════════════════════════════════════════
+ *  NEXUS PRO V10 — وحدة المراقبة والتتبع
+ *  Error Tracking + Performance Monitoring
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ *  ✅ Global Error Handler (window.onerror + unhandledrejection)
+ *  ✅ Error grouping + deduplication
+ *  ✅ Web Vitals (LCP, FID, CLS)
+ *  ✅ API Latency tracking per endpoint
+ *  ✅ Memory usage monitoring
+ *  ✅ FPS counter للـ Canvas chart
+ *  ✅ Connection quality assessment
+ *  ✅ Error spike detection
+ *
+ *  @version 1.0
+ */
+
+var NexusMonitor = (function () {
+
+  /* ═══ ERROR TRACKING ═══ */
+
+  /** @type {Array<Object>} سجل الأخطاء */
+  var _errors = [];
+  /** @type {Object<string, number>} مجموعات الأخطاء (للتكرار) */
+  var _errorGroups = {};
+  /** @type {number} أقصى عدد أخطاء */
+  var MAX_ERRORS = 100;
+  /** @type {string|null} رابط إرسال الأخطاء */
+  var _errorEndpoint = null;
+  /** @type {number} عداد الأخطاء في آخر دقيقة */
+  var _errorsLastMinute = 0;
+  /** @type {number} */
+  var _errResetTime = Date.now();
+
+  /**
+   * تسجيل خطأ
+   * @param {Object} err — {message, source, line, col, stack, type}
+   */
+  function _recordError(err) {
+    /* Deduplication — مفتاح فريد */
+    var key = (err.message || '') + ':' + (err.source || '') + ':' + (err.line || 0);
+    if (_errorGroups[key]) {
+      _errorGroups[key]++;
+      return; /* لا نسجّل المكرر */
+    }
+    _errorGroups[key] = 1;
+
+    var entry = {
+      time: Date.now(),
+      message: (err.message || 'Unknown error').slice(0, 500),
+      source: (err.source || '').slice(0, 200),
+      line: err.line || 0,
+      col: err.col || 0,
+      stack: (err.stack || '').slice(0, 1000),
+      type: err.type || 'error',
+      userAgent: navigator.userAgent.slice(0, 150),
+      url: location.href.slice(0, 200),
+      network: navigator.onLine ? 'online' : 'offline',
+      coins: typeof T !== 'undefined' ? Object.keys(T).length : 0,
+      wsLevel: typeof NexusWS !== 'undefined' ? NexusWS.Fallback.getLevel() : 'unknown'
+    };
+
+    _errors.push(entry);
+    if (_errors.length > MAX_ERRORS) _errors = _errors.slice(-MAX_ERRORS);
+
+    /* Spike detection — أكثر من 10 أخطاء في دقيقة */
+    _errorsLastMinute++;
+    if (Date.now() - _errResetTime > 60000) {
+      _errorsLastMinute = 1;
+      _errResetTime = Date.now();
+    }
+    if (_errorsLastMinute > 10) {
+      console.warn('[Monitor] ⚠️ Error spike: ' + _errorsLastMinute + ' أخطاء في دقيقة');
+    }
+
+    /* إرسال للخادم */
+    if (_errorEndpoint) {
+      try {
+        navigator.sendBeacon(_errorEndpoint, JSON.stringify(entry));
+      } catch (e) {
+        try {
+          fetch(_errorEndpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(entry),
+            keepalive: true
+          }).catch(function () {});
+        } catch (e2) {}
+      }
+    }
+  }
+
+
+  /* ═══ PERFORMANCE METRICS ═══ */
+
+  /** @type {Object} مقاييس الأداء */
+  var _perf = {
+    /** Web Vitals */
+    lcp: 0,          /* Largest Contentful Paint */
+    fid: 0,          /* First Input Delay */
+    cls: 0,          /* Cumulative Layout Shift */
+    fcp: 0,          /* First Contentful Paint */
+    ttfb: 0,         /* Time to First Byte */
+
+    /** FPS */
+    fps: 0,
+    fpsHistory: [],
+
+    /** Memory */
+    heapUsed: 0,
+    heapLimit: 0,
+    memPct: 0,
+
+    /** API Latency */
+    apiLatency: {},
+
+    /** Canvas FPS */
+    canvasFps: 0
+  };
+
+
+  /* ═══ WEB VITALS ═══ */
+
+  /**
+   * تتبع Web Vitals
+   */
+  function _trackWebVitals() {
+    /* LCP — Largest Contentful Paint */
+    try {
+      var lcpObserver = new PerformanceObserver(function (list) {
+        var entries = list.getEntries();
+        var last = entries[entries.length - 1];
+        _perf.lcp = Math.round(last.startTime);
+      });
+      lcpObserver.observe({ type: 'largest-contentful-paint', buffered: true });
+    } catch (e) {}
+
+    /* FID — First Input Delay */
+    try {
+      var fidObserver = new PerformanceObserver(function (list) {
+        var entry = list.getEntries()[0];
+        _perf.fid = Math.round(entry.processingStart - entry.startTime);
+      });
+      fidObserver.observe({ type: 'first-input', buffered: true });
+    } catch (e) {}
+
+    /* CLS — Cumulative Layout Shift */
+    try {
+      var clsValue = 0;
+      var clsObserver = new PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (entry) {
+          if (!entry.hadRecentInput) clsValue += entry.value;
+        });
+        _perf.cls = +clsValue.toFixed(4);
+      });
+      clsObserver.observe({ type: 'layout-shift', buffered: true });
+    } catch (e) {}
+
+    /* FCP + TTFB من Navigation Timing */
+    try {
+      var navEntries = performance.getEntriesByType('navigation');
+      if (navEntries.length > 0) {
+        var nav = navEntries[0];
+        _perf.ttfb = Math.round(nav.responseStart - nav.requestStart);
+        _perf.fcp = Math.round(nav.domContentLoadedEventEnd);
+      }
+    } catch (e) {}
+
+    /* Paint timing */
+    try {
+      var paintEntries = performance.getEntriesByType('paint');
+      paintEntries.forEach(function (p) {
+        if (p.name === 'first-contentful-paint') _perf.fcp = Math.round(p.startTime);
+      });
+    } catch (e) {}
+  }
+
+
+  /* ═══ FPS COUNTER ═══ */
+
+  var _fpsFrames = 0;
+  var _fpsLastTime = 0;
+  var _fpsTimer = null;
+
+  /**
+   * بدء عداد FPS
+   */
+  function _startFPSCounter() {
+    _fpsLastTime = performance.now();
+
+    function _frame() {
+      _fpsFrames++;
+      var now = performance.now();
+      if (now - _fpsLastTime >= 1000) {
+        _perf.fps = _fpsFrames;
+        _perf.fpsHistory.push(_fpsFrames);
+        if (_perf.fpsHistory.length > 60) _perf.fpsHistory = _perf.fpsHistory.slice(-60);
+        _fpsFrames = 0;
+        _fpsLastTime = now;
+      }
+      requestAnimationFrame(_frame);
+    }
+
+    requestAnimationFrame(_frame);
+  }
+
+
+  /* ═══ MEMORY MONITORING ═══ */
+
+  /**
+   * قياس استهلاك الذاكرة
+   */
+  function _checkMemory() {
+    if (performance.memory) {
+      _perf.heapUsed = Math.round(performance.memory.usedJSHeapSize / 1048576); /* MB */
+      _perf.heapLimit = Math.round(performance.memory.jsHeapSizeLimit / 1048576);
+      _perf.memPct = _perf.heapLimit > 0 ? Math.round((_perf.heapUsed / _perf.heapLimit) * 100) : 0;
+
+      if (_perf.memPct > 80) {
+        console.warn('[Monitor] ⚠️ ذاكرة عالية: ' + _perf.heapUsed + 'MB / ' + _perf.heapLimit + 'MB (' + _perf.memPct + '%)');
+      }
+    }
+  }
+
+
+  /* ═══ API LATENCY TRACKING ═══ */
+
+  /**
+   * تسجيل latency لطلب API
+   * @param {string} endpoint — مثال: '/api/all', 'binance/klines'
+   * @param {number} ms — الوقت بالمللي ثانية
+   * @param {boolean} [success=true]
+   */
+  function _recordAPILatency(endpoint, ms, success) {
+    if (!_perf.apiLatency[endpoint]) {
+      _perf.apiLatency[endpoint] = { count: 0, totalMs: 0, avgMs: 0, maxMs: 0, errors: 0 };
+    }
+    var entry = _perf.apiLatency[endpoint];
+    entry.count++;
+    entry.totalMs += ms;
+    entry.avgMs = Math.round(entry.totalMs / entry.count);
+    if (ms > entry.maxMs) entry.maxMs = ms;
+    if (success === false) entry.errors++;
+  }
+
+
+  /* ═══ CONNECTION QUALITY ═══ */
+
+  /**
+   * تقييم جودة الاتصال
+   * @returns {Object}
+   */
+  function _assessConnection() {
+    var quality = {
+      score: 100,
+      label: 'Excellent',
+      details: []
+    };
+
+    /* فحص الشبكة */
+    if (!navigator.onLine) {
+      quality.score = 0;
+      quality.label = 'Offline';
+      quality.details.push('لا اتصال بالإنترنت');
+      return quality;
+    }
+
+    /* Network Information API */
+    var conn = navigator.connection || navigator.mozConnection;
+    if (conn) {
+      if (conn.effectiveType === '2g' || conn.effectiveType === 'slow-2g') {
+        quality.score -= 40;
+        quality.details.push('اتصال بطيء: ' + conn.effectiveType);
+      } else if (conn.effectiveType === '3g') {
+        quality.score -= 15;
+        quality.details.push('اتصال 3G');
+      }
+      if (conn.saveData) {
+        quality.details.push('وضع توفير البيانات مفعّل');
+      }
+    }
+
+    /* FPS check */
+    if (_perf.fps > 0 && _perf.fps < 15) {
+      quality.score -= 20;
+      quality.details.push('FPS منخفض: ' + _perf.fps);
+    }
+
+    /* Memory check */
+    if (_perf.memPct > 80) {
+      quality.score -= 15;
+      quality.details.push('ذاكرة عالية: ' + _perf.memPct + '%');
+    }
+
+    quality.score = Math.max(0, quality.score);
+    quality.label = quality.score >= 80 ? 'Excellent' :
+      quality.score >= 50 ? 'Good' :
+        quality.score >= 30 ? 'Fair' : 'Poor';
+
+    return quality;
+  }
+
+
+  /* ═══ PUBLIC API ═══ */
+
+  return {
+    /**
+     * تهيئة نظام المراقبة
+     * @param {Object} [opts]
+     * @param {string} [opts.errorEndpoint] — رابط إرسال الأخطاء
+     */
+    init: function (opts) {
+      opts = opts || {};
+      _errorEndpoint = opts.errorEndpoint || null;
+
+      /* Global Error Handler */
+      window.onerror = function (message, source, line, col, error) {
+        _recordError({
+          message: message,
+          source: source,
+          line: line,
+          col: col,
+          stack: error ? error.stack : '',
+          type: 'error'
+        });
+        return false; /* لا تمنع الـ default */
+      };
+
+      /* Unhandled Promise Rejection */
+      window.addEventListener('unhandledrejection', function (evt) {
+        _recordError({
+          message: evt.reason ? (evt.reason.message || String(evt.reason)) : 'Unhandled rejection',
+          stack: evt.reason ? evt.reason.stack : '',
+          type: 'unhandledrejection'
+        });
+      });
+
+      /* Web Vitals */
+      _trackWebVitals();
+
+      /* FPS Counter */
+      _startFPSCounter();
+
+      /* Memory check كل 30 ثانية */
+      setInterval(_checkMemory, 30000);
+      _checkMemory();
+
+      /* Error groups cleanup كل 5 دقائق */
+      setInterval(function () { _errorGroups = {}; }, 300000);
+
+      console.log('[Monitor] ✅ نظام المراقبة نشط');
+    },
+
+    /**
+     * تسجيل latency لطلب API
+     * @param {string} endpoint
+     * @param {number} ms
+     * @param {boolean} [success]
+     */
+    trackAPI: _recordAPILatency,
+
+    /**
+     * تسجيل خطأ يدوياً
+     * @param {string} message
+     * @param {Object} [extra]
+     */
+    reportError: function (message, extra) {
+      _recordError(Object.assign({ message: message, type: 'manual' }, extra || {}));
+    },
+
+    /** الحصول على مقاييس الأداء */
+    getPerf: function () { return JSON.parse(JSON.stringify(_perf)); },
+
+    /** الحصول على سجل الأخطاء */
+    getErrors: function () { return _errors.slice(); },
+
+    /** تقييم جودة الاتصال */
+    getConnectionQuality: _assessConnection,
+
+    /** عدد الأخطاء في آخر دقيقة */
+    getErrorRate: function () { return _errorsLastMinute; },
+
+    /**
+     * عرض ملخص الأداء في Console
+     */
+    report: function () {
+      var p = _perf;
+      var conn = _assessConnection();
+      console.log('\n╔═══ NEXUS Monitor Report ═══╗');
+      console.log('║ Web Vitals:');
+      console.log('║   LCP: ' + p.lcp + 'ms | FID: ' + p.fid + 'ms | CLS: ' + p.cls);
+      console.log('║   FCP: ' + p.fcp + 'ms | TTFB: ' + p.ttfb + 'ms');
+      console.log('║ Performance:');
+      console.log('║   FPS: ' + p.fps + ' | Memory: ' + p.heapUsed + 'MB (' + p.memPct + '%)');
+      console.log('║ Connection: ' + conn.label + ' (' + conn.score + '/100)');
+      console.log('║ Errors: ' + _errors.length + ' total | ' + _errorsLastMinute + '/min');
+      var apiKeys = Object.keys(p.apiLatency);
+      if (apiKeys.length) {
+        console.log('║ API Latency:');
+        apiKeys.forEach(function (k) {
+          var a = p.apiLatency[k];
+          console.log('║   ' + k + ': avg ' + a.avgMs + 'ms | max ' + a.maxMs + 'ms | ' + a.count + ' calls');
+        });
+      }
+      console.log('╚════════════════════════════╝\n');
+    }
+  };
+})();
+
+window.NexusMonitor = NexusMonitor;
+
+/* ╔══════════════════════════════════════════════════════════════╗ */
+/* ║  MODULE 3: WEBSOCKET — نظام الاتصال المتقدم               ║ */
+/* ╚══════════════════════════════════════════════════════════════╝ */
+/**
+ * ═══════════════════════════════════════════════════════════════════
+ *  NEXUS PRO V10 — نظام WebSocket المتقدم
+ *  Advanced Hybrid WebSocket System
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ *  ✅ Binance Multi-Stream WebSocket
+ *  ✅ Bybit V5 WebSocket Integration
+ *  ✅ Smart Subscription Manager (صفحة-واعي)
+ *  ✅ Auto-reconnect مع Exponential Backoff
+ *  ✅ Message Buffering + UI Throttle (4 FPS)
+ *  ✅ Fallback Chain: WebSocket → SSE → Polling → Cache
+ *  ✅ Data Pipeline مع Web Worker
+ *  ✅ Offline Strategy مع IndexedDB
+ *  ✅ Bandwidth Optimization
+ *  ✅ Logging + Latency Tracking
+ *
+ *  @author NEXUS PRO
+ *  @version 2.0
+ */
+
+/* ═══════════════════════════════════════
+   📊 CONFIGURATION — إعدادات النظام
+   ═══════════════════════════════════════ */
+
+/** @type {Object} إعدادات WebSocket */
+var WS_CONFIG = {
+  /** رابط Binance WebSocket */
+  BINANCE_WS: 'wss://stream.binance.com:9443/stream',
+  /** رابط Binance Futures WebSocket */
+  BINANCE_FUTS_WS: 'wss://fstream.binance.com/stream',
+  /** رابط Bybit V5 WebSocket — Spot */
+  BYBIT_WS: 'wss://stream.bybit.com/v5/public/spot',
+  /** رابط Bybit V5 WebSocket — Linear (Futures) */
+  BYBIT_FUTS_WS: 'wss://stream.bybit.com/v5/public/linear',
+
+  /** أقصى محاولات إعادة الاتصال */
+  MAX_RECONNECT: 15,
+  /** التأخير الأولي لإعادة الاتصال (مللي ثانية) */
+  BASE_RECONNECT_DELAY: 1000,
+  /** أقصى تأخير لإعادة الاتصال (مللي ثانية) */
+  MAX_RECONNECT_DELAY: 60000,
+  /** فاصل فحص صحة الاتصال (مللي ثانية) */
+  HEALTH_CHECK_INTERVAL: 30000,
+  /** مهلة ping-pong (مللي ثانية) */
+  PONG_TIMEOUT: 10000,
+
+  /** فاصل تحديث الواجهة بالمللي ثانية (4 FPS) */
+  UI_THROTTLE_MS: 250,
+  /** فاصل تجميع الرسائل بالمللي ثانية */
+  BUFFER_FLUSH_MS: 100,
+  /** أقصى رسائل في المخزن المؤقت */
+  MAX_BUFFER_SIZE: 500,
+
+  /** فاصل Polling الاحتياطي (مللي ثانية) */
+  POLL_INTERVAL: 5000,
+  /** فاصل Polling البطيء — بيانات مثل FR/OI (مللي ثانية) */
+  SLOW_POLL_INTERVAL: 30000,
+
+  /** فاصل IndexedDB للبيانات التاريخية (مللي ثانية) */
+  IDB_SAVE_INTERVAL: 60000
+};
+
+/* ═══════════════════════════════════════
+   📡 EVENT BUS — ناقل الأحداث المركزي
+   ═══════════════════════════════════════ */
+
+/**
+ * ناقل أحداث مركزي مع أولويات وتحكم بمعدل الإرسال
+ * @namespace
+ */
+var NexusEvents = (function () {
+  /** @type {Object<string, Array<{fn: Function, priority: number}>>} */
+  var _listeners = {};
+  /** @type {Object<string, number>} آخر وقت إطلاق لكل حدث */
+  var _lastFire = {};
+  /** @type {Object<string, number>} فترة throttle لكل حدث */
+  var _throttleMs = {};
+  /** @type {Object<string, *>} مؤقتات debounce */
+  var _debounceTimers = {};
+
+  /** أنواع الأحداث المعرّفة */
+  var TYPES = {
+    /* --- أحداث الأسعار --- */
+    PRICE_UPDATE: 'price_update',           // تحديث سعر عملة
+    PRICES_BATCH: 'prices_batch',           // تحديث دفعة أسعار
+    TICKER_UPDATE: 'ticker_update',         // تحديث miniTicker
+    /* --- أحداث دفتر الأوامر --- */
+    DEPTH_UPDATE: 'depth_update',           // تحديث عمق السوق
+    /* --- أحداث التداول --- */
+    AGG_TRADE: 'agg_trade',                 // صفقة مجمّعة
+    WHALE_TRADE: 'whale_trade',             // صفقة حوت (> $100K)
+    /* --- أحداث التصفية --- */
+    LIQUIDATION: 'liquidation',             // تصفية مباشرة
+    /* --- أحداث الشموع --- */
+    KLINE_UPDATE: 'kline_update',           // تحديث شمعة
+    KLINE_CLOSE: 'kline_close',             // إغلاق شمعة
+    /* --- أحداث الإشارات --- */
+    SIGNAL_DETECTED: 'signal_detected',     // إشارة جديدة
+    WHALE_ALERT: 'whale_alert',             // تنبيه حوت
+    /* --- أحداث النظام --- */
+    WS_CONNECTED: 'ws_connected',           // WebSocket متصل
+    WS_DISCONNECTED: 'ws_disconnected',     // WebSocket مقطوع
+    WS_ERROR: 'ws_error',                   // خطأ WebSocket
+    FALLBACK_ACTIVE: 'fallback_active',     // تفعيل النظام البديل
+    DATA_STALE: 'data_stale',               // بيانات قديمة
+    CONNECTION_QUALITY: 'conn_quality',     // تغيّر جودة الاتصال
+    /* --- أحداث الصفحة --- */
+    PAGE_CHANGE: 'page_change',             // تغيير الصفحة
+    VISIBILITY_CHANGE: 'visibility_change'  // تغيير رؤية التطبيق
+  };
+
+  return {
+    TYPES: TYPES,
+
+    /**
+     * الاشتراك في حدث
+     * @param {string} event — اسم الحدث
+     * @param {Function} fn — دالة المعالجة
+     * @param {number} [priority=5] — الأولوية (1=أعلى، 10=أدنى)
+     * @returns {Function} دالة إلغاء الاشتراك
+     */
+    on: function (event, fn, priority) {
+      if (!_listeners[event]) _listeners[event] = [];
+      var entry = { fn: fn, priority: priority || 5 };
+      _listeners[event].push(entry);
+      _listeners[event].sort(function (a, b) { return a.priority - b.priority; });
+      return function () {
+        var arr = _listeners[event];
+        if (!arr) return;
+        var idx = arr.indexOf(entry);
+        if (idx !== -1) arr.splice(idx, 1);
+      };
+    },
+
+    /**
+     * إطلاق حدث
+     * @param {string} event — اسم الحدث
+     * @param {*} data — البيانات المرفقة
+     */
+    emit: function (event, data) {
+      /* --- Throttle Check --- */
+      if (_throttleMs[event]) {
+        var now = Date.now();
+        if (_lastFire[event] && now - _lastFire[event] < _throttleMs[event]) return;
+        _lastFire[event] = now;
+      }
+      var arr = _listeners[event];
+      if (!arr || !arr.length) return;
+      for (var i = 0; i < arr.length; i++) {
+        try { arr[i].fn(data); } catch (e) { console.error('[EventBus] Error in ' + event + ':', e); }
+      }
+    },
+
+    /**
+     * إطلاق حدث مع debounce
+     * @param {string} event — اسم الحدث
+     * @param {*} data — البيانات
+     * @param {number} ms — فترة الانتظار
+     */
+    emitDebounced: function (event, data, ms) {
+      if (_debounceTimers[event]) clearTimeout(_debounceTimers[event]);
+      _debounceTimers[event] = setTimeout(function () {
+        NexusEvents.emit(event, data);
+        delete _debounceTimers[event];
+      }, ms);
+    },
+
+    /**
+     * ضبط throttle لحدث معين
+     * @param {string} event — اسم الحدث
+     * @param {number} ms — الحد الأدنى بين الإطلاقات
+     */
+    setThrottle: function (event, ms) {
+      _throttleMs[event] = ms;
+    },
+
+    /**
+     * إزالة كل المستمعين لحدث
+     * @param {string} event
+     */
+    off: function (event) {
+      delete _listeners[event];
+    }
+  };
+})();
+
+/* ضبط Throttle للأحداث المتكررة */
+NexusEvents.setThrottle(NexusEvents.TYPES.PRICES_BATCH, WS_CONFIG.UI_THROTTLE_MS);
+NexusEvents.setThrottle(NexusEvents.TYPES.DEPTH_UPDATE, 500);
+NexusEvents.setThrottle(NexusEvents.TYPES.CONNECTION_QUALITY, 5000);
+
+
+/* ═══════════════════════════════════════
+   📊 CONNECTION LOGGER — سجل الاتصال
+   ═══════════════════════════════════════ */
+
+/**
+ * نظام تسجيل أداء الاتصال
+ * @namespace
+ */
+var WSLogger = (function () {
+  /** @type {Array<{time: number, type: string, msg: string, latency?: number}>} */
+  var _logs = [];
+  var MAX_LOGS = 200;
+
+  /** @type {{wsConnects: number, wsDisconnects: number, wsMsgs: number, avgLatency: number, latencies: number[], reconnects: number, lastMsg: number, bytesSaved: number}} */
+  var _stats = {
+    wsConnects: 0,
+    wsDisconnects: 0,
+    wsMsgs: 0,
+    avgLatency: 0,
+    latencies: [],
+    reconnects: 0,
+    lastMsg: 0,
+    bytesSaved: 0,
+    pollRequests: 0
+  };
+
+  return {
+    /**
+     * تسجيل رسالة
+     * @param {'info'|'warn'|'error'|'perf'} type
+     * @param {string} msg
+     * @param {number} [latency]
+     */
+    log: function (type, msg, latency) {
+      _logs.push({ time: Date.now(), type: type, msg: msg, latency: latency });
+      if (_logs.length > MAX_LOGS) _logs = _logs.slice(-MAX_LOGS);
+      if (type !== 'perf') console.log('[WS:' + type + '] ' + msg + (latency ? ' (' + latency + 'ms)' : ''));
+    },
+
+    /** تسجيل latency */
+    recordLatency: function (ms) {
+      _stats.latencies.push(ms);
+      if (_stats.latencies.length > 100) _stats.latencies = _stats.latencies.slice(-100);
+      _stats.avgLatency = Math.round(_stats.latencies.reduce(function (a, b) { return a + b; }, 0) / _stats.latencies.length);
+    },
+
+    /** زيادة عداد رسائل WS */
+    incMessages: function () { _stats.wsMsgs++; _stats.lastMsg = Date.now(); },
+
+    /** زيادة عداد الاتصالات */
+    incConnects: function () { _stats.wsConnects++; },
+
+    /** زيادة عداد إعادة الاتصال */
+    incReconnects: function () { _stats.reconnects++; },
+
+    /** زيادة عداد القطع */
+    incDisconnects: function () { _stats.wsDisconnects++; },
+
+    /** زيادة عداد Polling */
+    incPolls: function () { _stats.pollRequests++; },
+
+    /**
+     * حساب البايتات الموفّرة مقارنة بالـ Polling
+     * @param {number} bytes
+     */
+    addBytesSaved: function (bytes) { _stats.bytesSaved += bytes; },
+
+    /** الحصول على الإحصائيات */
+    getStats: function () { return Object.assign({}, _stats); },
+
+    /** الحصول على السجلات */
+    getLogs: function () { return _logs.slice(); }
+  };
+})();
+
+
+/* ═══════════════════════════════════════
+   🔌 BINANCE WEBSOCKET MANAGER
+   ═══════════════════════════════════════ */
+
+/**
+ * مدير اتصالات Binance WebSocket
+ * يدعم Multi-Stream مع إعادة اتصال تلقائية
+ * @namespace
+ */
+var BinanceWS = (function () {
+  /** @type {WebSocket|null} اتصال Spot */
+  var _spotWs = null;
+  /** @type {WebSocket|null} اتصال Futures */
+  var _futsWs = null;
+  /** @type {number} عداد إعادة اتصال Spot */
+  var _spotReconnects = 0;
+  /** @type {number} عداد إعادة اتصال Futures */
+  var _futsReconnects = 0;
+  /** @type {boolean} هل تم إيقاف الاتصال يدوياً */
+  var _stopped = false;
+  /** @type {number} رقم الطلب للاشتراكات */
+  var _reqId = 1;
+  /** @type {Set<string>} الاشتراكات الحالية لـ Spot */
+  var _spotSubs = new Set();
+  /** @type {Set<string>} الاشتراكات الحالية لـ Futures */
+  var _futsSubs = new Set();
+  /** @type {*} مؤقت فحص صحة Spot */
+  var _spotHealthTimer = null;
+  /** @type {*} مؤقت فحص صحة Futures */
+  var _futsHealthTimer = null;
+  /** @type {*} مؤقت pong Spot */
+  var _spotPongTimer = null;
+  /** @type {*} مؤقت pong Futures */
+  var _futsPongTimer = null;
+
+  /**
+   * إنشاء اتصال WebSocket مع معالجة الأحداث
+   * @param {'spot'|'futures'} type — نوع الاتصال
+   */
+  function _connect(type) {
+    if (_stopped) return;
+
+    var url = type === 'spot' ? WS_CONFIG.BINANCE_WS : WS_CONFIG.BINANCE_FUTS_WS;
+    var reconnects = type === 'spot' ? _spotReconnects : _futsReconnects;
+
+    if (reconnects >= WS_CONFIG.MAX_RECONNECT) {
+      WSLogger.log('error', 'Binance ' + type + ': أقصى محاولات إعادة الاتصال — تفعيل Fallback');
+      NexusEvents.emit(NexusEvents.TYPES.FALLBACK_ACTIVE, { source: 'binance_' + type, reason: 'max_reconnects' });
+      return;
+    }
+
+    WSLogger.log('info', 'Binance ' + type + ': جاري الاتصال...');
+
+    try {
+      var ws = new WebSocket(url);
+    } catch (e) {
+      WSLogger.log('error', 'Binance ' + type + ': فشل إنشاء WebSocket — ' + e.message);
+      _scheduleReconnect(type);
+      return;
+    }
+
+    ws.onopen = function () {
+      WSLogger.log('info', 'Binance ' + type + ': ✅ متصل');
+      WSLogger.incConnects();
+
+      if (type === 'spot') { _spotReconnects = 0; _spotWs = ws; }
+      else { _futsReconnects = 0; _futsWs = ws; }
+
+      NexusEvents.emit(NexusEvents.TYPES.WS_CONNECTED, { source: 'binance_' + type });
+
+      /* إعادة الاشتراك في القنوات السابقة */
+      var subs = type === 'spot' ? _spotSubs : _futsSubs;
+      if (subs.size > 0) {
+        var params = Array.from(subs);
+        _sendSub(ws, params, true);
+      }
+
+      /* بدء فحص الصحة */
+      _startHealthCheck(type);
+    };
+
+    ws.onmessage = function (evt) {
+      WSLogger.incMessages();
+      try {
+        var data = JSON.parse(evt.data);
+        /* Binance combined stream format: {stream: "...", data: {...}} */
+        if (data.stream && data.data) {
+          MessageBuffer.push({ source: 'binance', type: type, stream: data.stream, data: data.data, _ts: Date.now() });
+        } else if (data.result !== undefined) {
+          /* subscription confirmation — تجاهل */
+        } else if (data.e) {
+          /* single stream format */
+          MessageBuffer.push({ source: 'binance', type: type, stream: data.e, data: data, _ts: Date.now() });
+        }
+      } catch (e) { /* binary or invalid — تجاهل */ }
+    };
+
+    ws.onerror = function (evt) {
+      WSLogger.log('error', 'Binance ' + type + ': خطأ WebSocket');
+      NexusEvents.emit(NexusEvents.TYPES.WS_ERROR, { source: 'binance_' + type, error: evt });
+    };
+
+    ws.onclose = function (evt) {
+      WSLogger.log('warn', 'Binance ' + type + ': انقطع (code: ' + evt.code + ')');
+      WSLogger.incDisconnects();
+
+      if (type === 'spot') _spotWs = null;
+      else _futsWs = null;
+
+      _stopHealthCheck(type);
+      NexusEvents.emit(NexusEvents.TYPES.WS_DISCONNECTED, { source: 'binance_' + type, code: evt.code });
+
+      if (!_stopped) _scheduleReconnect(type);
+    };
+  }
+
+  /**
+   * جدولة إعادة اتصال مع Exponential Backoff
+   * @param {'spot'|'futures'} type
+   */
+  function _scheduleReconnect(type) {
+    var reconnects = type === 'spot' ? _spotReconnects : _futsReconnects;
+    var delay = Math.min(
+      WS_CONFIG.BASE_RECONNECT_DELAY * Math.pow(2, reconnects),
+      WS_CONFIG.MAX_RECONNECT_DELAY
+    );
+    /* إضافة jitter عشوائي (±25%) */
+    delay = Math.round(delay * (0.75 + Math.random() * 0.5));
+
+    if (type === 'spot') _spotReconnects++;
+    else _futsReconnects++;
+
+    WSLogger.log('info', 'Binance ' + type + ': إعادة اتصال بعد ' + Math.round(delay / 1000) + 's (محاولة ' + (reconnects + 1) + ')');
+    WSLogger.incReconnects();
+
+    setTimeout(function () { _connect(type); }, delay);
+  }
+
+  /**
+   * بدء فحص صحة الاتصال (ping-pong)
+   * @param {'spot'|'futures'} type
+   */
+  function _startHealthCheck(type) {
+    _stopHealthCheck(type);
+    var timer = setInterval(function () {
+      var ws = type === 'spot' ? _spotWs : _futsWs;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+
+      /* Binance: إرسال pong frame — الخادم يرسل ping تلقائياً */
+      /* نتحقق من آخر رسالة مستلمة */
+      var lastMsg = WSLogger.getStats().lastMsg;
+      if (lastMsg && Date.now() - lastMsg > WS_CONFIG.HEALTH_CHECK_INTERVAL * 2) {
+        WSLogger.log('warn', 'Binance ' + type + ': لا رسائل منذ ' + Math.round((Date.now() - lastMsg) / 1000) + 's — يعيد الاتصال');
+        ws.close(4000, 'health_check_timeout');
+      }
+    }, WS_CONFIG.HEALTH_CHECK_INTERVAL);
+
+    if (type === 'spot') _spotHealthTimer = timer;
+    else _futsHealthTimer = timer;
+  }
+
+  /**
+   * إيقاف فحص الصحة
+   * @param {'spot'|'futures'} type
+   */
+  function _stopHealthCheck(type) {
+    if (type === 'spot' && _spotHealthTimer) { clearInterval(_spotHealthTimer); _spotHealthTimer = null; }
+    if (type !== 'spot' && _futsHealthTimer) { clearInterval(_futsHealthTimer); _futsHealthTimer = null; }
+  }
+
+  /**
+   * إرسال أمر اشتراك/إلغاء اشتراك
+   * @param {WebSocket} ws
+   * @param {string[]} params — قائمة القنوات
+   * @param {boolean} subscribe — true=اشتراك، false=إلغاء
+   */
+  function _sendSub(ws, params, subscribe) {
+    if (!ws || ws.readyState !== WebSocket.OPEN || !params.length) return;
+    ws.send(JSON.stringify({
+      method: subscribe ? 'SUBSCRIBE' : 'UNSUBSCRIBE',
+      params: params,
+      id: _reqId++
+    }));
+  }
+
+  return {
+    /**
+     * بدء الاتصال
+     * @param {boolean} [includeFutures=true] — هل نتصل بـ Futures أيضاً
+     */
+    connect: function (includeFutures) {
+      _stopped = false;
+      _connect('spot');
+      if (includeFutures !== false) _connect('futures');
+    },
+
+    /** إيقاف الاتصال */
+    disconnect: function () {
+      _stopped = true;
+      if (_spotWs) { try { _spotWs.close(1000); } catch (e) {} _spotWs = null; }
+      if (_futsWs) { try { _futsWs.close(1000); } catch (e) {} _futsWs = null; }
+      _stopHealthCheck('spot');
+      _stopHealthCheck('futures');
+    },
+
+    /**
+     * الاشتراك في قنوات Spot
+     * @param {string[]} streams — مثال: ['btcusdt@miniTicker', 'ethusdt@kline_1h']
+     */
+    subscribeSPOT: function (streams) {
+      streams.forEach(function (s) { _spotSubs.add(s); });
+      _sendSub(_spotWs, streams, true);
+    },
+
+    /**
+     * إلغاء اشتراك Spot
+     * @param {string[]} streams
+     */
+    unsubscribeSPOT: function (streams) {
+      streams.forEach(function (s) { _spotSubs.delete(s); });
+      _sendSub(_spotWs, streams, false);
+    },
+
+    /**
+     * الاشتراك في قنوات Futures
+     * @param {string[]} streams
+     */
+    subscribeFUTS: function (streams) {
+      streams.forEach(function (s) { _futsSubs.add(s); });
+      _sendSub(_futsWs, streams, true);
+    },
+
+    /**
+     * إلغاء اشتراك Futures
+     * @param {string[]} streams
+     */
+    unsubscribeFUTS: function (streams) {
+      streams.forEach(function (s) { _futsSubs.delete(s); });
+      _sendSub(_futsWs, streams, false);
+    },
+
+    /** هل Spot متصل */
+    isSpotConnected: function () { return _spotWs && _spotWs.readyState === WebSocket.OPEN; },
+
+    /** هل Futures متصل */
+    isFutsConnected: function () { return _futsWs && _futsWs.readyState === WebSocket.OPEN; },
+
+    /** الحصول على عدد الاشتراكات الحالية */
+    getSubCount: function () { return { spot: _spotSubs.size, futures: _futsSubs.size }; },
+
+    /** إعادة ضبط عدادات إعادة الاتصال */
+    resetReconnects: function () { _spotReconnects = 0; _futsReconnects = 0; }
+  };
+})();
+
+
+/* ═══════════════════════════════════════
+   🔌 BYBIT WEBSOCKET MANAGER
+   ═══════════════════════════════════════ */
+
+/**
+ * مدير اتصالات Bybit V5 WebSocket
+ * @namespace
+ */
+var BybitWS = (function () {
+  /** @type {WebSocket|null} */
+  var _ws = null;
+  /** @type {number} */
+  var _reconnects = 0;
+  /** @type {boolean} */
+  var _stopped = false;
+  /** @type {Set<string>} */
+  var _subs = new Set();
+  /** @type {*} */
+  var _pingTimer = null;
+
+  function _connect() {
+    if (_stopped) return;
+    if (_reconnects >= WS_CONFIG.MAX_RECONNECT) {
+      WSLogger.log('error', 'Bybit: أقصى محاولات إعادة الاتصال');
+      NexusEvents.emit(NexusEvents.TYPES.FALLBACK_ACTIVE, { source: 'bybit', reason: 'max_reconnects' });
+      return;
+    }
+
+    WSLogger.log('info', 'Bybit: جاري الاتصال...');
+
+    try { _ws = new WebSocket(WS_CONFIG.BYBIT_WS); } catch (e) {
+      WSLogger.log('error', 'Bybit: فشل — ' + e.message);
+      _scheduleReconnect();
+      return;
+    }
+
+    _ws.onopen = function () {
+      WSLogger.log('info', 'Bybit: ✅ متصل');
+      WSLogger.incConnects();
+      _reconnects = 0;
+      NexusEvents.emit(NexusEvents.TYPES.WS_CONNECTED, { source: 'bybit' });
+
+      /* إعادة الاشتراكات */
+      if (_subs.size > 0) {
+        _ws.send(JSON.stringify({ op: 'subscribe', args: Array.from(_subs) }));
+      }
+
+      /* Bybit ping كل 20 ثانية */
+      _pingTimer = setInterval(function () {
+        if (_ws && _ws.readyState === WebSocket.OPEN) {
+          _ws.send(JSON.stringify({ op: 'ping' }));
+        }
+      }, 20000);
+    };
+
+    _ws.onmessage = function (evt) {
+      WSLogger.incMessages();
+      try {
+        var data = JSON.parse(evt.data);
+        if (data.op === 'pong' || data.ret_msg === 'pong') return;
+        if (data.success !== undefined) return; /* subscription ack */
+        if (data.topic && data.data) {
+          MessageBuffer.push({ source: 'bybit', stream: data.topic, data: data.data, ts: data.ts, _ts: Date.now() });
+        }
+      } catch (e) { /* تجاهل */ }
+    };
+
+    _ws.onerror = function () {
+      WSLogger.log('error', 'Bybit: خطأ WebSocket');
+    };
+
+    _ws.onclose = function (evt) {
+      WSLogger.log('warn', 'Bybit: انقطع (code: ' + evt.code + ')');
+      WSLogger.incDisconnects();
+      _ws = null;
+      if (_pingTimer) { clearInterval(_pingTimer); _pingTimer = null; }
+      NexusEvents.emit(NexusEvents.TYPES.WS_DISCONNECTED, { source: 'bybit' });
+      if (!_stopped) _scheduleReconnect();
+    };
+  }
+
+  function _scheduleReconnect() {
+    var delay = Math.min(WS_CONFIG.BASE_RECONNECT_DELAY * Math.pow(2, _reconnects), WS_CONFIG.MAX_RECONNECT_DELAY);
+    delay = Math.round(delay * (0.75 + Math.random() * 0.5));
+    _reconnects++;
+    WSLogger.log('info', 'Bybit: إعادة اتصال بعد ' + Math.round(delay / 1000) + 's');
+    WSLogger.incReconnects();
+    setTimeout(_connect, delay);
+  }
+
+  return {
+    connect: function () { _stopped = false; _connect(); },
+    disconnect: function () {
+      _stopped = true;
+      if (_ws) { try { _ws.close(1000); } catch (e) {} _ws = null; }
+      if (_pingTimer) { clearInterval(_pingTimer); _pingTimer = null; }
+    },
+
+    /**
+     * الاشتراك في قنوات Bybit
+     * @param {string[]} topics — مثال: ['tickers.BTCUSDT', 'kline.60.BTCUSDT']
+     */
+    subscribe: function (topics) {
+      topics.forEach(function (t) { _subs.add(t); });
+      if (_ws && _ws.readyState === WebSocket.OPEN) {
+        _ws.send(JSON.stringify({ op: 'subscribe', args: topics }));
+      }
+    },
+
+    /**
+     * إلغاء اشتراك
+     * @param {string[]} topics
+     */
+    unsubscribe: function (topics) {
+      topics.forEach(function (t) { _subs.delete(t); });
+      if (_ws && _ws.readyState === WebSocket.OPEN) {
+        _ws.send(JSON.stringify({ op: 'unsubscribe', args: topics }));
+      }
+    },
+
+    isConnected: function () { return _ws && _ws.readyState === WebSocket.OPEN; },
+    getSubCount: function () { return _subs.size; }
+  };
+})();
+
+
+/* ═══════════════════════════════════════
+   📦 MESSAGE BUFFER — مخزن الرسائل
+   ═══════════════════════════════════════ */
+
+/**
+ * مخزن مؤقت للرسائل — يجمّع الرسائل ويعالجها دفعة واحدة
+ * لتقليل الحمل على Main Thread
+ * @namespace
+ */
+var MessageBuffer = (function () {
+  /** @type {Array<Object>} */
+  var _buffer = [];
+  /** @type {*} */
+  var _flushTimer = null;
+  /** @type {boolean} */
+  var _processing = false;
+
+  /**
+   * معالجة دفعة الرسائل
+   * يُنفّذ كل BUFFER_FLUSH_MS
+   */
+  function _flush() {
+    if (_processing || !_buffer.length) return;
+    _processing = true;
+
+    var batch = _buffer.splice(0, WS_CONFIG.MAX_BUFFER_SIZE);
+    var priceUpdates = {};
+    var depthUpdates = {};
+    var tradeAlerts = [];
+    var liqAlerts = [];
+    var klineUpdates = {};
+
+    for (var i = 0; i < batch.length; i++) {
+      var msg = batch[i];
+      try {
+        _routeMessage(msg, priceUpdates, depthUpdates, tradeAlerts, liqAlerts, klineUpdates);
+      } catch (e) {
+        WSLogger.log('error', 'خطأ معالجة رسالة: ' + e.message);
+      }
+    }
+
+    /* --- إطلاق أحداث مجمّعة --- */
+    var priceKeys = Object.keys(priceUpdates);
+    if (priceKeys.length > 0) {
+      NexusEvents.emit(NexusEvents.TYPES.PRICES_BATCH, priceUpdates);
+    }
+
+    var depthKeys = Object.keys(depthUpdates);
+    if (depthKeys.length > 0) {
+      for (var dk = 0; dk < depthKeys.length; dk++) {
+        NexusEvents.emit(NexusEvents.TYPES.DEPTH_UPDATE, { sym: depthKeys[dk], data: depthUpdates[depthKeys[dk]] });
+      }
+    }
+
+    for (var ti = 0; ti < tradeAlerts.length; ti++) {
+      NexusEvents.emit(NexusEvents.TYPES.WHALE_TRADE, tradeAlerts[ti]);
+    }
+
+    for (var li = 0; li < liqAlerts.length; li++) {
+      NexusEvents.emit(NexusEvents.TYPES.LIQUIDATION, liqAlerts[li]);
+    }
+
+    var klineKeys = Object.keys(klineUpdates);
+    if (klineKeys.length > 0) {
+      for (var ki = 0; ki < klineKeys.length; ki++) {
+        NexusEvents.emit(NexusEvents.TYPES.KLINE_UPDATE, klineUpdates[klineKeys[ki]]);
+      }
+    }
+
+    _processing = false;
+  }
+
+  /**
+   * توجيه رسالة واحدة إلى المجموعة المناسبة
+   * @param {Object} msg — الرسالة الخام
+   * @param {Object} prices — مجمّع الأسعار
+   * @param {Object} depths — مجمّع الأعماق
+   * @param {Array} trades — تنبيهات الحيتان
+   * @param {Array} liqs — تنبيهات التصفيات
+   * @param {Object} klines — مجمّع الشموع
+   */
+  function _routeMessage(msg, prices, depths, trades, liqs, klines) {
+    var stream = msg.stream || '';
+    var d = msg.data;
+
+    if (msg.source === 'binance') {
+      _routeBinance(stream, d, msg.type, prices, depths, trades, liqs, klines);
+    } else if (msg.source === 'bybit') {
+      _routeBybit(stream, d, prices, klines);
+    }
+  }
+
+  /**
+   * توجيه رسائل Binance
+   */
+  function _routeBinance(stream, d, type, prices, depths, trades, liqs, klines) {
+    /* --- !miniTicker@arr --- */
+    if (stream === '!miniTicker@arr' || (Array.isArray(d) && d[0] && d[0].e === '24hrMiniTicker')) {
+      var arr = Array.isArray(d) ? d : [d];
+      for (var i = 0; i < arr.length; i++) {
+        var t = arr[i];
+        if (!t.s || !t.s.endsWith('USDT')) continue;
+        var sym = t.s.replace('USDT', '');
+        prices[sym] = {
+          p: +t.c,           /* سعر الإغلاق الحالي */
+          h: +t.h,           /* أعلى 24 ساعة */
+          l: +t.l,           /* أدنى 24 ساعة */
+          v: +t.q,           /* حجم التداول بالـ USDT */
+          c: +t.c > 0 && +t.o > 0 ? ((+t.c - +t.o) / +t.o) * 100 : 0, /* نسبة التغيير */
+          src: 'WS',
+          _ts: Date.now()
+        };
+      }
+      return;
+    }
+
+    /* --- {symbol}@aggTrade --- */
+    if (stream.includes('@aggTrade') || (d && d.e === 'aggTrade')) {
+      var sym = (d.s || '').replace('USDT', '');
+      var value = +d.p * +d.q;
+      /* فقط نبلّغ عن الصفقات الكبيرة (> $100K) */
+      if (value >= 100000) {
+        trades.push({
+          sym: sym,
+          price: +d.p,
+          qty: +d.q,
+          value: value,
+          isBuyerMaker: d.m,
+          time: d.T || Date.now()
+        });
+      }
+      /* تحديث VPIN */
+      if (typeof updateVPIN === 'function') {
+        updateVPIN(sym, +d.p, +d.q, d.m);
+      }
+      return;
+    }
+
+    /* --- {symbol}@depth@100ms --- */
+    if (stream.includes('@depth')) {
+      var sym = stream.split('@')[0].replace('usdt', '').toUpperCase();
+      depths[sym] = {
+        bids: d.b || d.bids || [],
+        asks: d.a || d.asks || [],
+        time: d.E || Date.now()
+      };
+      return;
+    }
+
+    /* --- {symbol}@kline_{interval} --- */
+    if (stream.includes('@kline_') || (d && d.e === 'kline')) {
+      var k = d.k || d;
+      var sym = (k.s || d.s || '').replace('USDT', '');
+      klines[sym] = {
+        sym: sym,
+        interval: k.i,
+        open: +k.o,
+        high: +k.h,
+        low: +k.l,
+        close: +k.c,
+        volume: +k.v,
+        quoteVolume: +k.q,
+        isClosed: k.x,
+        time: k.t
+      };
+      return;
+    }
+
+    /* --- !forceOrder@arr --- */
+    if (stream === '!forceOrder@arr' || stream.includes('forceOrder') || (d && d.e === 'forceOrder')) {
+      var o = d.o || d;
+      var sym = (o.s || '').replace('USDT', '');
+      var liqValue = +o.p * +o.q;
+      if (liqValue >= 10000) {
+        liqs.push({
+          sym: sym,
+          side: o.S,
+          price: +o.p,
+          qty: +o.q,
+          value: liqValue,
+          time: o.T || Date.now()
+        });
+      }
+      return;
+    }
+  }
+
+  /**
+   * توجيه رسائل Bybit
+   */
+  function _routeBybit(topic, d, prices, klines) {
+    /* --- tickers.{SYMBOL} --- */
+    if (topic.startsWith('tickers.')) {
+      var sym = topic.replace('tickers.', '').replace('USDT', '');
+      if (d && d.lastPrice) {
+        /* Bybit: نضيف كسعر ثانوي — Binance له الأولوية */
+        if (!prices[sym]) {
+          prices[sym] = {
+            p: +d.lastPrice,
+            h: +d.highPrice24h || 0,
+            l: +d.lowPrice24h || 0,
+            v: +d.turnover24h || 0,
+            c: +d.price24hPcnt ? +d.price24hPcnt * 100 : 0,
+            src: 'BY_WS',
+            _ts: Date.now()
+          };
+        } else {
+          /* حفظ سعر Bybit كمرجع */
+          prices[sym].by = +d.lastPrice;
+        }
+      }
+      return;
+    }
+
+    /* --- kline.{interval}.{SYMBOL} --- */
+    if (topic.startsWith('kline.')) {
+      var parts = topic.split('.');
+      var interval = parts[1];
+      var sym = (parts[2] || '').replace('USDT', '');
+      var candles = Array.isArray(d) ? d : [d];
+      var latest = candles[candles.length - 1];
+      if (latest) {
+        klines[sym + '_BY'] = {
+          sym: sym,
+          interval: interval,
+          open: +latest.open,
+          high: +latest.high,
+          low: +latest.low,
+          close: +latest.close,
+          volume: +latest.volume,
+          isClosed: latest.confirm,
+          time: +latest.start,
+          src: 'bybit'
+        };
+      }
+      return;
+    }
+  }
+
+  return {
+    /**
+     * إضافة رسالة للمخزن المؤقت
+     * @param {Object} msg
+     */
+    push: function (msg) {
+      _buffer.push(msg);
+      /* حماية من التراكم */
+      if (_buffer.length > WS_CONFIG.MAX_BUFFER_SIZE * 2) {
+        _buffer = _buffer.slice(-WS_CONFIG.MAX_BUFFER_SIZE);
+        WSLogger.log('warn', 'Buffer overflow — حُذفت رسائل قديمة');
+      }
+    },
+
+    /** بدء المعالجة الدورية */
+    start: function () {
+      if (_flushTimer) return;
+      _flushTimer = setInterval(_flush, WS_CONFIG.BUFFER_FLUSH_MS);
+    },
+
+    /** إيقاف المعالجة */
+    stop: function () {
+      if (_flushTimer) { clearInterval(_flushTimer); _flushTimer = null; }
+    },
+
+    /** عدد الرسائل في الانتظار */
+    pending: function () { return _buffer.length; },
+
+    /** تفريغ فوري */
+    flushNow: function () { _flush(); }
+  };
+})();
+
+
+/* ═══════════════════════════════════════
+   🧠 SMART SUBSCRIPTION MANAGER
+   مدير الاشتراكات الذكي — صفحة-واعي
+   ═══════════════════════════════════════ */
+
+/**
+ * يدير الاشتراكات بناءً على الصفحة الحالية والعملات المعروضة
+ * @namespace
+ */
+var SubManager = (function () {
+  /** @type {string} الصفحة الحالية */
+  var _currentPage = 'dash';
+  /** @type {string|null} العملة المفتوحة في التحليل */
+  var _focusCoin = null;
+  /** @type {Set<string>} عملات المراقبة */
+  var _watchlist = new Set();
+  /** @type {string[]} آخر اشتراكات spot نشطة */
+  var _activeSpotSubs = [];
+  /** @type {string[]} آخر اشتراكات futures نشطة */
+  var _activeFutsSubs = [];
+
+  /** العملات الأساسية — دائماً مشترك فيها */
+  var CORE_COINS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP'];
+
+  /**
+   * حساب الاشتراكات المطلوبة بناءً على الصفحة
+   * @returns {{spot: string[], futures: string[]}}
+   */
+  function _calcSubscriptions() {
+    var spotStreams = [];
+    var futsStreams = [];
+
+    /* --- دائماً: miniTicker لكل الأسعار --- */
+    spotStreams.push('!miniTicker@arr');
+
+    /* --- دائماً: تصفيات مباشرة --- */
+    futsStreams.push('!forceOrder@arr');
+
+    /* --- عملات أساسية: klines + aggTrade --- */
+    CORE_COINS.forEach(function (sym) {
+      var s = sym.toLowerCase() + 'usdt';
+      spotStreams.push(s + '@kline_1h');
+      spotStreams.push(s + '@aggTrade');
+    });
+
+    /* --- حسب الصفحة الحالية --- */
+    switch (_currentPage) {
+      case 'dash':
+        /* Dashboard: sparklines لأهم 10 عملات */
+        var top10 = (typeof WL !== 'undefined' ? WL.slice(0, 10) : CORE_COINS);
+        top10.forEach(function (sym) {
+          var s = sym.toLowerCase() + 'usdt';
+          if (spotStreams.indexOf(s + '@kline_1h') === -1) {
+            spotStreams.push(s + '@kline_1h');
+          }
+        });
+        break;
+
+      case 'whale':
+        /* Whales: aggTrade لأهم 20 عملة */
+        var top20 = (typeof WL !== 'undefined' ? WL.slice(0, 20) : CORE_COINS);
+        top20.forEach(function (sym) {
+          var s = sym.toLowerCase() + 'usdt';
+          if (spotStreams.indexOf(s + '@aggTrade') === -1) {
+            spotStreams.push(s + '@aggTrade');
+          }
+        });
+        break;
+
+      case 'scan':
+        /* Scanner: لا حاجة لاشتراكات إضافية — miniTicker كافي */
+        break;
+
+      case 'ind':
+        /* التحليل الفردي: كل شيء للعملة المفتوحة */
+        if (_focusCoin) {
+          var s = _focusCoin.toLowerCase() + 'usdt';
+          spotStreams.push(s + '@kline_1m');
+          spotStreams.push(s + '@kline_5m');
+          spotStreams.push(s + '@kline_15m');
+          spotStreams.push(s + '@kline_1h');
+          spotStreams.push(s + '@kline_4h');
+          spotStreams.push(s + '@depth@100ms');
+          spotStreams.push(s + '@aggTrade');
+        }
+        break;
+    }
+
+    /* --- عملات المراقبة: سعر + حجم --- */
+    _watchlist.forEach(function (sym) {
+      var s = sym.toLowerCase() + 'usdt';
+      if (spotStreams.indexOf(s + '@kline_1h') === -1) {
+        spotStreams.push(s + '@kline_1h');
+      }
+    });
+
+    return { spot: spotStreams, futures: futsStreams };
+  }
+
+  /**
+   * تحديث الاشتراكات — إلغاء القديم واشتراك الجديد
+   */
+  function _updateSubs() {
+    var needed = _calcSubscriptions();
+
+    /* --- Spot: حساب الفرق --- */
+    var newSpot = needed.spot.filter(function (s) { return _activeSpotSubs.indexOf(s) === -1; });
+    var oldSpot = _activeSpotSubs.filter(function (s) { return needed.spot.indexOf(s) === -1; });
+
+    if (oldSpot.length > 0) BinanceWS.unsubscribeSPOT(oldSpot);
+    if (newSpot.length > 0) BinanceWS.subscribeSPOT(newSpot);
+
+    /* --- Futures: حساب الفرق --- */
+    var newFuts = needed.futures.filter(function (s) { return _activeFutsSubs.indexOf(s) === -1; });
+    var oldFuts = _activeFutsSubs.filter(function (s) { return needed.futures.indexOf(s) === -1; });
+
+    if (oldFuts.length > 0) BinanceWS.unsubscribeFUTS(oldFuts);
+    if (newFuts.length > 0) BinanceWS.subscribeFUTS(newFuts);
+
+    _activeSpotSubs = needed.spot.slice();
+    _activeFutsSubs = needed.futures.slice();
+
+    WSLogger.log('info', 'اشتراكات: Spot=' + _activeSpotSubs.length + ' Futs=' + _activeFutsSubs.length);
+  }
+
+  return {
+    /**
+     * تغيير الصفحة الحالية — يحدّث الاشتراكات
+     * @param {string} page — مثال: 'dash', 'scan', 'whale', 'ind', 'me'
+     */
+    setPage: function (page) {
+      if (_currentPage === page) return;
+      _currentPage = page;
+      WSLogger.log('info', 'صفحة: ' + page + ' — يحدّث الاشتراكات');
+      _updateSubs();
+    },
+
+    /**
+     * تعيين عملة التركيز (عند فتح تحليل فردي)
+     * @param {string|null} sym
+     */
+    setFocusCoin: function (sym) {
+      _focusCoin = sym;
+      if (sym) _updateSubs();
+    },
+
+    /**
+     * تحديث قائمة المراقبة
+     * @param {string[]} coins
+     */
+    setWatchlist: function (coins) {
+      _watchlist = new Set(coins);
+      _updateSubs();
+    },
+
+    /** بدء الاشتراكات الأولية */
+    init: function () { _updateSubs(); },
+
+    /** الحصول على الصفحة الحالية */
+    getCurrentPage: function () { return _currentPage; },
+
+    /** عدد الاشتراكات النشطة */
+    getActiveCount: function () {
+      return { spot: _activeSpotSubs.length, futures: _activeFutsSubs.length };
+    }
+  };
+})();
+
+
+/* ═══════════════════════════════════════
+   💾 OFFLINE STRATEGY — IndexedDB
+   ═══════════════════════════════════════ */
+
+/**
+ * إدارة البيانات المحلية عبر IndexedDB
+ * للعمل أثناء انقطاع الاتصال
+ * @namespace
+ */
+var OfflineStore = (function () {
+  var DB_NAME = 'NexusProDB';
+  var DB_VERSION = 1;
+  /** @type {IDBDatabase|null} */
+  var _db = null;
+  /** @type {Array<Object>} طابور التنبيهات المؤجلة */
+  var _alertQueue = [];
+
+  /**
+   * فتح قاعدة البيانات
+   * @returns {Promise<IDBDatabase>}
+   */
+  function _openDB() {
+    return new Promise(function (resolve, reject) {
+      if (_db) { resolve(_db); return; }
+      try {
+        var req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = function (evt) {
+          var db = evt.target.result;
+          /* مخزن بيانات الأسعار */
+          if (!db.objectStoreNames.contains('tickers')) {
+            db.createObjectStore('tickers', { keyPath: 'sym' });
+          }
+          /* مخزن البيانات التاريخية */
+          if (!db.objectStoreNames.contains('klines')) {
+            var klStore = db.createObjectStore('klines', { keyPath: 'id' });
+            klStore.createIndex('sym', 'sym', { unique: false });
+          }
+          /* طابور التنبيهات */
+          if (!db.objectStoreNames.contains('alertQueue')) {
+            db.createObjectStore('alertQueue', { keyPath: 'id', autoIncrement: true });
+          }
+          /* لقطة آخر حالة */
+          if (!db.objectStoreNames.contains('snapshot')) {
+            db.createObjectStore('snapshot', { keyPath: 'key' });
+          }
+        };
+        req.onsuccess = function (evt) { _db = evt.target.result; resolve(_db); };
+        req.onerror = function () { reject(new Error('فشل فتح IndexedDB')); };
+      } catch (e) { reject(e); }
+    });
+  }
+
+  return {
+    /** تهيئة قاعدة البيانات */
+    init: function () { return _openDB(); },
+
+    /**
+     * حفظ لقطة أسعار
+     * @param {Object} tickers — كائن T الحالي
+     */
+    saveTickers: function (tickers) {
+      _openDB().then(function (db) {
+        try {
+          var tx = db.transaction('snapshot', 'readwrite');
+          var store = tx.objectStore('snapshot');
+          store.put({
+            key: 'lastTickers',
+            data: JSON.stringify(tickers),
+            time: Date.now()
+          });
+        } catch (e) { /* تجاهل */ }
+      }).catch(function () {});
+    },
+
+    /**
+     * تحميل آخر لقطة أسعار
+     * @returns {Promise<Object|null>}
+     */
+    loadTickers: function () {
+      return _openDB().then(function (db) {
+        return new Promise(function (resolve) {
+          try {
+            var tx = db.transaction('snapshot', 'readonly');
+            var req = tx.objectStore('snapshot').get('lastTickers');
+            req.onsuccess = function () {
+              if (req.result && req.result.data) {
+                resolve({ data: JSON.parse(req.result.data), time: req.result.time });
+              } else { resolve(null); }
+            };
+            req.onerror = function () { resolve(null); };
+          } catch (e) { resolve(null); }
+        });
+      }).catch(function () { return null; });
+    },
+
+    /**
+     * إضافة تنبيه للطابور (أثناء عدم الاتصال)
+     * @param {Object} alert
+     */
+    queueAlert: function (alert) {
+      _alertQueue.push(alert);
+      _openDB().then(function (db) {
+        try {
+          var tx = db.transaction('alertQueue', 'readwrite');
+          tx.objectStore('alertQueue').add(alert);
+        } catch (e) { /* تجاهل */ }
+      }).catch(function () {});
+    },
+
+    /**
+     * تفريغ طابور التنبيهات
+     * @returns {Promise<Array>}
+     */
+    drainAlerts: function () {
+      var queued = _alertQueue.slice();
+      _alertQueue = [];
+      return _openDB().then(function (db) {
+        return new Promise(function (resolve) {
+          try {
+            var tx = db.transaction('alertQueue', 'readwrite');
+            var store = tx.objectStore('alertQueue');
+            var req = store.getAll();
+            req.onsuccess = function () {
+              var all = req.result || [];
+              store.clear();
+              resolve(all.length > queued.length ? all : queued);
+            };
+            req.onerror = function () { resolve(queued); };
+          } catch (e) { resolve(queued); }
+        });
+      }).catch(function () { return queued; });
+    },
+
+    /**
+     * حفظ حالة كاملة (FR, OI, LS, إلخ)
+     * @param {string} key
+     * @param {*} data
+     */
+    saveState: function (key, data) {
+      _openDB().then(function (db) {
+        try {
+          var tx = db.transaction('snapshot', 'readwrite');
+          tx.objectStore('snapshot').put({ key: key, data: JSON.stringify(data), time: Date.now() });
+        } catch (e) { /* تجاهل */ }
+      }).catch(function () {});
+    },
+
+    /**
+     * تحميل حالة محفوظة
+     * @param {string} key
+     * @returns {Promise<*|null>}
+     */
+    loadState: function (key) {
+      return _openDB().then(function (db) {
+        return new Promise(function (resolve) {
+          try {
+            var tx = db.transaction('snapshot', 'readonly');
+            var req = tx.objectStore('snapshot').get(key);
+            req.onsuccess = function () {
+              if (req.result && req.result.data) resolve(JSON.parse(req.result.data));
+              else resolve(null);
+            };
+            req.onerror = function () { resolve(null); };
+          } catch (e) { resolve(null); }
+        });
+      }).catch(function () { return null; });
+    }
+  };
+})();
+
+
+/* ═══════════════════════════════════════
+   🔄 FALLBACK CHAIN — سلسلة الاحتياط
+   WebSocket → SSE → Polling → Cache
+   ═══════════════════════════════════════ */
+
+/**
+ * سلسلة الاحتياط — تنتقل تلقائياً بين المستويات
+ * @namespace
+ */
+var FallbackChain = (function () {
+  /** @type {'websocket'|'sse'|'polling'|'cache'} المستوى الحالي */
+  var _level = 'websocket';
+  /** @type {*} مؤقت Polling */
+  var _pollTimer = null;
+  /** @type {*} مؤقت Polling البطيء (FR/OI/LS) */
+  var _slowPollTimer = null;
+  /** @type {EventSource|null} SSE */
+  var _sse = null;
+  /** @type {number} عداد أخطاء Polling */
+  var _pollErrors = 0;
+  /** @type {boolean} هل التطبيق مرئي */
+  var _isVisible = true;
+
+  /**
+   * بدء Polling REST — يستبدل setInterval الحالي
+   */
+  function _startPolling() {
+    _stopPolling();
+    WSLogger.log('info', '📡 Polling نشط — كل ' + (WS_CONFIG.POLL_INTERVAL / 1000) + 's');
+
+    _pollTimer = setInterval(function () {
+      if (!_isVisible) return; /* لا نرسل طلبات والتطبيق مخفي */
+      WSLogger.incPolls();
+      _doPoll();
+    }, WS_CONFIG.POLL_INTERVAL);
+
+    /* تنفيذ فوري */
+    _doPoll();
+  }
+
+  /**
+   * تنفيذ طلب Polling واحد
+   */
+  function _doPoll() {
+    if (typeof loadTk !== 'function') return;
+    loadTk().then(function () {
+      _pollErrors = 0;
+      if (typeof checkWatchlistAlerts === 'function') checkWatchlistAlerts();
+      if (typeof updateConnStatus === 'function') updateConnStatus();
+    }).catch(function () {
+      _pollErrors++;
+      if (_pollErrors >= 5) {
+        WSLogger.log('warn', 'Polling: 5 أخطاء متتالية — التحول للكاش');
+        _setLevel('cache');
+      }
+    });
+  }
+
+  /**
+   * بدء Polling البطيء لبيانات FR/OI/LS
+   * (هذه البيانات لا تأتي عبر WebSocket الأساسي)
+   */
+  function _startSlowPoll() {
+    _stopSlowPoll();
+    _slowPollTimer = setInterval(function () {
+      if (!_isVisible) return;
+      if (typeof loadTk === 'function') {
+        loadTk().catch(function () {});
+      }
+    }, WS_CONFIG.SLOW_POLL_INTERVAL);
+  }
+
+  function _stopSlowPoll() {
+    if (_slowPollTimer) { clearInterval(_slowPollTimer); _slowPollTimer = null; }
+  }
+
+  function _stopPolling() {
+    if (_pollTimer) { clearInterval(_pollTimer); _pollTimer = null; }
+  }
+
+  /**
+   * تغيير المستوى
+   * @param {'websocket'|'sse'|'polling'|'cache'} newLevel
+   */
+  function _setLevel(newLevel) {
+    if (_level === newLevel) return;
+    var oldLevel = _level;
+    _level = newLevel;
+
+    WSLogger.log('info', '🔄 Fallback: ' + oldLevel + ' → ' + newLevel);
+    NexusEvents.emit(NexusEvents.TYPES.FALLBACK_ACTIVE, { from: oldLevel, to: newLevel });
+
+    switch (newLevel) {
+      case 'polling':
+        _startPolling();
+        break;
+      case 'cache':
+        _stopPolling();
+        /* تحميل آخر بيانات من IndexedDB */
+        OfflineStore.loadTickers().then(function (cached) {
+          if (cached && cached.data && typeof T !== 'undefined') {
+            var age = Math.round((Date.now() - cached.time) / 60000);
+            WSLogger.log('info', '📦 بيانات مخبّأة (عمرها ' + age + ' دقيقة)');
+            Object.assign(T, cached.data);
+            NexusEvents.emit(NexusEvents.TYPES.DATA_STALE, { age: age });
+          }
+        });
+        break;
+      case 'websocket':
+        _stopPolling();
+        break;
+    }
+  }
+
+  return {
+    /**
+     * بدء سلسلة الاحتياط
+     * @param {boolean} wsAvailable — هل WebSocket متاح
+     */
+    start: function (wsAvailable) {
+      if (wsAvailable) {
+        _setLevel('websocket');
+        /* حتى مع WebSocket، نحتاج polling بطيء لـ FR/OI/LS */
+        _startSlowPoll();
+      } else {
+        _setLevel('polling');
+      }
+
+      /* مراقبة رؤية التطبيق */
+      document.addEventListener('visibilitychange', function () {
+        _isVisible = !document.hidden;
+        NexusEvents.emit(NexusEvents.TYPES.VISIBILITY_CHANGE, { visible: _isVisible });
+
+        if (_isVisible) {
+          /* عاد مرئياً — تحقق من صحة البيانات */
+          var stats = WSLogger.getStats();
+          if (stats.lastMsg && Date.now() - stats.lastMsg > 30000) {
+            WSLogger.log('info', 'التطبيق عاد مرئياً — بيانات قديمة، يعيد التحميل');
+            if (typeof loadTk === 'function') loadTk().catch(function () {});
+          }
+        }
+      });
+    },
+
+    /** الإبلاغ عن انقطاع WebSocket */
+    onWSDown: function () {
+      if (_level === 'websocket') {
+        _setLevel('polling');
+      }
+    },
+
+    /** الإبلاغ عن عودة WebSocket */
+    onWSUp: function () {
+      _pollErrors = 0;
+      if (_level === 'polling' || _level === 'cache') {
+        _setLevel('websocket');
+        /* لا زلنا نحتاج slow poll لـ FR/OI/LS */
+        _startSlowPoll();
+      }
+    },
+
+    /** الحصول على المستوى الحالي */
+    getLevel: function () { return _level; },
+
+    /** إيقاف كل شيء */
+    stop: function () {
+      _stopPolling();
+      _stopSlowPoll();
+      if (_sse) { _sse.close(); _sse = null; }
+    }
+  };
+})();
+
+
+/* ═══════════════════════════════════════
+   🎛 DATA BRIDGE — جسر البيانات
+   يربط WebSocket بالمتغيرات العالمية
+   ═══════════════════════════════════════ */
+
+/**
+ * يستقبل أحداث الأسعار من EventBus ويحدّث المتغيرات العالمية (T, FR, OI...)
+ * ويحدّث واجهة المستخدم بمعدل محدود
+ * @namespace
+ */
+var DataBridge = (function () {
+  /** @type {*} مؤقت تحديث الواجهة */
+  var _uiTimer = null;
+  /** @type {boolean} هل هناك تحديثات بانتظار عرضها */
+  var _dirty = false;
+  /** @type {number} آخر تحديث للواجهة */
+  var _lastUIUpdate = 0;
+  /** @type {*} مؤقت حفظ IndexedDB */
+  var _idbTimer = null;
+
+  /**
+   * معالج تحديث الأسعار الدفعي
+   * @param {Object} updates — {SYM: {p, c, v, h, l, src}}
+   */
+  function _onPricesBatch(updates) {
+    if (typeof T === 'undefined') return;
+
+    var keys = Object.keys(updates);
+    for (var i = 0; i < keys.length; i++) {
+      var sym = keys[i];
+      var u = updates[sym];
+
+      /* Conflict Resolution: الأحدث له الأولوية */
+      if (T[sym] && T[sym]._ts && u._ts && u._ts < T[sym]._ts) continue;
+
+      /* دمج مع البيانات الحالية */
+      if (!T[sym]) {
+        T[sym] = u;
+      } else {
+        if (u.p) T[sym].p = u.p;
+        if (u.c !== undefined) T[sym].c = u.c;
+        if (u.v) T[sym].v = u.v;
+        if (u.h) T[sym].h = u.h;
+        if (u.l) T[sym].l = u.l;
+        if (u.by) T[sym].by = u.by;
+        T[sym].src = u.src || T[sym].src;
+        T[sym]._ts = u._ts;
+      }
+
+      /* تحديث Sparkline */
+      if (typeof sparkHist !== 'undefined' && u.p) {
+        if (!sparkHist[sym]) sparkHist[sym] = [];
+        sparkHist[sym].push(u.p);
+        if (sparkHist[sym].length > 12) sparkHist[sym] = sparkHist[sym].slice(-12);
+      }
+    }
+
+    _dirty = true;
+    if (typeof lastDataTime !== 'undefined') lastDataTime = Date.now();
+    if (typeof connMetrics !== 'undefined') connMetrics.wsUp = true;
+  }
+
+  /**
+   * معالج صفقات الحيتان
+   * @param {Object} trade — {sym, price, qty, value, isBuyerMaker, time}
+   */
+  function _onWhaleTrade(trade) {
+    if (typeof whaleWaves === 'undefined') return;
+    var sym = trade.sym;
+    if (!whaleWaves[sym]) whaleWaves[sym] = { waves: [], totalBuy: 0, engine: null };
+    var ww = whaleWaves[sym];
+
+    var wave = {
+      p: trade.price,
+      amount: trade.value,
+      side: trade.isBuyerMaker ? 'SELL' : 'BUY',
+      time: trade.time
+    };
+
+    ww.waves.push(wave);
+    if (ww.waves.length > 50) ww.waves = ww.waves.slice(-50);
+    if (!trade.isBuyerMaker) ww.totalBuy += trade.value;
+
+    /* تنبيه حوت كبير */
+    if (trade.value >= 500000) {
+      NexusEvents.emit(NexusEvents.TYPES.WHALE_ALERT, {
+        sym: sym,
+        value: trade.value,
+        side: wave.side,
+        price: trade.price
+      });
+    }
+  }
+
+  /**
+   * معالج التصفيات
+   * @param {Object} liq — {sym, side, price, qty, value, time}
+   */
+  function _onLiquidation(liq) {
+    if (typeof liqEvents === 'undefined') return;
+    liqEvents.push({ s: liq.sym + 'USDT', S: liq.side, p: liq.price, q: liq.qty, time: liq.time });
+    if (liqEvents.length > 100) liqEvents = liqEvents.slice(-100);
+
+    if (typeof liquidationData !== 'undefined') {
+      if (!liquidationData[liq.sym]) liquidationData[liq.sym] = [];
+      liquidationData[liq.sym].push({ side: liq.side, value: liq.value, price: liq.price, time: liq.time });
+      if (liquidationData[liq.sym].length > 50) liquidationData[liq.sym] = liquidationData[liq.sym].slice(-50);
+    }
+  }
+
+  /**
+   * معالج تحديث الشموع
+   * @param {Object} kline
+   */
+  function _onKlineUpdate(kline) {
+    /* يمكن استخدامها لتحديث الشارت مباشرة */
+    if (kline.sym === (typeof curCoin !== 'undefined' ? curCoin : '') && typeof curTF !== 'undefined') {
+      /* تحديث الشارت الحالي */
+      _dirty = true;
+    }
+  }
+
+  /**
+   * تحديث عناصر الواجهة المتكررة
+   */
+  function _updateUI() {
+    if (!_dirty) return;
+    _dirty = false;
+    _lastUIUpdate = Date.now();
+
+    /* تحديث شريط الأسعار */
+    try {
+      var el = document.getElementById('tkrEl');
+      if (el && typeof WL !== 'undefined' && typeof mkSpark === 'function' && typeof fP === 'function') {
+        var items = WL.filter(function (s) { return T[s]; }).slice(0, 16);
+        var h = '';
+        for (var r = 0; r < 2; r++) items.forEach(function (s) {
+          var d = T[s], up = d.c >= 0;
+          h += '<div class="tkr-i"><span class="tkr-sym">' + s + '</span><span style="font-family:var(--fm);font-size:9px;color:var(--t2)">' + fP(d.p) + '</span><div class="spark">' + mkSpark(s) + '</div><span class="tkr-c ' + (up ? 'up' : 'dn') + '">' + (up ? '+' : '') + d.c.toFixed(1) + '%</span></div>';
+        });
+        el.innerHTML = h;
+      }
+    } catch (e) { /* تجاهل */ }
+
+    /* تحديث FR panel */
+    try {
+      var pfrE = document.getElementById('pFR');
+      if (pfrE && typeof FR !== 'undefined' && FR.BTC) {
+        pfrE.textContent = (FR.BTC.rate >= 0 ? '+' : '') + FR.BTC.rate.toFixed(4) + '%';
+      }
+    } catch (e) { /* تجاهل */ }
+
+    /* تحديث حالة الاتصال */
+    try {
+      if (typeof updateConnStatus === 'function') updateConnStatus();
+    } catch (e) { /* تجاهل */ }
+  }
+
+  return {
+    /** بدء الجسر — ربط الأحداث */
+    init: function () {
+      /* الاشتراك في الأحداث */
+      NexusEvents.on(NexusEvents.TYPES.PRICES_BATCH, _onPricesBatch, 1);
+      NexusEvents.on(NexusEvents.TYPES.WHALE_TRADE, _onWhaleTrade, 2);
+      NexusEvents.on(NexusEvents.TYPES.LIQUIDATION, _onLiquidation, 2);
+      NexusEvents.on(NexusEvents.TYPES.KLINE_UPDATE, _onKlineUpdate, 3);
+
+      /* تحديث الواجهة كل 250ms (4 FPS) */
+      _uiTimer = setInterval(_updateUI, WS_CONFIG.UI_THROTTLE_MS);
+
+      /* حفظ بيانات في IndexedDB كل دقيقة */
+      _idbTimer = setInterval(function () {
+        if (typeof T !== 'undefined') {
+          OfflineStore.saveTickers(T);
+        }
+        if (typeof FR !== 'undefined') OfflineStore.saveState('lastFR', FR);
+        if (typeof OI !== 'undefined') OfflineStore.saveState('lastOI', OI);
+        if (typeof LS !== 'undefined') OfflineStore.saveState('lastLS', LS);
+      }, WS_CONFIG.IDB_SAVE_INTERVAL);
+
+      /* الاستماع لأحداث الاتصال/الانقطاع */
+      NexusEvents.on(NexusEvents.TYPES.WS_CONNECTED, function () {
+        FallbackChain.onWSUp();
+        if (typeof connMetrics !== 'undefined') connMetrics.wsUp = true;
+      }, 1);
+
+      NexusEvents.on(NexusEvents.TYPES.WS_DISCONNECTED, function () {
+        /* تحقق هل كل الاتصالات منقطعة */
+        if (!BinanceWS.isSpotConnected() && !BybitWS.isConnected()) {
+          FallbackChain.onWSDown();
+          if (typeof connMetrics !== 'undefined') connMetrics.wsUp = false;
+        }
+      }, 1);
+
+      /* الاستماع لتنبيهات الحيتان */
+      NexusEvents.on(NexusEvents.TYPES.WHALE_ALERT, function (data) {
+        if (typeof notify === 'function' && typeof fmt === 'function') {
+          notify(data.sym, 'whale', 0, {
+            value: data.value,
+            side: data.side
+          });
+        }
+      }, 5);
+    },
+
+    /** إيقاف */
+    stop: function () {
+      if (_uiTimer) { clearInterval(_uiTimer); _uiTimer = null; }
+      if (_idbTimer) { clearInterval(_idbTimer); _idbTimer = null; }
+    },
+
+    /** فرض تحديث الواجهة */
+    forceUpdate: function () { _dirty = true; _updateUI(); }
+  };
+})();
+
+
+/* ═══════════════════════════════════════
+   🚀 NEXUS WS — النظام الرئيسي
+   ═══════════════════════════════════════ */
+
+/**
+ * النقطة الرئيسية — يبدأ ويدير كل مكونات WebSocket
+ * @namespace
+ */
+var NexusWS = (function () {
+  /** @type {boolean} */
+  var _initialized = false;
+  /** @type {*} مؤقت الإحصائيات */
+  var _statsTimer = null;
+
+  return {
+    /**
+     * تهيئة نظام WebSocket الكامل
+     * يُستدعى مرة واحدة عند بدء التطبيق
+     */
+    init: function () {
+      if (_initialized) return;
+      _initialized = true;
+
+      WSLogger.log('info', '🚀 NEXUS WebSocket System V2.0 — جاري التهيئة');
+
+      /* 1. تهيئة IndexedDB */
+      OfflineStore.init().then(function () {
+        WSLogger.log('info', '💾 IndexedDB جاهز');
+      }).catch(function () {
+        WSLogger.log('warn', '💾 IndexedDB غير متاح — الكاش معطّل');
+      });
+
+      /* 2. بدء Message Buffer */
+      MessageBuffer.start();
+
+      /* 3. بدء DataBridge */
+      DataBridge.init();
+
+      /* 4. الاتصال بـ Binance WebSocket */
+      try {
+        BinanceWS.connect(true);
+      } catch (e) {
+        WSLogger.log('error', 'فشل اتصال Binance: ' + e.message);
+      }
+
+      /* 5. الاتصال بـ Bybit WebSocket */
+      try {
+        BybitWS.connect();
+        /* اشتراك في أسعار Bybit الأساسية */
+        BybitWS.subscribe([
+          'tickers.BTCUSDT',
+          'tickers.ETHUSDT',
+          'tickers.SOLUSDT',
+          'tickers.BNBUSDT',
+          'tickers.XRPUSDT'
+        ]);
+      } catch (e) {
+        WSLogger.log('error', 'فشل اتصال Bybit: ' + e.message);
+      }
+
+      /* 6. بدء الاشتراكات الذكية */
+      /* ننتظر ثانية حتى يتصل WebSocket */
+      setTimeout(function () {
+        SubManager.init();
+      }, 1500);
+
+      /* 7. بدء سلسلة الاحتياط */
+      FallbackChain.start(true);
+
+      /* 8. سجل إحصائيات كل 30 ثانية */
+      _statsTimer = setInterval(function () {
+        var stats = WSLogger.getStats();
+        var subs = BinanceWS.getSubCount();
+        WSLogger.log('perf',
+          'WS msgs:' + stats.wsMsgs +
+          ' | lat:' + stats.avgLatency + 'ms' +
+          ' | reconn:' + stats.reconnects +
+          ' | subs:' + (subs.spot + subs.futures) +
+          ' | buff:' + MessageBuffer.pending() +
+          ' | polls:' + stats.pollRequests +
+          ' | level:' + FallbackChain.getLevel()
+        );
+
+        NexusEvents.emit(NexusEvents.TYPES.CONNECTION_QUALITY, {
+          wsConnected: BinanceWS.isSpotConnected(),
+          level: FallbackChain.getLevel(),
+          latency: stats.avgLatency,
+          msgRate: stats.wsMsgs
+        });
+      }, 30000);
+
+      WSLogger.log('info', '✅ NEXUS WebSocket System — جاهز');
+    },
+
+    /** إيقاف النظام بالكامل */
+    shutdown: function () {
+      WSLogger.log('info', '🛑 إيقاف نظام WebSocket');
+      BinanceWS.disconnect();
+      BybitWS.disconnect();
+      MessageBuffer.stop();
+      DataBridge.stop();
+      FallbackChain.stop();
+      if (_statsTimer) { clearInterval(_statsTimer); _statsTimer = null; }
+      _initialized = false;
+    },
+
+    /**
+     * تغيير الصفحة (يُستدعى من sp() في app.js)
+     * @param {string} page
+     */
+    setPage: function (page) {
+      SubManager.setPage(page);
+    },
+
+    /**
+     * تعيين عملة التحليل الفردي
+     * @param {string} sym
+     */
+    setFocusCoin: function (sym) {
+      SubManager.setFocusCoin(sym);
+    },
+
+    /** الحصول على إحصائيات النظام */
+    getStats: function () {
+      return {
+        ws: WSLogger.getStats(),
+        subs: BinanceWS.getSubCount(),
+        bybit: { connected: BybitWS.isConnected(), subs: BybitWS.getSubCount() },
+        buffer: MessageBuffer.pending(),
+        level: FallbackChain.getLevel(),
+        logs: WSLogger.getLogs()
+      };
+    },
+
+    /* --- وصول للمكونات الفرعية --- */
+    Events: NexusEvents,
+    Logger: WSLogger,
+    Binance: BinanceWS,
+    Bybit: BybitWS,
+    Buffer: MessageBuffer,
+    Subs: SubManager,
+    Offline: OfflineStore,
+    Fallback: FallbackChain,
+    Bridge: DataBridge
+  };
+})();
+
+/* تصدير عالمي */
+window.NexusWS = NexusWS;
+window.NexusEvents = NexusEvents;
+
+/* ╔══════════════════════════════════════════════════════════════╗ */
+/* ║  MODULE 4: SIGNAL ENGINE V2 — محرك الإشارات المتقدم       ║ */
+/* ╚══════════════════════════════════════════════════════════════╝ */
+/**
+ * ═══════════════════════════════════════════════════════════════════
+ *  NEXUS PRO V10 — محرك الإشارات المتقدم
+ *  Advanced Signal Engine V2
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ *  A) نظام تسجيل Bayesian مع تعلّم تلقائي
+ *  B) Multi-Timeframe Confluence (5m → 1d)
+ *  C) Market Regime Detection (ADX + BB + Volume)
+ *  D) Dynamic Position Sizing (Kelly + Anti-Martingale)
+ *  E) Entry Optimization (Support + Volume Profile + Fibonacci)
+ *
+ *  يُحمّل بعد app.js — يعزّز quickScan/deepAnalyze
+ *  @version 2.0
+ */
+
+/* ═══════════════════════════════════════════════════════════════
+   A) نظام BAYESIAN SCORING
+   ═══════════════════════════════════════════════════════════════
+
+   الفكرة الرياضية:
+   بدلاً من جمع النقاط (additive)، نحسب احتمال النجاح لكل فحص
+   باستخدام Bayes' Theorem:
+
+   P(Win|Check) = P(Check|Win) × P(Win) / P(Check)
+
+   النتيجة النهائية = log-likelihood ratio:
+   LLR = Σ log(P(Check_i|Win) / P(Check_i|Loss))
+
+   كلما زاد LLR = ثقة أعلى في النجاح
+
+   التحديث التلقائي: مع كل صفقة، نحدّث الاحتمالات
+*/
+
+var BayesianScorer = (function () {
+
+  /** @type {string} مفتاح التخزين */
+  var STORAGE_KEY = 'nxBayes';
+
+  /**
+   * الاحتمالات المبدئية (Prior) — من بيانات تاريخية تقديرية
+   * @type {Object<string, {winGiven: number, lossGiven: number, winCount: number, lossCount: number}>}
+   */
+  var _priors = null;
+
+  /** الاحتمالات الافتراضية */
+  var DEFAULT_PRIORS = {
+    /* الفحص: P(Check=true|Win), P(Check=true|Loss) */
+    volumeSpike:   { winGiven: 0.72, lossGiven: 0.40, winCount: 0, lossCount: 0 },
+    orderBookBias: { winGiven: 0.65, lossGiven: 0.35, winCount: 0, lossCount: 0 },
+    rsiOptimal:    { winGiven: 0.60, lossGiven: 0.45, winCount: 0, lossCount: 0 },
+    macdBullish:   { winGiven: 0.58, lossGiven: 0.42, winCount: 0, lossCount: 0 },
+    frNegative:    { winGiven: 0.70, lossGiven: 0.30, winCount: 0, lossCount: 0 },
+    oiRising:      { winGiven: 0.55, lossGiven: 0.48, winCount: 0, lossCount: 0 },
+    whaleActivity: { winGiven: 0.75, lossGiven: 0.25, winCount: 0, lossCount: 0 },
+    earlyDetect:   { winGiven: 0.68, lossGiven: 0.38, winCount: 0, lossCount: 0 },
+    mtfConfluence: { winGiven: 0.78, lossGiven: 0.22, winCount: 0, lossCount: 0 }
+  };
+
+  /** تحميل من localStorage */
+  function _load() {
+    if (_priors) return;
+    try {
+      _priors = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (!_priors) _priors = JSON.parse(JSON.stringify(DEFAULT_PRIORS));
+    } catch (e) {
+      _priors = JSON.parse(JSON.stringify(DEFAULT_PRIORS));
+    }
+  }
+
+  /** حفظ */
+  function _save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(_priors)); } catch (e) {}
+  }
+
+  return {
+    /**
+     * حساب النتيجة بأسلوب Bayesian
+     *
+     * الصيغة الرياضية:
+     * LLR = Σ [ log(P(Check_i=val|Win) / P(Check_i=val|Loss)) ]
+     *
+     * ثم نحوّل لاحتمال:
+     * P(Win|Evidence) = 1 / (1 + exp(-LLR))
+     *
+     * @param {Object} checks — نتائج الفحوصات {volumeSpike: true, rsiOptimal: false, ...}
+     * @returns {{probability: number, confidence: number, llr: number, breakdown: Array}}
+     */
+    score: function (checks) {
+      _load();
+      var llr = 0;
+      var breakdown = [];
+      var checkKeys = Object.keys(checks);
+
+      for (var i = 0; i < checkKeys.length; i++) {
+        var key = checkKeys[i];
+        var prior = _priors[key];
+        if (!prior) continue;
+
+        var checkPassed = checks[key];
+
+        /* P(Evidence|Win) و P(Evidence|Loss) */
+        var pEvidenceGivenWin, pEvidenceGivenLoss;
+
+        if (checkPassed) {
+          pEvidenceGivenWin = prior.winGiven;
+          pEvidenceGivenLoss = prior.lossGiven;
+        } else {
+          /* P(NOT Check|Win) = 1 - P(Check|Win) */
+          pEvidenceGivenWin = 1 - prior.winGiven;
+          pEvidenceGivenLoss = 1 - prior.lossGiven;
+        }
+
+        /* تجنب log(0) */
+        pEvidenceGivenWin = Math.max(0.01, Math.min(0.99, pEvidenceGivenWin));
+        pEvidenceGivenLoss = Math.max(0.01, Math.min(0.99, pEvidenceGivenLoss));
+
+        var contribution = Math.log(pEvidenceGivenWin / pEvidenceGivenLoss);
+        llr += contribution;
+
+        breakdown.push({
+          check: key,
+          passed: checkPassed,
+          contribution: +contribution.toFixed(3),
+          pWin: +pEvidenceGivenWin.toFixed(3),
+          pLoss: +pEvidenceGivenLoss.toFixed(3)
+        });
+      }
+
+      /* تحويل LLR إلى احتمال باستخدام Sigmoid */
+      var probability = 1 / (1 + Math.exp(-llr));
+      probability = Math.max(0.05, Math.min(0.95, probability));
+
+      /* الثقة = مدى بُعد الاحتمال عن 0.5 */
+      var confidence = Math.round(Math.abs(probability - 0.5) * 200);
+
+      return {
+        probability: +probability.toFixed(4),
+        confidence: confidence,
+        llr: +llr.toFixed(4),
+        breakdown: breakdown.sort(function (a, b) { return Math.abs(b.contribution) - Math.abs(a.contribution); })
+      };
+    },
+
+    /**
+     * تحديث الاحتمالات بعد صفقة (Online Learning)
+     *
+     * نستخدم Bayesian update مبسّط:
+     * P_new = (P_old × N + observation) / (N + 1)
+     *
+     * حيث observation = 1 إذا الفحص كان صحيحاً في صفقة رابحة
+     *
+     * @param {Object} checks — الفحوصات عند الدخول
+     * @param {boolean} isWin — هل الصفقة ربحت
+     */
+    update: function (checks, isWin) {
+      _load();
+      var checkKeys = Object.keys(checks);
+
+      for (var i = 0; i < checkKeys.length; i++) {
+        var key = checkKeys[i];
+        var prior = _priors[key];
+        if (!prior) continue;
+
+        var checkPassed = checks[key];
+
+        if (isWin) {
+          prior.winCount++;
+          /* تحديث P(Check|Win) */
+          if (checkPassed) {
+            var n = prior.winCount;
+            prior.winGiven = (prior.winGiven * (n - 1) + 1) / n;
+          } else {
+            var n = prior.winCount;
+            prior.winGiven = (prior.winGiven * (n - 1) + 0) / n;
+          }
+        } else {
+          prior.lossCount++;
+          if (checkPassed) {
+            var n = prior.lossCount;
+            prior.lossGiven = (prior.lossGiven * (n - 1) + 1) / n;
+          } else {
+            var n = prior.lossCount;
+            prior.lossGiven = (prior.lossGiven * (n - 1) + 0) / n;
+          }
+        }
+
+        /* حدود — تجنب الاحتمالات المتطرفة */
+        prior.winGiven = Math.max(0.1, Math.min(0.9, prior.winGiven));
+        prior.lossGiven = Math.max(0.1, Math.min(0.9, prior.lossGiven));
+      }
+
+      _save();
+    },
+
+    /** الحصول على الاحتمالات الحالية */
+    getPriors: function () { _load(); return JSON.parse(JSON.stringify(_priors)); },
+
+    /** إعادة ضبط */
+    reset: function () { _priors = JSON.parse(JSON.stringify(DEFAULT_PRIORS)); _save(); }
+  };
+})();
+
+
+/* ═══════════════════════════════════════════════════════════════
+   B) MULTI-TIMEFRAME CONFLUENCE
+   ═══════════════════════════════════════════════════════════════
+
+   يحلل نفس العملة على 5 فريمات (5m, 15m, 1h, 4h, 1d)
+   ويقيس درجة التوافق (Alignment Score 0-100)
+
+   الأوزان: TF أعلى = وزن أعلى
+   5m=1, 15m=1.5, 1h=2, 4h=3, 1d=4
+*/
+
+var MTFConfluence = (function () {
+
+  /** أوزان الفريمات */
+  var TF_WEIGHTS = { '5m': 1, '15m': 1.5, '1h': 2, '4h': 3, '1d': 4 };
+  var TF_LIST = ['5m', '15m', '1h', '4h', '1d'];
+
+  /**
+   * تحليل فريم واحد
+   * @param {number[]} closes — أسعار الإغلاق
+   * @returns {{trend: 'up'|'down'|'neutral', strength: number, rsi: number, macd: string}}
+   */
+  function _analyzeTF(closes) {
+    if (!closes || closes.length < 26) return { trend: 'neutral', strength: 0, rsi: 50, macd: 'none' };
+
+    var price = closes[closes.length - 1];
+    var ema20 = _ema(closes, 20);
+    var ema50 = _ema(closes, 50);
+    var rsi = _rsi(closes, 14);
+    var macd = _macd(closes);
+
+    var trend = 'neutral';
+    var strength = 0;
+
+    /* اتجاه بناءً على EMA */
+    if (price > ema20 && ema20 > ema50) { trend = 'up'; strength += 30; }
+    else if (price < ema20 && ema20 < ema50) { trend = 'down'; strength += 30; }
+
+    /* RSI */
+    if (rsi >= 40 && rsi <= 60) strength += 10; /* منطقة محايدة */
+    else if (rsi >= 30 && rsi < 40) { trend = trend || 'up'; strength += 20; } /* ارتداد */
+    else if (rsi > 70) strength -= 10; /* تشبع شراء */
+
+    /* MACD */
+    if (macd.cross === 'bull') { strength += 25; if (trend !== 'down') trend = 'up'; }
+    else if (macd.cross === 'bear') { strength += 25; if (trend !== 'up') trend = 'down'; }
+    else if (macd.h > 0) strength += 10;
+
+    return { trend: trend, strength: Math.min(100, Math.max(0, strength)), rsi: +rsi.toFixed(1), macd: macd.cross };
+  }
+
+  /** حساب EMA */
+  function _ema(data, period) {
+    if (!data || data.length < period) return data ? data[data.length - 1] : 0;
+    var k = 2 / (period + 1);
+    var e = data.slice(0, period).reduce(function (a, b) { return a + b; }, 0) / period;
+    for (var i = period; i < data.length; i++) e = data[i] * k + e * (1 - k);
+    return e;
+  }
+
+  /** حساب RSI */
+  function _rsi(closes, period) {
+    period = period || 14;
+    if (closes.length < period + 1) return 50;
+    var g = 0, l = 0;
+    for (var i = closes.length - period; i < closes.length; i++) {
+      var d = closes[i] - closes[i - 1];
+      if (d > 0) g += d; else l += Math.abs(d);
+    }
+    return 100 - 100 / (1 + g / Math.max(l, 0.001));
+  }
+
+  /** حساب MACD */
+  function _macd(closes) {
+    if (closes.length < 26) return { h: 0, cross: 'none' };
+    var ema12 = _ema(closes.slice(-12), 12);
+    var ema26 = _ema(closes, 26);
+    var line = ema12 - ema26;
+    var prev12 = _ema(closes.slice(-13, -1), 12);
+    var prev26 = _ema(closes.slice(0, -1), 26);
+    var prevLine = prev12 - prev26;
+    var signal = _ema(closes.slice(-35).map(function (_, i, arr) {
+      return _ema(arr.slice(0, i + 1).slice(-12), 12) - _ema(arr.slice(0, i + 1), 26);
+    }).filter(function (v) { return !isNaN(v); }), 9);
+    var cross = line > signal && prevLine <= signal ? 'bull' : line < signal && prevLine >= signal ? 'bear' : 'none';
+    return { h: line, cross: cross };
+  }
+
+  return {
+    /**
+     * تحليل التوافق عبر الفريمات
+     * @param {Object} klinesData — {5m: [...closes], 15m: [...], 1h: [...], 4h: [...], 1d: [...]}
+     * @returns {{alignmentScore: number, direction: string, details: Array, signal: string}}
+     */
+    analyze: function (klinesData) {
+      var results = [];
+      var totalWeight = 0;
+      var bullWeight = 0;
+      var bearWeight = 0;
+
+      for (var i = 0; i < TF_LIST.length; i++) {
+        var tf = TF_LIST[i];
+        var closes = klinesData[tf];
+        var weight = TF_WEIGHTS[tf];
+
+        if (!closes || closes.length < 10) continue;
+
+        var analysis = _analyzeTF(closes);
+        totalWeight += weight;
+
+        if (analysis.trend === 'up') bullWeight += weight * (analysis.strength / 100);
+        else if (analysis.trend === 'down') bearWeight += weight * (analysis.strength / 100);
+
+        results.push({
+          tf: tf,
+          trend: analysis.trend,
+          strength: analysis.strength,
+          rsi: analysis.rsi,
+          macd: analysis.macd,
+          weight: weight
+        });
+      }
+
+      /* Alignment Score (0-100) */
+      var alignmentScore = 0;
+      if (totalWeight > 0) {
+        var netBull = (bullWeight - bearWeight) / totalWeight;
+        alignmentScore = Math.round(Math.abs(netBull) * 100);
+      }
+
+      var direction = bullWeight > bearWeight ? 'BULLISH' : bearWeight > bullWeight ? 'BEARISH' : 'NEUTRAL';
+
+      /* Signal strength */
+      var signal = 'WEAK';
+      if (alignmentScore >= 70) signal = 'STRONG';
+      else if (alignmentScore >= 50) signal = 'MODERATE';
+      else if (alignmentScore >= 30) signal = 'WEAK';
+      else signal = 'CONFLICTING';
+
+      return {
+        alignmentScore: alignmentScore,
+        direction: direction,
+        signal: signal,
+        bullWeight: +bullWeight.toFixed(2),
+        bearWeight: +bearWeight.toFixed(2),
+        details: results
+      };
+    },
+
+    /**
+     * جلب بيانات الشموع لكل الفريمات (يُستخدم مع Binance API)
+     * @param {string} sym — رمز العملة
+     * @returns {Promise<Object>} بيانات الشموع لكل فريم
+     */
+    fetchAllTF: async function (sym) {
+      var pair = sym + 'USDT';
+      var intervals = { '5m': 50, '15m': 50, '1h': 50, '4h': 50, '1d': 30 };
+      var result = {};
+
+      var promises = Object.keys(intervals).map(function (interval) {
+        var limit = intervals[interval];
+        return (typeof fj === 'function'
+          ? fj('https://api.binance.com/api/v3/klines?symbol=' + pair + '&interval=' + interval + '&limit=' + limit)
+          : fetch('https://api.binance.com/api/v3/klines?symbol=' + pair + '&interval=' + interval + '&limit=' + limit).then(function(r){return r.json()})
+        ).then(function (kl) {
+          if (kl && Array.isArray(kl)) {
+            result[interval] = kl.map(function (k) { return +k[4]; }); /* closes */
+          }
+        }).catch(function () {});
+      });
+
+      await Promise.all(promises);
+      return result;
+    }
+  };
+})();
+
+
+/* ═══════════════════════════════════════════════════════════════
+   C) MARKET REGIME DETECTION
+   ═══════════════════════════════════════════════════════════════
+
+   يكتشف حالة السوق الحالية تلقائياً:
+   - Trending Up / Trending Down / Ranging / Volatile / Quiet
+
+   المؤشرات المستخدمة:
+   - ADX > 25 = Trending
+   - Bollinger Width > median = Volatile
+   - Volume Profile = تأكيد
+*/
+
+var MarketRegime = (function () {
+
+  /** @type {string} النظام الحالي */
+  var _currentRegime = 'UNKNOWN';
+  /** @type {number} آخر تحديث */
+  var _lastUpdate = 0;
+  /** @type {Object} تفاصيل النظام */
+  var _details = {};
+
+  /**
+   * كشف نظام السوق
+   * @param {Object} params — {closes, highs, lows, volumes} لـ BTC (أو أي عملة)
+   * @returns {{regime: string, confidence: number, strategy: Object, details: Object}}
+   */
+  function detect(params) {
+    var c = params.closes || [];
+    var h = params.highs || [];
+    var l = params.lows || [];
+    var v = params.volumes || [];
+
+    if (c.length < 30) return { regime: 'UNKNOWN', confidence: 0, strategy: {}, details: {} };
+
+    /* 1. ADX — قوة الاتجاه */
+    var adx = _calcADX(h, l, c, 14);
+
+    /* 2. Bollinger Width — التذبذب */
+    var bb = _calcBollinger(c, 20, 2);
+    var bbWidth = bb.upper > 0 ? ((bb.upper - bb.lower) / bb.middle) * 100 : 0;
+
+    /* عرض BB التاريخي لتحديد الوسيط */
+    var widths = [];
+    for (var i = 20; i <= c.length; i++) {
+      var slice = c.slice(i - 20, i);
+      var sma = slice.reduce(function (a, b) { return a + b; }, 0) / 20;
+      var sd = Math.sqrt(slice.reduce(function (s, v) { return s + Math.pow(v - sma, 2); }, 0) / 20);
+      widths.push((4 * sd / sma) * 100);
+    }
+    var medianWidth = widths.sort(function (a, b) { return a - b; })[Math.floor(widths.length / 2)] || bbWidth;
+
+    /* 3. Volume — فوق أو تحت المتوسط */
+    var avgVol = v.length > 5 ? v.slice(-20).reduce(function (a, b) { return a + b; }, 0) / Math.min(20, v.length) : 0;
+    var recentVol = v.length > 0 ? v[v.length - 1] : 0;
+    var volRatio = avgVol > 0 ? recentVol / avgVol : 1;
+
+    /* 4. اتجاه السعر */
+    var ema20 = _ema(c, 20);
+    var ema50 = c.length >= 50 ? _ema(c, 50) : ema20;
+    var price = c[c.length - 1];
+    var priceAboveEMA = price > ema20;
+    var emaAligned = ema20 > ema50; /* EMAs صاعدة */
+
+    /* === تحديد النظام === */
+    var regime, confidence;
+
+    if (adx.adx > 30) {
+      /* اتجاه قوي */
+      if (priceAboveEMA && emaAligned) {
+        regime = 'TRENDING_UP';
+        confidence = Math.min(95, 50 + adx.adx);
+      } else if (!priceAboveEMA && !emaAligned) {
+        regime = 'TRENDING_DOWN';
+        confidence = Math.min(95, 50 + adx.adx);
+      } else {
+        regime = 'TRENDING_UP'; /* ADX عالي لكن إشارات مختلطة */
+        confidence = 40;
+      }
+    } else if (bbWidth > medianWidth * 1.5) {
+      /* تذبذب عالي */
+      regime = 'VOLATILE';
+      confidence = Math.min(85, 40 + Math.round(bbWidth / medianWidth * 20));
+    } else if (adx.adx < 20 && bbWidth < medianWidth * 0.7) {
+      /* هدوء */
+      regime = 'QUIET';
+      confidence = Math.min(80, 50 + (20 - adx.adx) * 2);
+    } else {
+      /* نطاق عرضي */
+      regime = 'RANGING';
+      confidence = Math.min(75, 40 + Math.round(Math.abs(25 - adx.adx) * 2));
+    }
+
+    /* === استراتيجية حسب النظام === */
+    var strategy = _getStrategy(regime);
+
+    _currentRegime = regime;
+    _lastUpdate = Date.now();
+    _details = { adx: adx.adx, bbWidth: +bbWidth.toFixed(2), medianWidth: +medianWidth.toFixed(2), volRatio: +volRatio.toFixed(2), ema20: ema20, ema50: ema50 };
+
+    return { regime: regime, confidence: confidence, strategy: strategy, details: _details };
+  }
+
+  /**
+   * تعديل استراتيجية الإشارات بناءً على النظام
+   * @param {string} regime
+   * @returns {Object}
+   */
+  function _getStrategy(regime) {
+    switch (regime) {
+      case 'TRENDING_UP':
+        return {
+          approach: 'FOLLOW_TREND',
+          label_ar: 'اتبع الاتجاه الصاعد',
+          label_en: 'Follow uptrend',
+          entryType: 'pullback',       /* ادخل عند التراجع */
+          slMultiplier: 1.0,           /* Stop Loss عادي */
+          tpMultiplier: 1.5,           /* Take Profit أعلى */
+          minScore: 40,                /* حد أدنى أقل — الاتجاه يساعد */
+          riskPct: 2.0                 /* مخاطرة عادية */
+        };
+      case 'TRENDING_DOWN':
+        return {
+          approach: 'AVOID_OR_SHORT',
+          label_ar: 'تجنب أو قصير',
+          label_en: 'Avoid or short',
+          entryType: 'avoid',
+          slMultiplier: 0.8,
+          tpMultiplier: 0.8,
+          minScore: 70,                /* حد أدنى عالي — ضد الاتجاه */
+          riskPct: 1.0
+        };
+      case 'RANGING':
+        return {
+          approach: 'BOUNCE_PLAY',
+          label_ar: 'ارتداد من الحدود',
+          label_en: 'Range bounce',
+          entryType: 'support_bounce',
+          slMultiplier: 0.7,           /* SL ضيق */
+          tpMultiplier: 1.0,
+          minScore: 50,
+          riskPct: 1.5
+        };
+      case 'VOLATILE':
+        return {
+          approach: 'WIDE_STOPS',
+          label_ar: 'وسّع الوقفات',
+          label_en: 'Wide stops',
+          entryType: 'breakout',
+          slMultiplier: 1.5,           /* SL أوسع */
+          tpMultiplier: 2.0,           /* TP أعلى */
+          minScore: 60,
+          riskPct: 0.8                 /* مخاطرة أقل */
+        };
+      case 'QUIET':
+        return {
+          approach: 'WAIT_BREAKOUT',
+          label_ar: 'انتظر الاختراق',
+          label_en: 'Wait for breakout',
+          entryType: 'breakout_only',
+          slMultiplier: 0.5,
+          tpMultiplier: 2.0,
+          minScore: 55,
+          riskPct: 1.0
+        };
+      default:
+        return { approach: 'DEFAULT', minScore: 50, riskPct: 1.5, slMultiplier: 1, tpMultiplier: 1 };
+    }
+  }
+
+  /* حسابات مساعدة */
+  function _ema(data, period) {
+    if (!data || data.length < period) return data ? data[data.length - 1] : 0;
+    var k = 2 / (period + 1), e = data.slice(0, period).reduce(function (a, b) { return a + b; }, 0) / period;
+    for (var i = period; i < data.length; i++) e = data[i] * k + e * (1 - k);
+    return e;
+  }
+
+  function _calcADX(highs, lows, closes, period) {
+    period = period || 14;
+    if (highs.length < period + 1) return { adx: 25, pdi: 0, mdi: 0 };
+    var pdm = [], mdm = [], tr = [];
+    for (var i = 1; i < highs.length; i++) {
+      var h = highs[i] - highs[i - 1], l = lows[i - 1] - lows[i];
+      pdm.push(h > l && h > 0 ? h : 0);
+      mdm.push(l > h && l > 0 ? l : 0);
+      tr.push(Math.max(highs[i] - lows[i], Math.abs(highs[i] - closes[i - 1]), Math.abs(lows[i] - closes[i - 1])));
+    }
+    var atr = _ema(tr, period), aPDM = _ema(pdm, period), aMDM = _ema(mdm, period);
+    var pdi = atr > 0 ? (aPDM / atr) * 100 : 0, mdi = atr > 0 ? (aMDM / atr) * 100 : 0;
+    var dx = (pdi + mdi) > 0 ? Math.abs(pdi - mdi) / (pdi + mdi) * 100 : 0;
+    return { adx: +dx.toFixed(1), pdi: +pdi.toFixed(1), mdi: +mdi.toFixed(1) };
+  }
+
+  function _calcBollinger(closes, period, stdDev) {
+    period = period || 20; stdDev = stdDev || 2;
+    if (closes.length < period) return { upper: 0, middle: 0, lower: 0 };
+    var slice = closes.slice(-period);
+    var sma = slice.reduce(function (a, b) { return a + b; }, 0) / period;
+    var sd = Math.sqrt(slice.reduce(function (s, v) { return s + Math.pow(v - sma, 2); }, 0) / period);
+    return { upper: sma + stdDev * sd, middle: sma, lower: sma - stdDev * sd };
+  }
+
+  return {
+    detect: detect,
+    getRegime: function () { return _currentRegime; },
+    getDetails: function () { return _details; },
+    getLastUpdate: function () { return _lastUpdate; }
+  };
+})();
+
+
+/* ═══════════════════════════════════════════════════════════════
+   D) DYNAMIC POSITION SIZING
+   ═══════════════════════════════════════════════════════════════
+
+   - Kelly Criterion مبسّط
+   - Anti-Martingale بعد سلسلة خسائر
+   - Correlation-based exposure limit
+*/
+
+var PositionSizer = (function () {
+
+  /**
+   * حساب حجم المركز باستخدام Kelly Criterion المبسّط
+   *
+   * الصيغة الرياضية:
+   * f* = W - (1 - W) / R
+   *
+   * حيث:
+   *   f* = نسبة رأس المال المثالية
+   *   W  = معدل الربح (Win Rate)
+   *   R  = نسبة الربح/الخسارة (Win/Loss Ratio)
+   *
+   * نستخدم Half-Kelly للأمان: f = f* / 2
+   *
+   * @param {Object} params
+   * @param {number} params.capital — رأس المال الكلي
+   * @param {number} params.winRate — معدل الربح (0-1)
+   * @param {number} params.avgWin — متوسط الربح (%)
+   * @param {number} params.avgLoss — متوسط الخسارة (%)
+   * @param {number} params.consecutiveLosses — عدد الخسائر المتتالية
+   * @param {number} params.openPositions — عدد المراكز المفتوحة
+   * @param {number} params.maxPositions — أقصى عدد مراكز
+   * @returns {{positionSize: number, riskPct: number, kellyPct: number, reason: string}}
+   */
+  function calculate(params) {
+    var capital = params.capital || 1000;
+    var winRate = Math.max(0.1, Math.min(0.9, params.winRate || 0.5));
+    var avgWin = Math.max(0.5, params.avgWin || 3);
+    var avgLoss = Math.max(0.5, params.avgLoss || 2);
+    var consLosses = params.consecutiveLosses || 0;
+    var openPos = params.openPositions || 0;
+    var maxPos = params.maxPositions || 5;
+
+    /* 1. Kelly Criterion */
+    var R = avgWin / avgLoss; /* Win/Loss Ratio */
+    var kellyFull = winRate - ((1 - winRate) / R);
+    var kellyPct = Math.max(0.5, Math.min(5, kellyFull * 100 / 2)); /* Half Kelly, capped 0.5-5% */
+
+    var riskPct = kellyPct;
+    var reason = 'Kelly: ' + kellyPct.toFixed(1) + '%';
+
+    /* 2. Anti-Martingale — تقليل بعد الخسائر */
+    if (consLosses >= 2) {
+      var reduction = Math.pow(0.7, consLosses - 1); /* تقليل 30% لكل خسارة إضافية */
+      riskPct = riskPct * reduction;
+      reason += ' | Anti-Mart: -' + Math.round((1 - reduction) * 100) + '%';
+    }
+
+    /* 3. Exposure Limit — لا نفتح أكثر من الحد */
+    if (openPos >= maxPos) {
+      return { positionSize: 0, riskPct: 0, kellyPct: kellyPct, reason: 'أقصى عدد مراكز (' + maxPos + ')' };
+    }
+
+    /* تقليل المخاطرة مع زيادة المراكز المفتوحة */
+    var exposureFactor = 1 - (openPos / (maxPos + 1)) * 0.5;
+    riskPct = riskPct * exposureFactor;
+
+    /* 4. حدود أمان */
+    riskPct = Math.max(0.25, Math.min(3, riskPct));
+
+    var positionSize = capital * (riskPct / 100);
+
+    return {
+      positionSize: +positionSize.toFixed(2),
+      riskPct: +riskPct.toFixed(2),
+      kellyPct: +kellyPct.toFixed(2),
+      reason: reason
+    };
+  }
+
+  /**
+   * فحص التشابه بين المراكز المفتوحة
+   * لا نفتح 3 مراكز متشابهة (مرتبطة)
+   * @param {string} newSym — العملة الجديدة
+   * @param {Array} openTrades — الصفقات المفتوحة
+   * @returns {{allowed: boolean, correlation: number, reason: string}}
+   */
+  function checkCorrelation(newSym, openTrades) {
+    if (!openTrades || openTrades.length < 2) return { allowed: true, correlation: 0, reason: '' };
+
+    /* فحص مبسّط: هل العملات المفتوحة تتحرك بنفس الاتجاه */
+    var openSyms = openTrades.filter(function (t) { return t.status === 'OPEN'; }).map(function (t) { return t.sym; });
+    var sameDirection = 0;
+
+    if (typeof T !== 'undefined') {
+      var newChange = T[newSym] ? T[newSym].c : 0;
+      openSyms.forEach(function (s) {
+        var d = T[s];
+        if (d && Math.sign(d.c) === Math.sign(newChange)) sameDirection++;
+      });
+    }
+
+    var correlation = openSyms.length > 0 ? sameDirection / openSyms.length : 0;
+
+    /* لا نسمح بأكثر من 3 مراكز في نفس الاتجاه */
+    if (sameDirection >= 3) {
+      return {
+        allowed: false,
+        correlation: correlation,
+        reason: sameDirection + ' مراكز في نفس الاتجاه — ارتباط عالي'
+      };
+    }
+
+    return { allowed: true, correlation: correlation, reason: '' };
+  }
+
+  return { calculate: calculate, checkCorrelation: checkCorrelation };
+})();
+
+
+/* ═══════════════════════════════════════════════════════════════
+   E) ENTRY OPTIMIZATION
+   ═══════════════════════════════════════════════════════════════
+
+   بدلاً من entry ثابت عند 0.985×price:
+   - يحدد أقرب Support حقيقي
+   - يستخدم Volume Profile لتحديد High Volume Nodes
+   - يضع Entry عند HVN الأقرب تحت السعر
+   - Target عند أقرب Resistance أو Fibonacci 0.618
+*/
+
+var EntryOptimizer = (function () {
+
+  /**
+   * تحسين نقطة الدخول
+   * @param {Object} params
+   * @param {number} params.price — السعر الحالي
+   * @param {Array} params.klines — بيانات الشموع (Binance format)
+   * @param {string} params.regime — نظام السوق الحالي
+   * @returns {Object} نقاط الدخول المحسّنة
+   */
+  function optimize(params) {
+    var price = params.price;
+    var klines = params.klines || [];
+    var regime = params.regime || 'RANGING';
+
+    if (!klines.length || klines.length < 10) {
+      return _defaultEntry(price);
+    }
+
+    var closes = klines.map(function (k) { return +k[4]; });
+    var highs = klines.map(function (k) { return +k[2]; });
+    var lows = klines.map(function (k) { return +k[3]; });
+    var volumes = klines.map(function (k) { return +k[5]; });
+
+    /* 1. Support & Resistance */
+    var sr = _findSR(highs, lows);
+
+    /* 2. Volume Profile — High Volume Nodes */
+    var hvn = _findHVN(klines);
+
+    /* 3. Fibonacci Levels */
+    var fib = _calcFibonacci(highs, lows);
+
+    /* 4. تحديد أفضل Entry */
+    var supports = sr.support.filter(function (s) { return s < price; }).sort(function (a, b) { return b - a; });
+    var resistances = sr.resistance.filter(function (r) { return r > price; }).sort(function (a, b) { return a - b; });
+
+    var hvnBelow = hvn.filter(function (h) { return h.price < price; }).sort(function (a, b) { return b.price - a.price; });
+
+    /* Entry: أقرب HVN أو Support تحت السعر */
+    var entry = price * 0.985; /* افتراضي */
+    if (hvnBelow.length > 0 && hvnBelow[0].price > price * 0.96) {
+      entry = hvnBelow[0].price;
+    } else if (supports.length > 0 && supports[0] > price * 0.95) {
+      entry = supports[0] * 1.005; /* فوق الدعم بقليل */
+    }
+
+    /* Stop: تحت أقرب Support أو Fibonacci 0.786 */
+    var stop = entry * 0.93;
+    if (supports.length > 0) {
+      var deepSupport = supports.find(function (s) { return s < entry * 0.98; });
+      if (deepSupport) stop = deepSupport * 0.99;
+    }
+    if (fib.level786 && fib.level786 < entry) {
+      stop = Math.min(stop, fib.level786 * 0.995);
+    }
+
+    /* Target 1: Fibonacci 0.618 أو أقرب Resistance */
+    var target1 = price * 1.05;
+    if (fib.level618 && fib.level618 > price) {
+      target1 = fib.level618;
+    } else if (resistances.length > 0) {
+      target1 = resistances[0] * 0.995;
+    }
+
+    /* Target 2: أبعد Resistance أو Fibonacci 1.0 */
+    var target2 = price * 1.10;
+    if (resistances.length > 1) {
+      target2 = resistances[1] * 0.995;
+    } else if (fib.level100) {
+      target2 = fib.level100;
+    }
+
+    /* تعديل حسب نظام السوق */
+    if (regime === 'VOLATILE') {
+      stop = stop * 0.98; /* وقف أوسع */
+      target2 = target2 * 1.05;
+    } else if (regime === 'RANGING') {
+      /* في النطاق: TP عند المقاومة العلوية */
+      if (resistances.length > 0) target1 = resistances[0] * 0.99;
+    }
+
+    /* R/R Ratio */
+    var risk = entry - stop;
+    var rr = risk > 0 ? ((target1 - entry) / risk) : 0;
+
+    return {
+      entry: +entry.toFixed(8),
+      stop: +stop.toFixed(8),
+      target1: +target1.toFixed(8),
+      target2: +target2.toFixed(8),
+      rr: +rr.toFixed(1),
+      support: supports[0] || null,
+      resistance: resistances[0] || null,
+      hvn: hvnBelow.length > 0 ? hvnBelow[0].price : null,
+      fibonacci: fib,
+      regime: regime,
+      quality: rr >= 3 ? 'EXCELLENT' : rr >= 2 ? 'GOOD' : rr >= 1.5 ? 'FAIR' : 'POOR'
+    };
+  }
+
+  function _defaultEntry(price) {
+    return {
+      entry: +(price * 0.985).toFixed(8),
+      stop: +(price * 0.93).toFixed(8),
+      target1: +(price * 1.05).toFixed(8),
+      target2: +(price * 1.10).toFixed(8),
+      rr: 3.3,
+      quality: 'DEFAULT'
+    };
+  }
+
+  function _findSR(highs, lows) {
+    var support = [], resistance = [];
+    var len = Math.min(highs.length, lows.length);
+    for (var i = 2; i < len - 2; i++) {
+      if (highs[i] > highs[i - 1] && highs[i] > highs[i - 2] && highs[i] > highs[i + 1] && highs[i] > highs[i + 2]) {
+        resistance.push(highs[i]);
+      }
+      if (lows[i] < lows[i - 1] && lows[i] < lows[i - 2] && lows[i] < lows[i + 1] && lows[i] < lows[i + 2]) {
+        support.push(lows[i]);
+      }
+    }
+    return { support: _cluster(support), resistance: _cluster(resistance) };
+  }
+
+  function _cluster(levels) {
+    if (levels.length < 2) return levels;
+    levels.sort(function (a, b) { return a - b; });
+    var result = [], group = [levels[0]];
+    for (var i = 1; i < levels.length; i++) {
+      if (Math.abs(levels[i] - group[0]) / group[0] < 0.015) group.push(levels[i]);
+      else { result.push(group.reduce(function (a, b) { return a + b; }, 0) / group.length); group = [levels[i]]; }
+    }
+    result.push(group.reduce(function (a, b) { return a + b; }, 0) / group.length);
+    return result;
+  }
+
+  function _findHVN(klines) {
+    if (!klines || klines.length < 5) return [];
+    var prices = [], minP = Infinity, maxP = 0;
+    klines.forEach(function (k) { var h = +k[2], l = +k[3]; if (h > maxP) maxP = h; if (l < minP) minP = l; });
+    var bins = 20, binSize = (maxP - minP) / bins;
+    if (binSize <= 0) return [];
+    var profile = new Array(bins).fill(0);
+    klines.forEach(function (k) {
+      var mid = (+k[2] + +k[3]) / 2, vol = +k[5];
+      var idx = Math.min(bins - 1, Math.max(0, Math.floor((mid - minP) / binSize)));
+      profile[idx] += vol;
+    });
+    var avgVol = profile.reduce(function (a, b) { return a + b; }, 0) / bins;
+    var hvn = [];
+    for (var i = 0; i < bins; i++) {
+      if (profile[i] > avgVol * 1.5) {
+        hvn.push({ price: +(minP + binSize * (i + 0.5)).toFixed(8), volume: profile[i], strength: +(profile[i] / avgVol).toFixed(1) });
+      }
+    }
+    return hvn.sort(function (a, b) { return b.volume - a.volume; });
+  }
+
+  function _calcFibonacci(highs, lows) {
+    if (!highs.length || !lows.length) return {};
+    var high = Math.max.apply(null, highs.slice(-30));
+    var low = Math.min.apply(null, lows.slice(-30));
+    var range = high - low;
+    return {
+      level236: +(high - range * 0.236).toFixed(8),
+      level382: +(high - range * 0.382).toFixed(8),
+      level500: +(high - range * 0.5).toFixed(8),
+      level618: +(high - range * 0.618).toFixed(8),
+      level786: +(high - range * 0.786).toFixed(8),
+      level100: +high.toFixed(8),
+      level000: +low.toFixed(8),
+      high: high,
+      low: low
+    };
+  }
+
+  return { optimize: optimize };
+})();
+
+
+/* ═══════════════════════════════════════════════════════════════
+   🎯 SIGNAL ENGINE V2 — نقطة التكامل
+   ═══════════════════════════════════════════════════════════════
+*/
+
+var SignalEngineV2 = {
+  Bayesian: BayesianScorer,
+  MTF: MTFConfluence,
+  Regime: MarketRegime,
+  Position: PositionSizer,
+  Entry: EntryOptimizer,
+
+  /**
+   * تحليل شامل لعملة — يجمع كل المحركات
+   * @param {string} sym — رمز العملة
+   * @param {Object} rawChecks — نتائج الفحوصات الحالية من deepAnalyze
+   * @param {Object} [opts] — خيارات إضافية
+   * @returns {Promise<Object>} التحليل الشامل
+   */
+  fullAnalysis: async function (sym, rawChecks, opts) {
+    opts = opts || {};
+
+    /* 1. Bayesian Score */
+    var bayesian = BayesianScorer.score(rawChecks);
+
+    /* 2. Market Regime (يحتاج BTC klines) */
+    var regime = { regime: 'UNKNOWN', strategy: {} };
+    try {
+      if (typeof T !== 'undefined' && T.BTC) {
+        var btcKl = opts.btcKlines;
+        if (btcKl && btcKl.length >= 30) {
+          regime = MarketRegime.detect({
+            closes: btcKl.map(function (k) { return +k[4]; }),
+            highs: btcKl.map(function (k) { return +k[2]; }),
+            lows: btcKl.map(function (k) { return +k[3]; }),
+            volumes: btcKl.map(function (k) { return +k[5]; })
+          });
+        }
+      }
+    } catch (e) {}
+
+    /* 3. Multi-Timeframe (إن توفرت البيانات) */
+    var mtf = null;
+    try {
+      if (opts.fetchMTF !== false) {
+        var tfData = await MTFConfluence.fetchAllTF(sym);
+        mtf = MTFConfluence.analyze(tfData);
+      }
+    } catch (e) {}
+
+    /* 4. Entry Optimization */
+    var entry = EntryOptimizer.optimize({
+      price: (typeof T !== 'undefined' && T[sym]) ? T[sym].p : 0,
+      klines: opts.klines || [],
+      regime: regime.regime
+    });
+
+    /* 5. Position Sizing */
+    var position = null;
+    if (opts.capital) {
+      position = PositionSizer.calculate({
+        capital: opts.capital,
+        winRate: bayesian.probability,
+        avgWin: opts.avgWin || 4,
+        avgLoss: opts.avgLoss || 2,
+        consecutiveLosses: opts.consecutiveLosses || 0,
+        openPositions: opts.openPositions || 0,
+        maxPositions: opts.maxPositions || 5
+      });
+    }
+
+    /* 6. Expected Value */
+    var ev = bayesian.probability * (opts.avgWin || 4) - (1 - bayesian.probability) * (opts.avgLoss || 2);
+
+    /* 7. النتيجة النهائية */
+    var finalScore = bayesian.probability * 100;
+    if (mtf && mtf.alignmentScore > 50) finalScore += 10;
+    if (regime.regime === 'TRENDING_UP') finalScore += 5;
+    else if (regime.regime === 'TRENDING_DOWN') finalScore -= 15;
+    finalScore = Math.max(0, Math.min(100, finalScore));
+
+    return {
+      sym: sym,
+      bayesian: bayesian,
+      regime: regime,
+      mtf: mtf,
+      entry: entry,
+      position: position,
+      expectedValue: +ev.toFixed(3),
+      evPositive: ev > 0,
+      finalScore: Math.round(finalScore),
+      shouldTrade: ev > 0 && entry.rr >= 1.5 && bayesian.probability > 0.5,
+      timestamp: Date.now()
+    };
+  }
+};
+
+window.SignalEngineV2 = SignalEngineV2;
+window.BayesianScorer = BayesianScorer;
+window.MTFConfluence = MTFConfluence;
+window.MarketRegime = MarketRegime;
+window.PositionSizer = PositionSizer;
+window.EntryOptimizer = EntryOptimizer;
+
+/* ╔══════════════════════════════════════════════════════════════╗ */
+/* ║  MODULE 5: BACKTESTER — محرك الاختبار الرجعي              ║ */
+/* ╚══════════════════════════════════════════════════════════════╝ */
+/**
+ * ═══════════════════════════════════════════════════════════════════
+ *  NEXUS PRO V10 — محرك Backtesting
+ *  Backtesting Engine + A/B Testing + Walk-Forward Optimization
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ *  ✅ إعادة تشغيل خوارزمية الإشارات على بيانات تاريخية
+ *  ✅ تحقق من النتائج بعد 1h, 4h, 12h, 24h
+ *  ✅ Win Rate, Avg Return, Max Drawdown, Sharpe Ratio
+ *  ✅ A/B Testing: مقارنة نسختين من الخوارزمية
+ *  ✅ Walk-Forward Optimization
+ *  ✅ Signal Quality Score V2 مع Confidence Interval
+ *  ✅ يعمل في Web Worker (لا يجمّد الواجهة)
+ *
+ *  @version 1.0
+ */
+
+var Backtester = (function () {
+
+  /** @type {string} */
+  var STORAGE_KEY = 'nxBacktest';
+  /** @type {Object|null} */
+  var _lastResult = null;
+
+  /**
+   * جلب بيانات تاريخية من Binance
+   * @param {string} sym — رمز العملة
+   * @param {string} interval — الفاصل الزمني
+   * @param {number} limit — عدد الشموع
+   * @returns {Promise<Array|null>}
+   */
+  async function _fetchKlines(sym, interval, limit) {
+    var url = 'https://api.binance.com/api/v3/klines?symbol=' + sym + 'USDT&interval=' + interval + '&limit=' + limit;
+    try {
+      var res = typeof fj === 'function' ? await fj(url) : await fetch(url).then(function (r) { return r.json(); });
+      return res;
+    } catch (e) { return null; }
+  }
+
+  /**
+   * محاكاة quickScan على بيانات تاريخية
+   * @param {Array} klines — بيانات الشموع
+   * @param {number} index — النقطة الحالية في البيانات
+   * @returns {Object} نتيجة الفحص
+   */
+  function _simulateScan(klines, index) {
+    if (index < 26) return null;
+
+    var slice = klines.slice(0, index + 1);
+    var closes = slice.map(function (k) { return +k[4]; });
+    var volumes = slice.map(function (k) { return +k[5]; });
+    var price = closes[closes.length - 1];
+
+    /* 1. Volume Spike */
+    var avgVol = volumes.slice(-15, -3).reduce(function (a, b) { return a + b; }, 0) / 12;
+    var recentVol = (volumes[volumes.length - 1] + volumes[volumes.length - 2]) / 2;
+    var volSpike = avgVol > 0 ? recentVol / avgVol : 1;
+
+    /* 2. RSI */
+    var rsi = _calcRSI(closes, 14);
+
+    /* 3. MACD */
+    var macd = _calcMACD(closes);
+
+    /* 4. Price change */
+    var change24 = closes.length > 24 ? ((price - closes[closes.length - 25]) / closes[closes.length - 25]) * 100 : 0;
+
+    /* 5. Near high */
+    var high24 = Math.max.apply(null, slice.slice(-24).map(function (k) { return +k[2]; }));
+    var nearHigh = ((high24 - price) / price) * 100 < 1.5;
+
+    /* Score */
+    var score = 0, checks = { vol: false, rsi: false, macd: false };
+
+    if (volSpike > 1.8) { score += 20; checks.vol = true; }
+    else if (volSpike > 1.3) { score += 10; checks.vol = true; }
+
+    if (rsi >= 35 && rsi <= 60) { score += 12; checks.rsi = true; }
+    else if (rsi < 30) { score += 15; checks.rsi = true; }
+
+    if (macd.h > 0) { score += 12; checks.macd = true; }
+    if (macd.cross === 'bull') score += 5;
+
+    if (change24 >= 0.5 && change24 < 3) score += 25; /* EARLY */
+    if (change24 >= 3 && change24 < 8) score += 18;
+    if (nearHigh) score += 12;
+
+    var passed = Object.values(checks).filter(Boolean).length;
+
+    return {
+      price: price,
+      score: score,
+      checks: checks,
+      passed: passed,
+      rsi: rsi,
+      macd: macd.cross,
+      volSpike: +volSpike.toFixed(2),
+      change: +change24.toFixed(2),
+      time: +klines[index][0]
+    };
+  }
+
+  /**
+   * تشغيل Backtest كامل
+   * @param {Object} opts
+   * @param {string[]} opts.symbols — العملات (أهم 50)
+   * @param {number} opts.days — عدد الأيام (افتراضي 30)
+   * @param {number} opts.minScore — حد أدنى للإشارة
+   * @param {Function} [opts.onProgress] — callback للتقدم
+   * @returns {Promise<Object>} النتائج الكاملة
+   */
+  async function run(opts) {
+    var symbols = opts.symbols || ['BTC', 'ETH', 'SOL', 'BNB', 'XRP'];
+    var days = opts.days || 30;
+    var minScore = opts.minScore || 40;
+    var onProgress = opts.onProgress || function () {};
+
+    var signals = [];
+    var totalSyms = symbols.length;
+
+    for (var si = 0; si < totalSyms; si++) {
+      var sym = symbols[si];
+      onProgress({ phase: 'fetching', symbol: sym, progress: Math.round((si / totalSyms) * 50) });
+
+      /* جلب شموع 1h لآخر N يوم */
+      var klines = await _fetchKlines(sym, '1h', days * 24);
+      if (!klines || klines.length < 50) continue;
+
+      /* محاكاة الماسح على كل نقطة */
+      for (var i = 50; i < klines.length - 24; i++) {
+        var scan = _simulateScan(klines, i);
+        if (!scan || scan.score < minScore) continue;
+
+        var entryPrice = scan.price;
+        var entryTime = scan.time;
+
+        /* تحقق من النتيجة بعد 1h, 4h, 12h, 24h */
+        var outcomes = {};
+        var checkPoints = { '1h': 1, '4h': 4, '12h': 12, '24h': 24 };
+        var keys = Object.keys(checkPoints);
+        var maxGain = 0, maxDrawdown = 0;
+
+        for (var cp = 0; cp < keys.length; cp++) {
+          var label = keys[cp];
+          var offset = checkPoints[label];
+          if (i + offset < klines.length) {
+            var futurePrice = +klines[i + offset][4];
+            var pnl = ((futurePrice - entryPrice) / entryPrice) * 100;
+            outcomes[label] = +pnl.toFixed(3);
+
+            /* Max gain/drawdown during period */
+            for (var j = i + 1; j <= i + offset && j < klines.length; j++) {
+              var hGain = ((+klines[j][2]) - entryPrice) / entryPrice * 100;
+              var lDraw = ((+klines[j][3]) - entryPrice) / entryPrice * 100;
+              if (hGain > maxGain) maxGain = hGain;
+              if (lDraw < maxDrawdown) maxDrawdown = lDraw;
+            }
+          }
+        }
+
+        signals.push({
+          sym: sym,
+          score: scan.score,
+          passed: scan.passed,
+          rsi: scan.rsi,
+          macd: scan.macd,
+          volSpike: scan.volSpike,
+          entryPrice: entryPrice,
+          entryTime: entryTime,
+          change: scan.change,
+          outcomes: outcomes,
+          maxGain: +maxGain.toFixed(2),
+          maxDrawdown: +maxDrawdown.toFixed(2),
+          hit3pct: outcomes['4h'] >= 3 || outcomes['12h'] >= 3 || outcomes['24h'] >= 3,
+          hour: new Date(entryTime).getUTCHours()
+        });
+      }
+
+      /* تأخير لتجنب rate limiting */
+      if (si < totalSyms - 1) await new Promise(function (r) { setTimeout(r, 200); });
+    }
+
+    onProgress({ phase: 'analyzing', progress: 80 });
+
+    /* === تحليل النتائج === */
+    var result = _analyzeResults(signals, minScore);
+    _lastResult = result;
+
+    /* حفظ */
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ time: Date.now(), result: result })); } catch (e) {}
+
+    onProgress({ phase: 'done', progress: 100 });
+    return result;
+  }
+
+  /**
+   * تحليل نتائج Backtest
+   * @param {Array} signals
+   * @param {number} minScore
+   * @returns {Object}
+   */
+  function _analyzeResults(signals, minScore) {
+    if (!signals.length) return { totalSignals: 0 };
+
+    /* تصنيف حسب النوع */
+    var ultra = signals.filter(function (s) { return s.score >= 70 && s.passed >= 5; });
+    var confirmed = signals.filter(function (s) { return s.score >= 50 && s.passed >= 3 && s.score < 70; });
+    var breakout = signals.filter(function (s) { return s.change >= 3 && s.score >= 40; });
+
+    /* Win Rate (target hit >= 3% within 24h) */
+    var wins = signals.filter(function (s) { return s.hit3pct; });
+    var winRate = signals.length > 0 ? (wins.length / signals.length * 100) : 0;
+
+    /* Average Return */
+    var returns4h = signals.map(function (s) { return s.outcomes['4h'] || 0; });
+    var returns24h = signals.map(function (s) { return s.outcomes['24h'] || 0; });
+    var avgReturn4h = returns4h.reduce(function (a, b) { return a + b; }, 0) / returns4h.length;
+    var avgReturn24h = returns24h.reduce(function (a, b) { return a + b; }, 0) / returns24h.length;
+
+    /* Max Drawdown */
+    var maxDD = Math.min.apply(null, signals.map(function (s) { return s.maxDrawdown; }));
+
+    /* Sharpe Ratio (مبسّط: mean/std of 4h returns) */
+    var mean = avgReturn4h;
+    var variance = returns4h.reduce(function (s, r) { return s + Math.pow(r - mean, 2); }, 0) / returns4h.length;
+    var std = Math.sqrt(variance);
+    var sharpe = std > 0 ? (mean / std * Math.sqrt(6)) : 0; /* annualized approx for 4h */
+
+    /* Win Rate per type */
+    function typeStats(arr) {
+      var w = arr.filter(function (s) { return s.hit3pct; });
+      var avgR = arr.length > 0 ? arr.reduce(function (s, x) { return s + (x.outcomes['24h'] || 0); }, 0) / arr.length : 0;
+      return { total: arr.length, wins: w.length, rate: arr.length > 0 ? +(w.length / arr.length * 100).toFixed(1) : 0, avgReturn: +avgR.toFixed(2) };
+    }
+
+    /* Best/Worst hour */
+    var hourBuckets = {};
+    signals.forEach(function (s) {
+      var h = s.hour;
+      if (!hourBuckets[h]) hourBuckets[h] = { wins: 0, total: 0 };
+      hourBuckets[h].total++;
+      if (s.hit3pct) hourBuckets[h].wins++;
+    });
+    var bestHour = -1, worstHour = -1, bestHourRate = 0, worstHourRate = 100;
+    Object.keys(hourBuckets).forEach(function (h) {
+      var b = hourBuckets[h];
+      if (b.total < 3) return;
+      var rate = b.wins / b.total * 100;
+      if (rate > bestHourRate) { bestHourRate = rate; bestHour = +h; }
+      if (rate < worstHourRate) { worstHourRate = rate; worstHour = +h; }
+    });
+
+    /* Best/Worst coin */
+    var coinBuckets = {};
+    signals.forEach(function (s) {
+      if (!coinBuckets[s.sym]) coinBuckets[s.sym] = { wins: 0, total: 0, returns: [] };
+      coinBuckets[s.sym].total++;
+      coinBuckets[s.sym].returns.push(s.outcomes['24h'] || 0);
+      if (s.hit3pct) coinBuckets[s.sym].wins++;
+    });
+
+    /* Equity Curve */
+    var equity = [10000]; /* بدء بـ $10,000 */
+    var sortedSignals = signals.slice().sort(function (a, b) { return a.entryTime - b.entryTime; });
+    sortedSignals.forEach(function (s) {
+      var pnl = s.outcomes['4h'] || 0;
+      var lastEquity = equity[equity.length - 1];
+      equity.push(+(lastEquity * (1 + pnl / 100)).toFixed(2));
+    });
+
+    return {
+      totalSignals: signals.length,
+      winRate: +winRate.toFixed(1),
+      avgReturn4h: +avgReturn4h.toFixed(3),
+      avgReturn24h: +avgReturn24h.toFixed(3),
+      maxDrawdown: +maxDD.toFixed(2),
+      sharpeRatio: +sharpe.toFixed(2),
+      byType: { ultra: typeStats(ultra), confirmed: typeStats(confirmed), breakout: typeStats(breakout) },
+      bestHour: bestHour,
+      worstHour: worstHour,
+      hourlyStats: hourBuckets,
+      coinStats: coinBuckets,
+      equityCurve: equity,
+      signals: signals.slice(0, 200), /* أهم 200 إشارة */
+      timestamp: Date.now()
+    };
+  }
+
+
+  /* ═══ A/B TESTING ═══ */
+
+  /**
+   * تشغيل A/B Test — مقارنة نسختين من الخوارزمية
+   * @param {Object} opts
+   * @param {string[]} opts.symbols
+   * @param {number} opts.days
+   * @param {Object} opts.configA — إعدادات النسخة A
+   * @param {Object} opts.configB — إعدادات النسخة B
+   * @returns {Promise<Object>}
+   */
+  async function abTest(opts) {
+    var resultA = await run({ symbols: opts.symbols, days: opts.days, minScore: opts.configA.minScore || 40 });
+    var resultB = await run({ symbols: opts.symbols, days: opts.days, minScore: opts.configB.minScore || 50 });
+
+    /* مقارنة إحصائية */
+    var better = resultA.winRate > resultB.winRate ? 'A' : 'B';
+    var diff = Math.abs(resultA.winRate - resultB.winRate);
+    var significant = diff > 5 && Math.min(resultA.totalSignals, resultB.totalSignals) > 20;
+
+    return {
+      A: { config: opts.configA, result: resultA },
+      B: { config: opts.configB, result: resultB },
+      winner: better,
+      winRateDiff: +diff.toFixed(1),
+      isSignificant: significant,
+      recommendation: significant
+        ? 'النسخة ' + better + ' أفضل بفارق ' + diff.toFixed(1) + '% — اعتمدها'
+        : 'لا فرق كافٍ — تحتاج بيانات أكثر'
+    };
+  }
+
+
+  /* ═══ WALK-FORWARD OPTIMIZATION ═══ */
+
+  /**
+   * Walk-Forward: تدريب على 70% واختبار على 30%
+   * @param {Array} allSignals — كل الإشارات
+   * @param {number} windowSize — حجم النافذة (عدد الإشارات)
+   * @returns {Object}
+   */
+  function walkForward(allSignals, windowSize) {
+    windowSize = windowSize || 100;
+    if (allSignals.length < windowSize) return { error: 'بيانات غير كافية' };
+
+    var results = [];
+    var step = Math.floor(windowSize * 0.3);
+
+    for (var start = 0; start + windowSize <= allSignals.length; start += step) {
+      var window = allSignals.slice(start, start + windowSize);
+      var trainSize = Math.floor(windowSize * 0.7);
+      var train = window.slice(0, trainSize);
+      var test = window.slice(trainSize);
+
+      /* "تدريب": حساب أفضل minScore من بيانات التدريب */
+      var bestScore = 40, bestRate = 0;
+      for (var ms = 30; ms <= 80; ms += 5) {
+        var filtered = train.filter(function (s) { return s.score >= ms; });
+        if (filtered.length < 5) continue;
+        var rate = filtered.filter(function (s) { return s.hit3pct; }).length / filtered.length * 100;
+        if (rate > bestRate) { bestRate = rate; bestScore = ms; }
+      }
+
+      /* "اختبار": تطبيق على بيانات الاختبار */
+      var testFiltered = test.filter(function (s) { return s.score >= bestScore; });
+      var testRate = testFiltered.length > 0
+        ? testFiltered.filter(function (s) { return s.hit3pct; }).length / testFiltered.length * 100
+        : 0;
+
+      results.push({
+        window: start,
+        trainRate: +bestRate.toFixed(1),
+        testRate: +testRate.toFixed(1),
+        optimalMinScore: bestScore,
+        trainSize: train.length,
+        testSize: test.length,
+        overfitting: bestRate - testRate > 15
+      });
+    }
+
+    var avgTestRate = results.reduce(function (s, r) { return s + r.testRate; }, 0) / results.length;
+    var avgOverfit = results.filter(function (r) { return r.overfitting; }).length / results.length * 100;
+
+    return {
+      windows: results,
+      avgTestWinRate: +avgTestRate.toFixed(1),
+      overfitPct: +avgOverfit.toFixed(0),
+      recommendedMinScore: results.length > 0
+        ? Math.round(results.reduce(function (s, r) { return s + r.optimalMinScore; }, 0) / results.length)
+        : 50
+    };
+  }
+
+
+  /* ═══ SIGNAL QUALITY SCORE V2 ═══ */
+
+  /**
+   * حساب Expected Value مع Confidence Interval
+   * @param {Object} params
+   * @param {number} params.winRate — معدل الربح (0-100)
+   * @param {number} params.avgWin — متوسط الربح
+   * @param {number} params.avgLoss — متوسط الخسارة
+   * @param {number} params.sampleSize — حجم العينة
+   * @returns {Object}
+   */
+  function signalQualityV2(params) {
+    var wr = params.winRate / 100;
+    var avgWin = params.avgWin || 3;
+    var avgLoss = params.avgLoss || 2;
+    var n = params.sampleSize || 10;
+
+    /* Expected Value */
+    var ev = wr * avgWin - (1 - wr) * avgLoss;
+
+    /* Confidence Interval (95%) using Wilson Score */
+    var z = 1.96;
+    var p = wr;
+    var denom = 1 + z * z / n;
+    var center = (p + z * z / (2 * n)) / denom;
+    var margin = z * Math.sqrt((p * (1 - p) + z * z / (4 * n)) / n) / denom;
+
+    var lowerWR = Math.max(0, center - margin) * 100;
+    var upperWR = Math.min(1, center + margin) * 100;
+
+    /* EV range */
+    var evLower = (lowerWR / 100) * avgWin - (1 - lowerWR / 100) * avgLoss;
+    var evUpper = (upperWR / 100) * avgWin - (1 - upperWR / 100) * avgLoss;
+
+    return {
+      expectedValue: +ev.toFixed(3),
+      evPositive: ev > 0,
+      winRate: params.winRate,
+      winRateCI: [+lowerWR.toFixed(1), +upperWR.toFixed(1)],
+      evRange: [+evLower.toFixed(3), +evUpper.toFixed(3)],
+      shouldTrade: evLower > 0, /* فقط تداول إذا حتى الحد الأدنى > 0 */
+      quality: ev > 1 ? 'EXCELLENT' : ev > 0.3 ? 'GOOD' : ev > 0 ? 'MARGINAL' : 'NEGATIVE',
+      confidence: n >= 30 ? 'HIGH' : n >= 10 ? 'MEDIUM' : 'LOW'
+    };
+  }
+
+
+  /* ═══ PUBLIC API ═══ */
+
+  return {
+    run: run,
+    abTest: abTest,
+    walkForward: walkForward,
+    signalQualityV2: signalQualityV2,
+    getLastResult: function () {
+      if (_lastResult) return _lastResult;
+      try { var saved = JSON.parse(localStorage.getItem(STORAGE_KEY)); return saved ? saved.result : null; } catch (e) { return null; }
+    }
+  };
+
+
+  /* === Helper Functions === */
+  function _calcRSI(c, p) {
+    p = p || 14; if (c.length < p + 1) return 50;
+    var g = 0, l = 0;
+    for (var i = c.length - p; i < c.length; i++) { var d = c[i] - c[i - 1]; if (d > 0) g += d; else l += Math.abs(d); }
+    return 100 - 100 / (1 + g / Math.max(l, 0.001));
+  }
+
+  function _calcMACD(c) {
+    if (c.length < 26) return { h: 0, cross: 'none' };
+    var ema = function (d, p) { var k = 2 / (p + 1), e = d[0]; for (var i = 1; i < d.length; i++) e = d[i] * k + e * (1 - k); return e; };
+    var ml = ema(c.slice(-12), 12) - ema(c, 26);
+    var prev = c.length > 27 ? ema(c.slice(-13, -1).slice(-12), 12) - ema(c.slice(0, -1), 26) : 0;
+    var sig = ema(c.slice(-35).map(function () { return ml; }), 9);
+    return { h: ml, cross: ml > sig && prev <= sig ? 'bull' : ml < sig && prev >= sig ? 'bear' : 'none' };
+  }
+
+})();
+
+window.Backtester = Backtester;
+
+/* ╔══════════════════════════════════════════════════════════════╗ */
+/* ║  MODULE 6: AI ENGINE — الذكاء الاصطناعي                   ║ */
+/* ╚══════════════════════════════════════════════════════════════╝ */
+/**
+ * ═══════════════════════════════════════════════════════════════════
+ *  NEXUS PRO V10 — نظام الذكاء الاصطناعي
+ *  AI Module: ML + Anomaly Detection + Ensemble Scoring
+ * ═══════════════════════════════════════════════════════════════════
+ *
+ *  1. Feature Engineering Module (~20 features per coin)
+ *  2. Logistic Regression (Online Learning, pure JS)
+ *  3. Ensemble Scoring (Rule-based + ML + Regime)
+ *  4. Anomaly Detection (Volume/Price/FR spikes)
+ *  5. K-Means Market Regime Classifier
+ *
+ *  بدون مكتبات خارجية — JavaScript نقي
+ *  يعمل في Web Worker
+ *  @version 1.0
+ */
+
+
+/* ═══════════════════════════════════════════════════════════════
+   1) FEATURE ENGINEERING
+   ═══════════════════════════════════════════════════════════════ */
+
+var FeatureEngine = {
+  /**
+   * حساب كل الـ Features لعملة واحدة
+   * @param {Object} params
+   * @param {number[]} params.closes — أسعار إغلاق (1h, آخر 100)
+   * @param {number[]} params.volumes — أحجام
+   * @param {number[]} params.highs
+   * @param {number[]} params.lows
+   * @param {Object} params.meta — {fr, oi, ls, btcCloses, fgValue, whaleScore}
+   * @returns {Object} features vector
+   */
+  extract: function (params) {
+    var c = params.closes || [];
+    var v = params.volumes || [];
+    var h = params.highs || [];
+    var l = params.lows || [];
+    var m = params.meta || {};
+
+    if (c.length < 25) return null;
+
+    var price = c[c.length - 1];
+
+    /* ═══ Price Features ═══ */
+    var ret1h = c.length > 1 ? (price - c[c.length - 2]) / c[c.length - 2] : 0;
+    var ret4h = c.length > 4 ? (price - c[c.length - 5]) / c[c.length - 5] : 0;
+    var ret24h = c.length > 24 ? (price - c[c.length - 25]) / c[c.length - 25] : 0;
+
+    /* Volatility: 20-period standard deviation of returns */
+    var returns = [];
+    for (var i = Math.max(1, c.length - 20); i < c.length; i++) {
+      returns.push((c[i] - c[i - 1]) / c[i - 1]);
+    }
+    var meanR = returns.reduce(function (a, b) { return a + b; }, 0) / returns.length;
+    var volatility = Math.sqrt(returns.reduce(function (s, r) { return s + Math.pow(r - meanR, 2); }, 0) / returns.length);
+
+    /* Z-Score: مدى انحراف السعر عن المتوسط */
+    var sma20 = c.slice(-20).reduce(function (a, b) { return a + b; }, 0) / 20;
+    var sd20 = Math.sqrt(c.slice(-20).reduce(function (s, v) { return s + Math.pow(v - sma20, 2); }, 0) / 20);
+    var zScore = sd20 > 0 ? (price - sma20) / sd20 : 0;
+
+    /* ═══ Volume Features ═══ */
+    var avgVol = v.slice(-20).reduce(function (a, b) { return a + b; }, 0) / Math.min(20, v.length);
+    var recentVol = v.length > 0 ? v[v.length - 1] : 0;
+    var volRatio = avgVol > 0 ? recentVol / avgVol : 1;
+
+    /* VWAP deviation */
+    var vwap = 0, totalVol = 0;
+    for (var i = Math.max(0, c.length - 20); i < c.length; i++) {
+      vwap += c[i] * (v[i] || 0);
+      totalVol += (v[i] || 0);
+    }
+    vwap = totalVol > 0 ? vwap / totalVol : price;
+    var vwapDev = vwap > 0 ? (price - vwap) / vwap : 0;
+
+    /* OBV Trend */
+    var obv = 0;
+    for (var i = 1; i < Math.min(c.length, 20); i++) {
+      var idx = c.length - 20 + i;
+      if (idx > 0 && idx < c.length) {
+        obv += c[idx] > c[idx - 1] ? (v[idx] || 0) : -(v[idx] || 0);
+      }
+    }
+    var obvTrend = obv > 0 ? 1 : obv < 0 ? -1 : 0;
+
+    /* ═══ Momentum Features ═══ */
+    var rsi = _rsi(c, 14);
+    var macd = _macd(c);
+    var stoch = _stochastic(c, h, l, 14);
+
+    /* ═══ Market Features ═══ */
+    var btcCorr = 0;
+    if (m.btcCloses && m.btcCloses.length >= 20 && c.length >= 20) {
+      btcCorr = _correlation(c.slice(-20), m.btcCloses.slice(-20));
+    }
+
+    /* Beta = covariance(coin, BTC) / variance(BTC) */
+    var beta = 1;
+    if (m.btcCloses && m.btcCloses.length > 5) {
+      var coinRets = [], btcRets = [];
+      var len = Math.min(c.length, m.btcCloses.length, 20);
+      for (var i = 1; i < len; i++) {
+        coinRets.push((c[c.length - len + i] - c[c.length - len + i - 1]) / c[c.length - len + i - 1]);
+        btcRets.push((m.btcCloses[m.btcCloses.length - len + i] - m.btcCloses[m.btcCloses.length - len + i - 1]) / m.btcCloses[m.btcCloses.length - len + i - 1]);
+      }
+      var cov = _covariance(coinRets, btcRets);
+      var btcVar = _variance(btcRets);
+      beta = btcVar > 0 ? cov / btcVar : 1;
+    }
+
+    /* Relative Strength vs BTC */
+    var relStrength = 0;
+    if (m.btcCloses && m.btcCloses.length > 24) {
+      var btcRet = (m.btcCloses[m.btcCloses.length - 1] - m.btcCloses[m.btcCloses.length - 25]) / m.btcCloses[m.btcCloses.length - 25];
+      relStrength = ret24h - btcRet;
+    }
+
+    /* ═══ Sentiment Features ═══ */
+    var frZScore = 0;
+    if (m.fr !== undefined) {
+      frZScore = m.fr / 0.01; /* تقريبي: FR مقارنة بالمعدل */
+    }
+
+    var lsDev = 0;
+    if (m.ls) {
+      lsDev = (m.ls.ratio || 1) - 1; /* انحراف عن 1:1 */
+    }
+
+    var whaleScore = m.whaleScore || 0;
+
+    /* ═══ On-Chain Features ═══ */
+    var oiChange = m.oi || 0;
+    var liqRatio = m.liqRatio || 0;
+
+    /* ═══ تجميع كل الـ Features ═══ */
+    return {
+      /* Price (4) */
+      ret1h: +ret1h.toFixed(6),
+      ret4h: +ret4h.toFixed(6),
+      ret24h: +ret24h.toFixed(6),
+      volatility: +volatility.toFixed(6),
+      zScore: +zScore.toFixed(4),
+
+      /* Volume (3) */
+      volRatio: +volRatio.toFixed(4),
+      vwapDev: +vwapDev.toFixed(6),
+      obvTrend: obvTrend,
+
+      /* Momentum (4) */
+      rsi: +rsi.toFixed(2),
+      macdHist: +macd.h.toFixed(6),
+      macdCross: macd.cross === 'bull' ? 1 : macd.cross === 'bear' ? -1 : 0,
+      stochK: +stoch.k.toFixed(2),
+
+      /* Market (3) */
+      btcCorrelation: +btcCorr.toFixed(4),
+      beta: +beta.toFixed(4),
+      relStrength: +relStrength.toFixed(6),
+
+      /* Sentiment (3) */
+      frZScore: +frZScore.toFixed(4),
+      lsDev: +lsDev.toFixed(4),
+      whaleScore: whaleScore,
+
+      /* On-chain (2) */
+      oiChange: oiChange,
+      liqRatio: liqRatio
+    };
+  }
+};
+
+
+/* ═══════════════════════════════════════════════════════════════
+   2) LOGISTIC REGRESSION — يعمل في المتصفح
+   ═══════════════════════════════════════════════════════════════
+
+   الصيغة:
+   P(y=1|x) = σ(w·x + b) = 1 / (1 + exp(-(w·x + b)))
+
+   التدريب: Stochastic Gradient Descent
+   ∂L/∂w_i = (prediction - actual) × x_i
+   w_i = w_i - lr × ∂L/∂w_i
+
+   Online Learning: يتعلم من كل صفقة جديدة
+*/
+
+var LogisticRegression = (function () {
+
+  var STORAGE_KEY = 'nxLR';
+  var FEATURES = ['ret1h', 'ret4h', 'ret24h', 'volatility', 'zScore',
+    'volRatio', 'vwapDev', 'obvTrend',
+    'rsi', 'macdHist', 'macdCross', 'stochK',
+    'btcCorrelation', 'beta', 'relStrength',
+    'frZScore', 'lsDev', 'whaleScore',
+    'oiChange', 'liqRatio'];
+
+  /** @type {number[]} الأوزان */
+  var _weights = null;
+  /** @type {number} الانحياز */
+  var _bias = 0;
+  /** @type {number} معدل التعلم */
+  var _lr = 0.01;
+  /** @type {number} عدد التدريبات */
+  var _trainCount = 0;
+  /** @type {number[]} Mean لكل feature (للتطبيع) */
+  var _means = null;
+  /** @type {number[]} Std لكل feature */
+  var _stds = null;
+
+  function _load() {
+    if (_weights) return;
+    try {
+      var saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+      if (saved && saved.weights) {
+        _weights = saved.weights;
+        _bias = saved.bias || 0;
+        _trainCount = saved.trainCount || 0;
+        _means = saved.means || new Array(FEATURES.length).fill(0);
+        _stds = saved.stds || new Array(FEATURES.length).fill(1);
+        return;
+      }
+    } catch (e) {}
+    /* Initialize */
+    _weights = new Array(FEATURES.length).fill(0);
+    /* Xavier initialization */
+    var scale = Math.sqrt(2 / FEATURES.length);
+    for (var i = 0; i < _weights.length; i++) _weights[i] = (Math.random() - 0.5) * scale;
+    _bias = 0;
+    _trainCount = 0;
+    _means = new Array(FEATURES.length).fill(0);
+    _stds = new Array(FEATURES.length).fill(1);
+  }
+
+  function _save() {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ weights: _weights, bias: _bias, trainCount: _trainCount, means: _means, stds: _stds })); } catch (e) {}
+  }
+
+  /** Sigmoid function */
+  function _sigmoid(z) { return 1 / (1 + Math.exp(-Math.max(-500, Math.min(500, z)))); }
+
+  /**
+   * تحويل features object إلى vector مطبّع
+   * @param {Object} features
+   * @returns {number[]}
+   */
+  function _toVector(features) {
+    return FEATURES.map(function (name, i) {
+      var val = features[name] || 0;
+      /* تطبيع */
+      return _stds[i] > 0.0001 ? (val - _means[i]) / _stds[i] : val;
+    });
+  }
+
+  return {
+    /**
+     * التنبؤ: احتمال صعود +3% خلال 4 ساعات
+     * @param {Object} features — من FeatureEngine.extract()
+     * @returns {{probability: number, confidence: number}}
+     */
+    predict: function (features) {
+      _load();
+      var x = _toVector(features);
+
+      /* z = w·x + b */
+      var z = _bias;
+      for (var i = 0; i < x.length; i++) z += _weights[i] * x[i];
+
+      var prob = _sigmoid(z);
+      var confidence = Math.round(Math.abs(prob - 0.5) * 200);
+
+      return { probability: +prob.toFixed(4), confidence: confidence };
+    },
+
+    /**
+     * تدريب على ملاحظة جديدة (Online Learning)
+     * @param {Object} features — features عند الدخول
+     * @param {boolean} actual — هل ربحت الصفقة
+     */
+    train: function (features, actual) {
+      _load();
+      var x = _toVector(features);
+      var y = actual ? 1 : 0;
+
+      /* Forward pass */
+      var z = _bias;
+      for (var i = 0; i < x.length; i++) z += _weights[i] * x[i];
+      var pred = _sigmoid(z);
+
+      /* Gradient descent */
+      var error = pred - y;
+      for (var i = 0; i < _weights.length; i++) {
+        _weights[i] -= _lr * error * x[i];
+        /* L2 regularization */
+        _weights[i] *= (1 - _lr * 0.001);
+      }
+      _bias -= _lr * error;
+
+      /* تحديث المتوسطات (Running Mean/Std) */
+      _trainCount++;
+      var raw = FEATURES.map(function (name) { return features[name] || 0; });
+      for (var i = 0; i < raw.length; i++) {
+        var oldMean = _means[i];
+        _means[i] = oldMean + (raw[i] - oldMean) / _trainCount;
+        _stds[i] = Math.sqrt(((_stds[i] * _stds[i]) * (_trainCount - 1) + (raw[i] - _means[i]) * (raw[i] - oldMean)) / _trainCount);
+      }
+
+      _save();
+    },
+
+    /** عدد التدريبات */
+    getTrainCount: function () { _load(); return _trainCount; },
+
+    /** الأوزان */
+    getWeights: function () { _load(); return FEATURES.map(function (name, i) { return { feature: name, weight: +_weights[i].toFixed(4) }; }).sort(function (a, b) { return Math.abs(b.weight) - Math.abs(a.weight); }); },
+
+    /** إعادة ضبط */
+    reset: function () { _weights = null; localStorage.removeItem(STORAGE_KEY); _load(); }
+  };
+})();
+
+
+/* ═══════════════════════════════════════════════════════════════
+   3) ENSEMBLE SCORING
+   ═══════════════════════════════════════════════════════════════ */
+
+var EnsembleScorer = {
+
+  /**
+   * حساب النتيجة المجمّعة من 3 أنظمة
+   * @param {Object} params
+   * @param {number} params.ruleScore — نتيجة النظام الحالي (0-100)
+   * @param {number} params.mlProb — احتمال ML (0-1)
+   * @param {number} params.regimeScore — نتيجة نظام السوق (0-100)
+   * @param {Object} [params.history] — أداء كل نظام في آخر 50 صفقة
+   * @returns {Object}
+   */
+  score: function (params) {
+    var ruleNorm = (params.ruleScore || 0) / 100; /* تطبيع 0-1 */
+    var mlProb = params.mlProb || 0.5;
+    var regimeNorm = (params.regimeScore || 50) / 100;
+
+    /* أوزان ديناميكية حسب الأداء */
+    var weights = { rule: 0.4, ml: 0.35, regime: 0.25 };
+
+    if (params.history) {
+      var h = params.history;
+      var totalPerf = (h.ruleRate || 50) + (h.mlRate || 50) + (h.regimeRate || 50);
+      if (totalPerf > 0) {
+        weights.rule = (h.ruleRate || 50) / totalPerf;
+        weights.ml = (h.mlRate || 50) / totalPerf;
+        weights.regime = (h.regimeRate || 50) / totalPerf;
+      }
+    }
+
+    /* النتيجة المجمّعة */
+    var final = weights.rule * ruleNorm + weights.ml * mlProb + weights.regime * regimeNorm;
+    final = Math.max(0, Math.min(1, final));
+
+    return {
+      finalScore: Math.round(final * 100),
+      probability: +final.toFixed(4),
+      weights: { rule: +weights.rule.toFixed(3), ml: +weights.ml.toFixed(3), regime: +weights.regime.toFixed(3) },
+      components: { rule: +ruleNorm.toFixed(3), ml: +mlProb.toFixed(3), regime: +regimeNorm.toFixed(3) },
+      signal: final >= 0.7 ? 'STRONG_BUY' : final >= 0.55 ? 'BUY' : final >= 0.45 ? 'NEUTRAL' : final >= 0.3 ? 'CAUTION' : 'AVOID'
+    };
+  }
+};
+
+
+/* ═══════════════════════════════════════════════════════════════
+   4) ANOMALY DETECTION
+   ═══════════════════════════════════════════════════════════════ */
+
+var AnomalyDetector = {
+  /**
+   * كشف الحالات الشاذة
+   * @param {Object} params
+   * @param {number} params.volumeRatio — نسبة الحجم مقارنة بالمتوسط
+   * @param {number} params.priceChange5m — تغيير السعر في 5 دقائق (%)
+   * @param {number} params.frRate — Funding Rate
+   * @param {number} params.prevFrRate — FR السابق
+   * @param {number} params.oiChange — تغيير OI (%)
+   * @param {number} params.priceChange1h — تغيير السعر في ساعة (%)
+   * @returns {Object}
+   */
+  detect: function (params) {
+    var anomalies = [];
+
+    /* Volume spike > 5σ */
+    if (params.volumeRatio > 5) {
+      anomalies.push({
+        type: 'VOLUME_SPIKE',
+        severity: params.volumeRatio > 10 ? 'EXTREME' : 'HIGH',
+        value: params.volumeRatio,
+        description_ar: 'ارتفاع حجم غير طبيعي: ' + params.volumeRatio.toFixed(1) + 'x',
+        description_en: 'Abnormal volume spike: ' + params.volumeRatio.toFixed(1) + 'x'
+      });
+    }
+
+    /* Price move > 3σ in < 5 minutes */
+    if (Math.abs(params.priceChange5m || 0) > 3) {
+      var dir = params.priceChange5m > 0 ? 'UP' : 'DOWN';
+      anomalies.push({
+        type: dir === 'UP' ? 'FLASH_PUMP' : 'FLASH_DUMP',
+        severity: Math.abs(params.priceChange5m) > 5 ? 'EXTREME' : 'HIGH',
+        value: params.priceChange5m,
+        description_ar: 'تحرك سريع ' + (dir === 'UP' ? '↑' : '↓') + ' ' + Math.abs(params.priceChange5m).toFixed(1) + '% في 5 دقائق',
+        description_en: 'Flash ' + dir.toLowerCase() + ': ' + Math.abs(params.priceChange5m).toFixed(1) + '% in 5min'
+      });
+    }
+
+    /* Funding Rate flip */
+    if (params.frRate !== undefined && params.prevFrRate !== undefined) {
+      if ((params.frRate > 0 && params.prevFrRate < 0) || (params.frRate < 0 && params.prevFrRate > 0)) {
+        anomalies.push({
+          type: 'FR_FLIP',
+          severity: 'MEDIUM',
+          value: params.frRate,
+          description_ar: 'انقلاب FR: ' + params.prevFrRate.toFixed(4) + '% → ' + params.frRate.toFixed(4) + '%',
+          description_en: 'FR flipped: ' + params.prevFrRate.toFixed(4) + '% → ' + params.frRate.toFixed(4) + '%'
+        });
+      }
+    }
+
+    /* OI surge + Price flat (accumulation) */
+    if (params.oiChange > 10 && Math.abs(params.priceChange1h || 0) < 1) {
+      anomalies.push({
+        type: 'ACCUMULATION',
+        severity: params.oiChange > 20 ? 'HIGH' : 'MEDIUM',
+        value: params.oiChange,
+        description_ar: 'تجميع: OI +' + params.oiChange.toFixed(1) + '% مع سعر ثابت',
+        description_en: 'Accumulation: OI +' + params.oiChange.toFixed(1) + '% with flat price'
+      });
+    }
+
+    /* OI drop + Price drop (distribution/capitulation) */
+    if (params.oiChange < -10 && (params.priceChange1h || 0) < -2) {
+      anomalies.push({
+        type: 'DISTRIBUTION',
+        severity: 'HIGH',
+        value: params.oiChange,
+        description_ar: 'توزيع: OI ' + params.oiChange.toFixed(1) + '% مع هبوط السعر',
+        description_en: 'Distribution: OI ' + params.oiChange.toFixed(1) + '% with price drop'
+      });
+    }
+
+    /* تصنيف الحالة */
+    var classification = 'NORMAL';
+    if (anomalies.length > 0) {
+      var hasExtreme = anomalies.some(function (a) { return a.severity === 'EXTREME'; });
+      var hasHigh = anomalies.some(function (a) { return a.severity === 'HIGH'; });
+      classification = hasExtreme ? 'EXTREME_ANOMALY' : hasHigh ? 'ANOMALY' : 'MINOR_ANOMALY';
+    }
+
+    return { anomalies: anomalies, classification: classification, count: anomalies.length };
+  }
+};
+
+
+/* ═══════════════════════════════════════════════════════════════
+   5) K-MEANS MARKET REGIME CLASSIFIER
+   ═══════════════════════════════════════════════════════════════
+
+   5 أنظمة: Bull Trend, Bear Trend, Ranging, High Vol, Low Vol
+   Features: BTC trend, VIX proxy, breadth, volume
+*/
+
+var KMeansRegime = (function () {
+
+  /** المراكز المبدئية (يتم تحديثها) */
+  var _centroids = [
+    { label: 'BULL_TREND', center: [2, 0.3, 65, 1.2] },   /* btcRet>0, lowVol, highBreadth, avgVol */
+    { label: 'BEAR_TREND', center: [-2, 0.5, 30, 1.1] },  /* btcRet<0, midVol, lowBreadth */
+    { label: 'RANGING', center: [0, 0.2, 50, 0.8] },       /* flat, lowVol, midBreadth */
+    { label: 'HIGH_VOL', center: [0, 1.5, 45, 2.0] },      /* any, highVol, any, highVol */
+    { label: 'LOW_VOL', center: [0, 0.1, 50, 0.5] }        /* flat, veryLowVol, mid, lowVol */
+  ];
+
+  /**
+   * تصنيف حالة السوق
+   * @param {Object} params
+   * @param {number} params.btcReturn24h — تغيير BTC 24h (%)
+   * @param {number} params.vixProxy — تقلّب السوق (BB Width أو ATR)
+   * @param {number} params.breadth — نسبة العملات الصاعدة (%)
+   * @param {number} params.volumeRatio — حجم مقارنة بالمتوسط
+   * @returns {Object}
+   */
+  function classify(params) {
+    var point = [
+      params.btcReturn24h || 0,
+      params.vixProxy || 0.5,
+      params.breadth || 50,
+      params.volumeRatio || 1
+    ];
+
+    /* حساب المسافة لكل مركز */
+    var distances = _centroids.map(function (c) {
+      return {
+        label: c.label,
+        dist: _euclidean(point, c.center)
+      };
+    });
+
+    distances.sort(function (a, b) { return a.dist - b.dist; });
+    var closest = distances[0];
+    var secondClosest = distances[1];
+
+    /* ثقة = مدى الفرق بين الأقرب والثاني */
+    var confidence = secondClosest.dist > 0
+      ? Math.min(95, Math.round((1 - closest.dist / secondClosest.dist) * 100))
+      : 50;
+
+    return {
+      regime: closest.label,
+      confidence: Math.max(20, confidence),
+      distances: distances,
+      features: { btcReturn: point[0], vixProxy: point[1], breadth: point[2], volumeRatio: point[3] }
+    };
+  }
+
+  /**
+   * تحديث المراكز (تعلّم) — يُستدعى كل ساعة
+   * @param {Array<{features: number[], label: string}>} observations
+   */
+  function updateCentroids(observations) {
+    if (!observations || observations.length < 10) return;
+
+    /* تجميع حسب التصنيف */
+    var groups = {};
+    _centroids.forEach(function (c) { groups[c.label] = []; });
+
+    observations.forEach(function (obs) {
+      var classified = classify({ btcReturn24h: obs.features[0], vixProxy: obs.features[1], breadth: obs.features[2], volumeRatio: obs.features[3] });
+      groups[classified.regime].push(obs.features);
+    });
+
+    /* تحديث كل مركز */
+    _centroids.forEach(function (c) {
+      var points = groups[c.label];
+      if (points.length < 3) return;
+      for (var d = 0; d < 4; d++) {
+        c.center[d] = points.reduce(function (s, p) { return s + p[d]; }, 0) / points.length;
+      }
+    });
+  }
+
+  function _euclidean(a, b) {
+    var sum = 0;
+    for (var i = 0; i < a.length; i++) sum += Math.pow(a[i] - b[i], 2);
+    return Math.sqrt(sum);
+  }
+
+  return { classify: classify, updateCentroids: updateCentroids, getCentroids: function () { return _centroids; } };
+})();
+
+
+/* ═══ HELPER MATH FUNCTIONS ═══ */
+
+function _rsi(c, p) {
+  p = p || 14; if (c.length < p + 1) return 50;
+  var g = 0, l = 0;
+  for (var i = c.length - p; i < c.length; i++) { var d = c[i] - c[i - 1]; if (d > 0) g += d; else l += Math.abs(d); }
+  return 100 - 100 / (1 + g / Math.max(l, 0.001));
+}
+
+function _macd(c) {
+  if (c.length < 26) return { h: 0, cross: 'none' };
+  var ema = function (d, p) { var k = 2 / (p + 1), e = d[0]; for (var i = 1; i < d.length; i++) e = d[i] * k + e * (1 - k); return e; };
+  var ml = ema(c.slice(-12), 12) - ema(c, 26);
+  return { h: ml, cross: ml > 0 ? 'bull' : 'bear' };
+}
+
+function _stochastic(closes, highs, lows, period) {
+  period = period || 14;
+  if (closes.length < period) return { k: 50, d: 50 };
+  var h = Math.max.apply(null, highs.slice(-period));
+  var l = Math.min.apply(null, lows.slice(-period));
+  var c = closes[closes.length - 1];
+  var k = h !== l ? ((c - l) / (h - l)) * 100 : 50;
+  return { k: k, d: k }; /* مبسّط */
+}
+
+function _correlation(a, b) {
+  var n = Math.min(a.length, b.length);
+  if (n < 3) return 0;
+  var mA = a.reduce(function (s, v) { return s + v; }, 0) / n;
+  var mB = b.reduce(function (s, v) { return s + v; }, 0) / n;
+  var num = 0, dA = 0, dB = 0;
+  for (var i = 0; i < n; i++) {
+    num += (a[i] - mA) * (b[i] - mB);
+    dA += Math.pow(a[i] - mA, 2);
+    dB += Math.pow(b[i] - mB, 2);
+  }
+  var denom = Math.sqrt(dA * dB);
+  return denom > 0 ? num / denom : 0;
+}
+
+function _covariance(a, b) {
+  var n = Math.min(a.length, b.length);
+  var mA = a.reduce(function (s, v) { return s + v; }, 0) / n;
+  var mB = b.reduce(function (s, v) { return s + v; }, 0) / n;
+  return a.reduce(function (s, v, i) { return s + (v - mA) * (b[i] - mB); }, 0) / n;
+}
+
+function _variance(arr) {
+  var m = arr.reduce(function (s, v) { return s + v; }, 0) / arr.length;
+  return arr.reduce(function (s, v) { return s + Math.pow(v - m, 2); }, 0) / arr.length;
+}
+
+
+/* ═══ EXPORTS ═══ */
+
+window.NexusAI = {
+  Features: FeatureEngine,
+  LR: LogisticRegression,
+  Ensemble: EnsembleScorer,
+  Anomaly: AnomalyDetector,
+  KMeans: KMeansRegime
+};
+
+/* ╔══════════════════════════════════════════════════════════════╗ */
+/* ║  WEB WORKER — Inline Blob (لا حاجة لملف منفصل)            ║ */
+/* ╚══════════════════════════════════════════════════════════════╝ */
+/* ═══ WEB WORKER — Inline Blob ═══ */
+var _WORKER_CODE = [
+'function calcRSI(c,p){p=p||14;if(c.length<p+1)return 50;var g=0,l=0;for(var i=c.length-p;i<c.length;i++){var d=c[i]-c[i-1];if(d>0)g+=d;else l+=Math.abs(d)}return 100-100/(1+g/Math.max(l,.001))}',
+'function calcEMA(d,p){if(!d||d.length<p)return d&&d.length?d[d.length-1]:0;var k=2/(p+1),e=d.slice(0,p).reduce(function(a,b){return a+b},0)/p;for(var i=p;i<d.length;i++)e=d[i]*k+e*(1-k);return e}',
+'function calcEMASeries(d,p){if(!d||d.length<p)return[];var k=2/(p+1),r=[],e=d.slice(0,p).reduce(function(a,b){return a+b},0)/p;r.push(e);for(var i=p;i<d.length;i++){e=d[i]*k+e*(1-k);r.push(e)}return r}',
+'function calcMACD(c){if(c.length<26)return{h:0,signal:0,cross:"none",histogram:[]};var e12=calcEMASeries(c,12),e26=calcEMASeries(c,26),off=e12.length-e26.length,ml=[];for(var i=0;i<e26.length;i++)ml.push(e12[i+off]-e26[i]);var sl=calcEMASeries(ml,9),so=ml.length-sl.length,hist=[];for(var j=0;j<sl.length;j++)hist.push(ml[j+so]-sl[j]);var lm=ml[ml.length-1],ls=sl[sl.length-1],pm=ml.length>=2?ml[ml.length-2]:0,ps=sl.length>=2?sl[sl.length-2]:0;return{h:lm,signal:ls,cross:lm>ls&&pm<=ps?"bull":lm<ls&&pm>=ps?"bear":"none",histogram:hist}}',
+'function calcBollinger(c,p,sd){p=p||20;sd=sd||2;if(c.length<p)return{upper:0,middle:0,lower:0,width:0,pctB:.5};var s=c.slice(-p),m=s.reduce(function(a,b){return a+b},0)/p,v=s.reduce(function(a,b){return a+Math.pow(b-m,2)},0)/p,d=Math.sqrt(v),u=m+sd*d,l=m-sd*d,w=u-l;return{upper:u,middle:m,lower:l,width:w,pctB:w>0?(c[c.length-1]-l)/w:.5}}',
+'function fullAnalysis(p){var c=p.closes||[],h=p.highs||[],l=p.lows||[];return{rsi:calcRSI(c,14),macd:calcMACD(c),bollinger:calcBollinger(c,20,2),ema20:calcEMA(c,20),ema50:calcEMA(c,50),price:c.length>0?c[c.length-1]:0}}',
+'self.onmessage=function(e){var m=e.data;if(!m||!m.cmd)return;var r=null,er=null;try{switch(m.cmd){case"calcRSI":r=calcRSI(m.data.closes,m.data.period);break;case"calcMACD":r=calcMACD(m.data.closes);break;case"calcEMA":r=calcEMA(m.data.data,m.data.period);break;case"calcBollinger":r=calcBollinger(m.data.closes,m.data.period,m.data.stdDev);break;case"fullAnalysis":r=fullAnalysis(m.data);break;case"batchAnalysis":r={};var coins=m.data.coins||[];for(var i=0;i<coins.length;i++)r[coins[i].sym]=fullAnalysis(coins[i]);break;default:er="Unknown cmd"}}catch(ex){er=ex.message}self.postMessage({id:m.id,cmd:m.cmd,result:r,error:er})}'
+].join('\n');
+
+function _initWorker(){
+  try{
+    var blob=new Blob([_WORKER_CODE],{type:'application/javascript'});
+    var url=URL.createObjectURL(blob);
+    window._calcWorker=new Worker(url);
+    window._workerCallbacks={};
+    window._calcWorker.onmessage=function(e){if(e.data&&e.data.id&&window._workerCallbacks[e.data.id]){window._workerCallbacks[e.data.id](e.data);delete window._workerCallbacks[e.data.id]}};
+    console.log('[Worker] ✅ Inline Worker جاهز');
+  }catch(e){console.log('[Worker] ⚠️ غير متاح — '+e.message)}
+}
+
+/* ╔══════════════════════════════════════════════════════════════╗ */
+/* ║  MODULE 7: CORE APP — التطبيق الأصلي                      ║ */
+/* ╚══════════════════════════════════════════════════════════════╝ */
 /* NEXUS PRO V10 — Early Detection + Sound Alerts + Smart Cache + 6 Checks */
 var tg=window.Telegram&&window.Telegram.WebApp?window.Telegram.WebApp:null;if(tg){tg.ready();tg.expand();tg.setHeaderColor('#060b14');tg.setBackgroundColor('#020408')}
 const BN='https://api.binance.com/api/v3',BF='https://fapi.binance.com/fapi/v1',CG='https://api.coingecko.com/api/v3',CB='https://api.coinbase.com/v2';
@@ -747,7 +5461,7 @@ function loadToneUI(){var opts=document.querySelectorAll('.tone-opt');opts.forEa
 /* Active users removed */
 (function(){try{if(localStorage.getItem('nxt10')==='light'){document.body.dataset.theme='light'}}catch(e){};if(lang==='en')togLang()})();
 document.querySelectorAll('.bb').forEach(function(b){b.onclick=function(){sp(b.dataset.p)}});
-function sp(id){document.querySelectorAll('.pg').forEach(function(p){p.classList.remove('act')});document.querySelectorAll('.bb').forEach(function(b){b.classList.remove('act')});var el=document.getElementById('pg-'+id);if(el)el.classList.add('act');document.querySelectorAll('[data-p="'+id+'"]').forEach(function(b){b.classList.add('act')});if(id==='scan')scanTab(curScanTab,document.querySelector('#pg-scan .big-tab.act'));if(id==='whale')loadWhales();if(id==='ind')loadInd();if(id==='me')renderPort();if(id==='market')loadMarket();window.scrollTo({top:0})}
+function sp(id){document.querySelectorAll('.pg').forEach(function(p){p.classList.remove('act')});document.querySelectorAll('.bb').forEach(function(b){b.classList.remove('act')});var el=document.getElementById('pg-'+id);if(el)el.classList.add('act');document.querySelectorAll('[data-p="'+id+'"]').forEach(function(b){b.classList.add('act')});if(typeof NexusWS!=='undefined')NexusWS.setPage(id);if(id==='scan')scanTab(curScanTab,document.querySelector('#pg-scan .big-tab.act'));if(id==='whale')loadWhales();if(id==='ind')loadInd();if(id==='me')renderPort();if(id==='market')loadMarket();window.scrollTo({top:0})}
 function openMo(id){var e=document.getElementById(id);if(e)e.classList.add('show')}
 function closeMo(id){var e=document.getElementById(id);if(e)e.classList.remove('show')}
 document.querySelectorAll('.mo').forEach(function(m){m.onclick=function(e){if(e.target===m)m.classList.remove('show')}});
@@ -2907,7 +7621,49 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<div class="mkt-hero-meta">'+(lang==='ar'?'\u0622\u062e\u0631 \u062a\u062d\u062f\u064a\u062b: ':'Updated: ')+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+' \u2014 '+(lang==='ar'?'\u0627\u0644\u0642\u0627\u062f\u0645: ':'Next: ')+nxt.toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
   h+='</div>';
 
-  /* ════ Section 2: Candle Closings Grid (4H, D, W, M) ════ */
+  /* ════ NEW: Mini Price Chart (SVG Candles) ════ */
+  if(data.kl4h&&data.kl4h.length>=12){
+    var cKl=data.kl4h.slice(-24);
+    var allH=cKl.map(function(k){return+k[2]});var allL=cKl.map(function(k){return+k[3]});
+    var pMax=Math.max.apply(null,allH);var pMin=Math.min.apply(null,allL);var pRng=pMax-pMin;if(pRng===0)pRng=pMax*0.02;
+    var cW=Math.floor(280/cKl.length)-1;if(cW<4)cW=4;var cH=140;var pad=20;
+    var yScale=function(p){return pad+(1-(p-pMin)/pRng)*(cH-pad*2)};
+    var svgW=cKl.length*(cW+1)+40;
+    var svg='<svg width="100%" viewBox="0 0 '+svgW+' '+(cH+10)+'" style="display:block;margin:6px 0;border-radius:8px;background:var(--bg2)">';
+    /* S/R lines */
+    svg+='<line x1="0" y1="'+yScale(data.resist)+'" x2="'+svgW+'" y2="'+yScale(data.resist)+'" stroke="var(--dn)" stroke-width="0.5" stroke-dasharray="3 3" opacity="0.5"/>';
+    svg+='<text x="'+(svgW-4)+'" y="'+(yScale(data.resist)-3)+'" fill="var(--dn)" font-size="7" text-anchor="end" font-family="var(--fm)">R '+rP(data.resist)+'</text>';
+    svg+='<line x1="0" y1="'+yScale(data.supp)+'" x2="'+svgW+'" y2="'+yScale(data.supp)+'" stroke="var(--up)" stroke-width="0.5" stroke-dasharray="3 3" opacity="0.5"/>';
+    svg+='<text x="'+(svgW-4)+'" y="'+(yScale(data.supp)+9)+'" fill="var(--up)" font-size="7" text-anchor="end" font-family="var(--fm)">S '+rP(data.supp)+'</text>';
+    /* EMA20 line */
+    if(data.ema20){svg+='<line x1="0" y1="'+yScale(data.ema20)+'" x2="'+svgW+'" y2="'+yScale(data.ema20)+'" stroke="var(--warn)" stroke-width="0.5" opacity="0.4"/>';}
+    /* FVG zones */
+    if(data.fvgs&&data.fvgs.length){data.fvgs.forEach(function(f){
+      var fTop=yScale(parseFloat(f.top.replace(/,/g,'')));var fBot=yScale(parseFloat(f.bot.replace(/,/g,'')));
+      var fH=Math.abs(fBot-fTop);if(fH<2)fH=2;
+      svg+='<rect x="0" y="'+Math.min(fTop,fBot)+'" width="'+svgW+'" height="'+fH+'" fill="'+(f.type==='bullish'?'rgba(0,255,136,.08)':'rgba(255,56,96,.08)')+'" rx="2"/>';
+    })}
+    /* Candles */
+    cKl.forEach(function(k,i){
+      var o=+k[1],hi=+k[2],lo=+k[3],cl=+k[4];
+      var x=i*(cW+1)+20;var isGreen=cl>=o;
+      var bodyTop=yScale(Math.max(o,cl));var bodyBot=yScale(Math.min(o,cl));var bodyH=Math.max(1,bodyBot-bodyTop);
+      var wickTop=yScale(hi);var wickBot=yScale(lo);
+      var color=isGreen?'var(--up)':'var(--dn)';
+      svg+='<line x1="'+(x+cW/2)+'" y1="'+wickTop+'" x2="'+(x+cW/2)+'" y2="'+wickBot+'" stroke="'+color+'" stroke-width="1"/>';
+      svg+='<rect x="'+x+'" y="'+bodyTop+'" width="'+cW+'" height="'+bodyH+'" fill="'+color+'" rx="0.5"/>';
+    });
+    /* Price label */
+    svg+='<circle cx="'+(svgW-16)+'" cy="'+yScale(data.price)+'" r="3" fill="'+coinColor+'"/>';
+    svg+='</svg>';
+    h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F4C8} '+(lang==='ar'?'\u0631\u0633\u0645 \u0628\u064a\u0627\u0646\u064a 4H \u2014 \u0622\u062e\u0631 24 \u0634\u0645\u0639\u0629':'4H Chart \u2014 Last 24 candles')+'</div>';
+    h+=svg;
+    h+='<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--t3);margin-top:2px;direction:ltr"><span style="color:var(--dn)">\u25AC R: '+rP(data.resist)+'</span><span style="color:var(--warn)">\u25AC EMA20</span><span style="color:var(--up)">\u25AC S: '+rP(data.supp)+'</span>';
+    if(data.fvgs&&data.fvgs.length)h+='<span style="color:var(--blue)">\u2591 FVG</span>';
+    h+='</div></div>';
+  }
+
+
   h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F56F}\uFE0F '+(lang==='ar'?'\u0625\u063a\u0644\u0627\u0642\u0627\u062a \u0627\u0644\u0634\u0645\u0648\u0639':'Candle Closings')+'</div>';
   var frames=[];
   /* 4H candle */
@@ -3166,34 +7922,213 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+data.bearP+'%;background:var(--dn)"></div></div><span style="font-size:8px;color:var(--dn)">'+data.bearP+'%</span></div>';
   h+='</div></div>';
 
-  /* ════ Section 12: Summary + Correlations + Events + Signature ════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F4CB} '+(lang==='ar'?'\u0627\u0644\u062e\u0644\u0627\u0635\u0629 \u0648\u0627\u0644\u0627\u0631\u062a\u0628\u0627\u0637\u0627\u062a':'Summary & Correlations')+'</div>';
-  /* Upcoming events */
-  var evs=getUpcomingEvents();
-  if(evs.length){
-    h+='<div class="mkt-events">';
-    evs.forEach(function(e){h+='<div class="mkt-event-i"><span>'+e.ic+'</span><span>'+e.txt+'</span></div>'+(e.warn?'<div style="font-size:8px;color:var(--warn);padding:0 0 2px 22px">'+e.warn+'</div>':'')});
+  /* ════ Section 12: Advanced Intelligence (NEW — Binance Free Data) ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F9E0} '+(lang==='ar'?'\u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0645\u062a\u0642\u062f\u0645':'Advanced Intelligence')+'</div>';
+  /* Top Traders L/S */
+  var ttd=topTradersLS[sym];
+  if(ttd&&ttd.accounts&&ttd.accounts.length){var ttLast=ttd.accounts[ttd.accounts.length-1];var ttPrev=ttd.accounts.length>=2?ttd.accounts[ttd.accounts.length-2]:ttLast;
+    var ttLong=(ttLast.long*100).toFixed(0);var ttShort=(ttLast.short*100).toFixed(0);var ttTrend=ttLast.long>ttPrev.long?'up':'down';
+    h+='<div class="mkt-box"><div class="mkt-box-t">\u{1F3C6} '+(lang==='ar'?'\u0643\u0628\u0627\u0631 \u0627\u0644\u0645\u062a\u062f\u0627\u0648\u0644\u064a\u0646 (Binance Top 20%)':'Top Traders (Binance Top 20%)')+'</div>';
+    h+='<div style="display:flex;align-items:center;gap:8px;margin:6px 0"><div style="flex:1;height:10px;border-radius:5px;overflow:hidden;display:flex"><div style="width:'+ttLong+'%;background:var(--up)"></div><div style="width:'+ttShort+'%;background:var(--dn)"></div></div></div>';
+    h+='<div style="display:flex;justify-content:space-between;font-size:10px"><span style="color:var(--up);font-weight:700">Long '+ttLong+'%</span><span style="font-size:9px;color:var(--t2)">'+(ttTrend==='up'?'\u{1F4C8}':'\u{1F4C9}')+' '+(ttTrend==='up'?(lang==='ar'?'\u0627\u0644\u0643\u0628\u0627\u0631 \u064a\u0632\u064a\u062f\u0648\u0646 Long':'Pros increasing Long'):(lang==='ar'?'\u0627\u0644\u0643\u0628\u0627\u0631 \u064a\u0632\u064a\u062f\u0648\u0646 Short':'Pros increasing Short'))+'</span><span style="color:var(--dn);font-weight:700">Short '+ttShort+'%</span></div></div>'}
+  /* Real CVD */
+  var cvdR=aggCVD[sym];
+  if(cvdR){var cvdCol=cvdR.trend==='BUYING'?'var(--up)':cvdR.trend==='SELLING'?'var(--dn)':'var(--warn)';
+    var buyPct=Math.round(cvdR.buyVol/(cvdR.buyVol+cvdR.sellVol)*100);
+    h+='<div class="mkt-box"><div class="mkt-box-t">\u{1F52C} '+(lang==='ar'?'CVD \u0627\u0644\u062d\u0642\u064a\u0642\u064a (\u0622\u062e\u0631 500 \u0635\u0641\u0642\u0629 Futures)':'Real CVD (Last 500 Futures trades)')+'</div>';
+    h+='<div style="display:flex;align-items:center;gap:8px;margin:6px 0"><div style="flex:1;height:10px;border-radius:5px;overflow:hidden;display:flex"><div style="width:'+buyPct+'%;background:var(--up)"></div><div style="width:'+(100-buyPct)+'%;background:var(--dn)"></div></div></div>';
+    h+='<div style="display:flex;justify-content:space-between;font-size:10px"><span style="color:var(--up)">'+(lang==='ar'?'\u0634\u0631\u0627\u0621':'Buy')+': $'+fmt(cvdR.buyVol)+'</span><span style="font-weight:800;color:'+cvdCol+'">'+(cvdR.trend==='BUYING'?(lang==='ar'?'\u0634\u0631\u0627\u0621 \u0645\u062e\u0641\u064a':'Hidden buying'):cvdR.trend==='SELLING'?(lang==='ar'?'\u0628\u064a\u0639 \u0645\u062e\u0641\u064a':'Hidden selling'):(lang==='ar'?'\u0645\u062a\u0648\u0627\u0632\u0646':'Balanced'))+'</span><span style="color:var(--dn)">'+(lang==='ar'?'\u0628\u064a\u0639':'Sell')+': $'+fmt(cvdR.sellVol)+'</span></div></div>'}
+  /* FR History mini chart */
+  if(frHistory[sym]&&frHistory[sym].length>=4){
+    var frH=frHistory[sym];var frLast=frH[frH.length-1];var frAvg=frH.slice(-8).reduce(function(a,x){return a+x.rate},0)/Math.min(8,frH.length);
+    var frTrend=frH.length>=2?(frLast.rate>frH[frH.length-2].rate?'up':'down'):'flat';
+    h+='<div class="mkt-box"><div class="mkt-box-t">\u{1F4C9} '+(lang==='ar'?'\u062a\u0627\u0631\u064a\u062e FR (\u0622\u062e\u0631 '+frH.length+' \u0641\u062a\u0631\u0629)':'FR History (last '+frH.length+' periods)')+'</div>';
+    h+='<div style="display:flex;align-items:center;gap:8px;margin:4px 0">'+frHistBars(sym)+'<span style="font-size:10px;font-family:var(--fm);color:'+(frLast.rate>0.03?'var(--dn)':frLast.rate<-0.01?'var(--up)':'var(--t1)');
+    h+=';direction:ltr">'+(frLast.rate>=0?'+':'')+frLast.rate.toFixed(4)+'%</span><span style="font-size:8px;color:var(--t2)">'+(lang==='ar'?'\u0645\u062a\u0648\u0633\u0637: ':'Avg: ')+(frAvg>=0?'+':'')+frAvg.toFixed(4)+'% '+(frTrend==='up'?'\u{1F4C8}':'\u{1F4C9}')+'</span></div></div>'}
+  /* OI History change */
+  if(oiHistory[sym]&&oiHistory[sym].length>=4){
+    var oiH=oiHistory[sym];var oiLast=oiH[oiH.length-1];var oiFirst=oiH[0];
+    var oiChg=oiFirst.val>0?((oiLast.val-oiFirst.val)/oiFirst.val*100):0;
+    var priceChg=data.ch.h24;
+    var oiInterp='';
+    if(oiChg>3&&priceChg>0)oiInterp=lang==='ar'?'\u{1F7E2} \u0623\u0645\u0648\u0627\u0644 Long \u062c\u062f\u064a\u062f\u0629 \u062a\u062f\u062e\u0644':'New Long money entering';
+    else if(oiChg>3&&priceChg<0)oiInterp=lang==='ar'?'\u{1F534} \u0623\u0645\u0648\u0627\u0644 Short \u062c\u062f\u064a\u062f\u0629':'New Short money entering';
+    else if(oiChg<-3&&priceChg>0)oiInterp=lang==='ar'?'\u{1F7E1} Short Squeeze':'Short Squeeze';
+    else if(oiChg<-3&&priceChg<0)oiInterp=lang==='ar'?'\u{1F7E1} Long Squeeze':'Long Squeeze';
+    else oiInterp=lang==='ar'?'\u2014 \u0645\u0633\u062a\u0642\u0631':'Stable';
+    h+='<div class="mkt-box"><div class="mkt-box-t">\u{1F4CA} '+(lang==='ar'?'\u062a\u063a\u064a\u0631 OI 24 \u0633\u0627\u0639\u0629':'OI Change 24h')+'</div>';
+    h+='<div style="display:flex;align-items:center;gap:8px;margin:4px 0">'+oiHistBars(sym)+'<span style="font-size:12px;font-weight:800;font-family:var(--fm);color:'+(oiChg>3?'var(--up)':oiChg<-3?'var(--dn)':'var(--warn)');
+    h+=';direction:ltr">'+(oiChg>=0?'+':'')+oiChg.toFixed(1)+'%</span><span style="font-size:9px;color:var(--t1)">'+oiInterp+'</span></div></div>'}
+  /* Spread */
+  var spd=bookTickers[sym];
+  if(spd){h+='<div style="display:flex;gap:8px;margin-bottom:6px"><div class="mkt-box" style="flex:1"><div class="mkt-box-t">\u{1F4D0} Spread</div><div style="font-size:14px;font-weight:800;font-family:var(--fm);color:'+(spd.spread>0.05?'var(--dn)':'var(--up)');
+    h+=';direction:ltr">'+spd.spread.toFixed(3)+'%</div><div style="font-size:8px;color:var(--t2)">'+(spd.spread>0.05?(lang==='ar'?'\u0633\u064a\u0648\u0644\u0629 \u0636\u0639\u064a\u0641\u0629':'Low liquidity'):(lang==='ar'?'\u0633\u064a\u0648\u0644\u0629 \u062c\u064a\u062f\u0629':'Good liquidity'))+'</div></div>';
+    var bidPressure=spd.bidQty>spd.askQty*1.2;var askPressure=spd.askQty>spd.bidQty*1.2;
+    h+='<div class="mkt-box" style="flex:1"><div class="mkt-box-t">\u{2696}\uFE0F '+(lang==='ar'?'\u0636\u063a\u0637':'Pressure')+'</div><div style="font-size:14px;font-weight:800;color:'+(bidPressure?'var(--up)':askPressure?'var(--dn)':'var(--warn)')+'">'+(bidPressure?(lang==='ar'?'\u0634\u0631\u0627\u0621':'Buy'):askPressure?(lang==='ar'?'\u0628\u064a\u0639':'Sell'):(lang==='ar'?'\u0645\u062a\u0648\u0627\u0632\u0646':'Balanced'))+'</div><div style="font-size:8px;color:var(--t2);direction:ltr">Bid:$'+fmt(spd.bid*spd.bidQty)+' / Ask:$'+fmt(spd.ask*spd.askQty)+'</div></div></div>'}
+  h+='</div>';
+
+  /* ════ Section 13: FVG Detail (Fair Value Gaps) ════ */
+  if(data.fvgs&&data.fvgs.length){
+    h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F573}\uFE0F '+(lang==='ar'?'\u0627\u0644\u0641\u062c\u0648\u0627\u062a \u0627\u0644\u0633\u0639\u0631\u064a\u0629 (FVG)':'Fair Value Gaps (FVG)')+'</div>';
+    h+='<div style="font-size:10px;color:var(--t2);margin-bottom:6px;line-height:1.6">'+(lang==='ar'?'\u0627\u0644\u0641\u062c\u0648\u0629 \u0627\u0644\u0633\u0639\u0631\u064a\u0629 = \u0645\u0646\u0637\u0642\u0629 \u0644\u0645 \u064a\u062a\u0645 \u062a\u062f\u0627\u0648\u0644\u0647\u0627 \u0628\u0634\u0643\u0644 \u0643\u0627\u0641\u064a. \u0627\u0644\u0633\u0639\u0631 \u063a\u0627\u0644\u0628\u0627\u064b \u064a\u0639\u0648\u062f \u0644\u0645\u0644\u0626\u0647\u0627 \u0642\u0628\u0644 \u0645\u0648\u0627\u0635\u0644\u0629 \u0627\u0644\u0627\u062a\u062c\u0627\u0647.':'A Fair Value Gap is a price zone that was not traded adequately. Price often returns to fill it before continuing.')+'</div>';
+    data.fvgs.forEach(function(f){
+      var isBull=f.type==='bullish';var icon=isBull?'\u{1F7E2}':'\u{1F534}';
+      h+='<div class="mkt-row" style="background:'+(isBull?'rgba(0,255,136,.03)':'rgba(255,56,96,.03)')+';border:1px solid '+(isBull?'rgba(0,255,136,.06)':'rgba(255,56,96,.06)')+';border-radius:8px;padding:6px 8px;margin-bottom:4px">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;font-weight:700">'+icon+' FVG '+(isBull?(lang==='ar'?'\u0635\u0639\u0648\u062f\u064a':'Bullish'):(lang==='ar'?'\u0647\u0628\u0648\u0637\u064a':'Bearish'))+'</span>';
+      h+='<span style="font-size:10px;font-family:var(--fm);font-weight:700;direction:ltr;color:'+(isBull?'var(--up)':'var(--dn)')+'">'+f.bot+' \u2014 '+f.top+'</span></div>';
+      h+='<div style="font-size:9px;color:var(--t2);margin-top:2px">'+(isBull?(lang==='ar'?'\u0627\u0644\u0633\u0639\u0631 \u0645\u0645\u0643\u0646 \u064a\u0646\u0632\u0644 \u0644\u0647\u0630\u0647 \u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u062b\u0645 \u064a\u0631\u062a\u062f \u0635\u0639\u0648\u062f\u0627\u064b':'Price may dip to this zone then bounce up'):(lang==='ar'?'\u0627\u0644\u0633\u0639\u0631 \u0645\u0645\u0643\u0646 \u064a\u0637\u0644\u0639 \u0644\u0647\u0630\u0647 \u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u062b\u0645 \u064a\u0647\u0628\u0637':'Price may rise to this zone then drop'))+'</div></div>';
+    });
     h+='</div>';
   }
-  /* Correlations */
-  h+='<div class="mkt-cor">';
-  h+='<div class="mkt-cor-i"><div class="mkt-cor-v">'+btcDom.toFixed(1)+'%</div><div class="mkt-cor-l">BTC Dom</div></div>';
-  h+='<div class="mkt-cor-i"><div class="mkt-cor-v">'+(T.ETH&&T.BTC?(T.ETH.p/T.BTC.p).toFixed(4):'--')+'</div><div class="mkt-cor-l">ETH/BTC</div></div>';
-  h+='<div class="mkt-cor-i"><div class="mkt-cor-v" style="color:'+(fgValue<30?'var(--dn)':fgValue>60?'var(--up)':'var(--warn)')+'">'+fgValue+'</div><div class="mkt-cor-l">Fear&Greed</div></div>';
+
+  /* ════ Section 14: Detailed Conclusion — Full Reasoning ════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F4DD} '+(lang==='ar'?'\u0627\u0644\u062e\u0644\u0627\u0635\u0629 \u0627\u0644\u0645\u0641\u0635\u0651\u0644\u0629 \u2014 \u0644\u0645\u0627\u0630\u0627 \u0647\u0630\u0627 \u0627\u0644\u0627\u062a\u062c\u0627\u0647\u061f':'Detailed Conclusion \u2014 Why this direction?')+'</div>';
+  var isBull=data.ts>=2;var isBear=data.ts<=-2;var isNeutral=!isBull&&!isBear;
+  var rsns=[];var wrns=[];
+  /* 1. Candle */
+  if(data.kl4h&&data.kl4h.length>=2){var lK=data.kl4h[data.kl4h.length-1];var lkG=+lK[4]>=+lK[1];
+    if(lkG&&isBull)rsns.push(lang==='ar'?'\u{1F56F} <b>\u0625\u063a\u0644\u0627\u0642 \u0627\u0644\u0634\u0645\u0648\u0639:</b> \u0627\u0644\u0634\u0645\u0639\u0629 \u0627\u0644\u0623\u062e\u064a\u0631\u0629 4H \u0623\u063a\u0644\u0642\u062a \u0635\u0639\u0648\u062f\u064a\u0629 (\u062e\u0636\u0631\u0627\u0621) \u0645\u0645\u0627 \u064a\u062f\u0644 \u0639\u0644\u0649 \u0633\u064a\u0637\u0631\u0629 \u0627\u0644\u0645\u0634\u062a\u0631\u064a\u0646 \u0648\u0627\u0633\u062a\u0645\u0631\u0627\u0631 \u0627\u0644\u0632\u062e\u0645 \u0627\u0644\u0635\u0639\u0648\u062f\u064a':'\u{1F56F} <b>Candle:</b> Last 4H closed bullish \u2014 buyers in control');
+    if(!lkG&&isBear)rsns.push(lang==='ar'?'\u{1F56F} <b>\u0625\u063a\u0644\u0627\u0642 \u0627\u0644\u0634\u0645\u0648\u0639:</b> \u0627\u0644\u0634\u0645\u0639\u0629 \u0627\u0644\u0623\u062e\u064a\u0631\u0629 \u0623\u063a\u0644\u0642\u062a \u0647\u0628\u0648\u0637\u064a\u0629 (\u062d\u0645\u0631\u0627\u0621) \u0645\u0645\u0627 \u064a\u062f\u0644 \u0639\u0644\u0649 \u0633\u064a\u0637\u0631\u0629 \u0627\u0644\u0628\u0627\u0626\u0639\u064a\u0646 \u0648\u0636\u063a\u0637 \u0628\u064a\u0639\u064a \u0645\u0633\u062a\u0645\u0631':'\u{1F56F} <b>Candle:</b> Last 4H closed bearish \u2014 sellers dominating')}
+  /* 2. EMA */
+  if(isBull&&data.price>data.ema20)rsns.push(lang==='ar'?'\u{1F4CA} <b>\u0627\u0644\u0645\u062a\u0648\u0633\u0637\u0627\u062a:</b> \u0627\u0644\u0633\u0639\u0631 \u0641\u0648\u0642 EMA20 ('+rP(data.ema20)+') \u0648EMA50 ('+rP(data.ema50)+') \u0645\u0645\u0627 \u064a\u0639\u0646\u064a \u0627\u0644\u0627\u062a\u062c\u0627\u0647 \u0627\u0644\u0639\u0627\u0645 \u0635\u0639\u0648\u062f\u064a \u0648\u0627\u0644\u0633\u0639\u0631 \u0645\u062f\u0639\u0648\u0645 \u0628\u0627\u0644\u0645\u062a\u0648\u0633\u0637\u0627\u062a \u0627\u0644\u0645\u062a\u062d\u0631\u0643\u0629':'\u{1F4CA} <b>MAs:</b> Price above EMA20 ('+rP(data.ema20)+') & EMA50 ('+rP(data.ema50)+') \u2014 bullish trend confirmed by moving averages');
+  if(isBear&&data.price<data.ema20)rsns.push(lang==='ar'?'\u{1F4CA} <b>\u0627\u0644\u0645\u062a\u0648\u0633\u0637\u0627\u062a:</b> \u0627\u0644\u0633\u0639\u0631 \u062a\u062d\u062a EMA20 ('+rP(data.ema20)+') \u0648EMA50 ('+rP(data.ema50)+') \u2014 \u0627\u0644\u0627\u062a\u062c\u0627\u0647 \u0647\u0628\u0648\u0637\u064a \u0648\u0627\u0644\u0645\u062a\u0648\u0633\u0637\u0627\u062a \u062a\u0639\u0645\u0644 \u0643\u0645\u0642\u0627\u0648\u0645\u0629':'\u{1F4CA} <b>MAs:</b> Price below EMA20 & EMA50 \u2014 bearish, MAs acting as resistance');
+  /* 3. S/R */
+  rsns.push(lang==='ar'?'\u{1F5FA} <b>\u0627\u0644\u062f\u0639\u0645/\u0645\u0642\u0627\u0648\u0645\u0629:</b> \u062f\u0639\u0645 '+rP(data.supp)+' \u0648\u0645\u0642\u0627\u0648\u0645\u0629 '+rP(data.resist)+'. '+(isBull?'\u0627\u0644\u0633\u0639\u0631 \u064a\u0636\u063a\u0637 \u0639\u0644\u0649 \u0627\u0644\u0645\u0642\u0627\u0648\u0645\u0629 \u2014 \u0627\u0644\u0645\u0634\u062a\u0631\u0648\u0646 \u0623\u0642\u0648\u064a\u0627\u0621':isBear?'\u0627\u0644\u0633\u0639\u0631 \u064a\u0642\u062a\u0631\u0628 \u0645\u0646 \u0627\u0644\u062f\u0639\u0645 \u2014 \u0643\u0633\u0631\u0647 \u064a\u0639\u0646\u064a \u0647\u0628\u0648\u0637 \u0623\u0639\u0645\u0642':'\u0641\u064a \u0645\u0646\u062a\u0635\u0641 \u0627\u0644\u0646\u0637\u0627\u0642'):'\u{1F5FA} <b>S/R:</b> Support '+rP(data.supp)+', resistance '+rP(data.resist)+'. '+(isBull?'Price pressing resistance \u2014 buyers strong':isBear?'Price nearing support \u2014 break means deeper drop':'Mid-range'));
+  /* 4. Whales */
+  if(data.wConf>=40)rsns.push(lang==='ar'?'\u{1F433} <b>\u0627\u0644\u062d\u064a\u062a\u0627\u0646:</b> \u062a\u062c\u0645\u064a\u0639 \u0628\u062b\u0642\u0629 '+data.wConf+'% \u2014 \u0627\u0644\u0645\u062d\u0627\u0641\u0638 \u0627\u0644\u0643\u0628\u064a\u0631\u0629 \u062a\u0634\u062a\u0631\u064a \u0628\u0643\u0645\u064a\u0627\u062a \u0636\u062e\u0645\u0629 \u0639\u0628\u0631 \u0623\u0648\u0627\u0645\u0631 \u0645\u062c\u0632\u0623\u0629\u060c \u0645\u0624\u0634\u0631 \u0625\u064a\u062c\u0627\u0628\u064a \u0642\u0648\u064a \u0644\u0623\u0646 \u0627\u0644\u062d\u064a\u062a\u0627\u0646 \u062a\u0645\u0644\u0643 \u0645\u0639\u0644\u0648\u0645\u0627\u062a \u0623\u0643\u062b\u0631':'\u{1F433} <b>Whales:</b> Accumulation at '+data.wConf+'% confidence \u2014 large wallets buying in hidden chunks, strong bullish signal');
+  else if(data.wConf<20&&isBear)rsns.push(lang==='ar'?'\u{1F433} <b>\u0627\u0644\u062d\u064a\u062a\u0627\u0646:</b> \u0644\u0627 \u062a\u062c\u0645\u064a\u0639 ('+data.wConf+'% \u0641\u0642\u0637) \u2014 \u0644\u0627 \u062f\u0639\u0645 \u0645\u0624\u0633\u0633\u064a':'\u{1F433} <b>Whales:</b> No accumulation ('+data.wConf+'%) \u2014 no institutional support');
+  /* 5. CVD */
+  var cvdR2=aggCVD[sym];
+  if(cvdR2&&cvdR2.trend==='BUYING')rsns.push(lang==='ar'?'\u{1F52C} <b>CVD:</b> \u0634\u0631\u0627\u0621 $'+fmt(cvdR2.buyVol)+' > \u0628\u064a\u0639 $'+fmt(cvdR2.sellVol)+' ('+cvdR2.ratio.toFixed(1)+'x) \u2014 \u0634\u0631\u0627\u0621 \u0645\u062e\u0641\u064a \u0642\u0648\u064a \u0644\u0645 \u064a\u0646\u0639\u0643\u0633 \u0639\u0644\u0649 \u0627\u0644\u0633\u0639\u0631 \u0628\u0639\u062f':'\u{1F52C} <b>CVD:</b> Buy $'+fmt(cvdR2.buyVol)+' > Sell $'+fmt(cvdR2.sellVol)+' ('+cvdR2.ratio.toFixed(1)+'x) \u2014 hidden buying not yet in price');
+  if(cvdR2&&cvdR2.trend==='SELLING')rsns.push(lang==='ar'?'\u{1F52C} <b>CVD:</b> \u0628\u064a\u0639 $'+fmt(cvdR2.sellVol)+' > \u0634\u0631\u0627\u0621 $'+fmt(cvdR2.buyVol)+' \u2014 \u0628\u064a\u0639 \u0645\u062e\u0641\u064a\u060c \u0627\u0644\u0633\u0639\u0631 \u0642\u062f \u064a\u062a\u0628\u0639\u0647 \u0642\u0631\u064a\u0628\u0627\u064b':'\u{1F52C} <b>CVD:</b> Sell $'+fmt(cvdR2.sellVol)+' > Buy $'+fmt(cvdR2.buyVol)+' \u2014 hidden selling, price may follow');
+  /* 6. Top Traders */
+  var tt2=topTradersLS[sym];
+  if(tt2&&tt2.accounts&&tt2.accounts.length){var tL2=tt2.accounts[tt2.accounts.length-1];
+    if(tL2.long>0.55)rsns.push(lang==='ar'?'\u{1F3C6} <b>\u0643\u0628\u0627\u0631 \u0627\u0644\u0645\u062a\u062f\u0627\u0648\u0644\u064a\u0646:</b> '+Math.round(tL2.long*100)+'% \u0645\u0646 \u0623\u0643\u0628\u0631 20% \u0639\u0644\u0649 Binance \u064a\u062d\u062a\u0641\u0638\u0648\u0646 Long \u2014 \u0627\u0644\u0645\u062d\u062a\u0631\u0641\u0648\u0646 \u064a\u0631\u0627\u0647\u0646\u0648\u0646 \u0639\u0644\u0649 \u0627\u0644\u0635\u0639\u0648\u062f':'\u{1F3C6} <b>Top Traders:</b> '+Math.round(tL2.long*100)+'% of Binance top 20% are Long \u2014 pros betting bullish');
+    if(tL2.long<0.45)rsns.push(lang==='ar'?'\u{1F3C6} <b>\u0643\u0628\u0627\u0631 \u0627\u0644\u0645\u062a\u062f\u0627\u0648\u0644\u064a\u0646:</b> '+Math.round(tL2.short*100)+'% Short \u2014 \u0627\u0644\u0645\u062d\u062a\u0631\u0641\u0648\u0646 \u064a\u062a\u0648\u0642\u0639\u0648\u0646 \u0647\u0628\u0648\u0637':'\u{1F3C6} <b>Top Traders:</b> '+Math.round(tL2.short*100)+'% Short \u2014 pros expect decline')}
+  /* 7. OI */
+  if(oiHistory[sym]&&oiHistory[sym].length>=4){var oH2=oiHistory[sym];var oC2=oH2[0].val>0?((oH2[oH2.length-1].val-oH2[0].val)/oH2[0].val*100):0;
+    if(oC2>3&&data.ch.h24>0)rsns.push(lang==='ar'?'\u{1F4CA} <b>OI:</b> \u0632\u0627\u062f +'+(oC2).toFixed(1)+'% \u0645\u0639 \u0627\u0631\u062a\u0641\u0627\u0639 \u0627\u0644\u0633\u0639\u0631 \u2014 \u0623\u0645\u0648\u0627\u0644 Long \u062c\u062f\u064a\u062f\u0629 \u062a\u062f\u062e\u0644\u060c \u0627\u0644\u0635\u0639\u0648\u062f \u0645\u062f\u0639\u0648\u0645 \u0628\u0633\u064a\u0648\u0644\u0629 \u062d\u0642\u064a\u0642\u064a\u0629':'\u{1F4CA} <b>OI:</b> Up +'+(oC2).toFixed(1)+'% with price rising \u2014 new Long money, rally backed by real liquidity');
+    if(oC2>3&&data.ch.h24<0)rsns.push(lang==='ar'?'\u{1F4CA} <b>OI:</b> \u0632\u0627\u062f +'+(oC2).toFixed(1)+'% \u0645\u0639 \u0627\u0646\u062e\u0641\u0627\u0636 \u0627\u0644\u0633\u0639\u0631 \u2014 \u0623\u0645\u0648\u0627\u0644 Short \u062c\u062f\u064a\u062f\u0629\u060c \u0636\u063a\u0637 \u0628\u064a\u0639\u064a \u064a\u062a\u0632\u0627\u064a\u062f':'\u{1F4CA} <b>OI:</b> Up +'+(oC2).toFixed(1)+'% with price dropping \u2014 new Short money, selling pressure growing')}
+  /* 8. FR */
+  if(data.fr&&data.fr.rate>0.05)wrns.push(lang==='ar'?'\u{1F4B0} <b>FR \u0645\u0631\u062a\u0641\u0639:</b> '+(data.fr.rate*100).toFixed(3)+'% \u2014 \u062c\u0634\u0639 \u0645\u0641\u0631\u0637\u060c \u0627\u062d\u062a\u0645\u0627\u0644 \u062a\u0635\u062d\u064a\u062d \u0642\u0631\u064a\u0628':'\u{1F4B0} <b>High FR:</b> '+(data.fr.rate*100).toFixed(3)+'% \u2014 extreme greed, correction likely');
+  if(data.fr&&data.fr.rate<-0.02)rsns.push(lang==='ar'?'\u{1F4B0} <b>FR \u0633\u0644\u0628\u064a:</b> '+(data.fr.rate*100).toFixed(3)+'% \u2014 \u0627\u0644\u0628\u0627\u0626\u0639\u0648\u0646 \u064a\u062f\u0641\u0639\u0648\u0646 \u0631\u0633\u0648\u0645\u060c \u0641\u0631\u0635\u0629 \u0634\u0631\u0627\u0621':'\u{1F4B0} <b>Negative FR:</b> '+(data.fr.rate*100).toFixed(3)+'% \u2014 shorts paying fees, buy opportunity');
+  /* 9. MACD */
+  if(data.macd.cross==='bull')rsns.push(lang==='ar'?'\u{1F4C8} <b>MACD:</b> \u062a\u0642\u0627\u0637\u0639 \u0635\u0639\u0648\u062f\u064a \u062c\u062f\u064a\u062f \u2014 \u0645\u0646 \u0623\u0642\u0648\u0649 \u0625\u0634\u0627\u0631\u0627\u062a \u0627\u0644\u0634\u0631\u0627\u0621':'\u{1F4C8} <b>MACD:</b> Fresh bull cross \u2014 one of the strongest buy signals');
+  if(data.macd.cross==='bear')rsns.push(lang==='ar'?'\u{1F4C9} <b>MACD:</b> \u062a\u0642\u0627\u0637\u0639 \u0647\u0628\u0648\u0637\u064a \u2014 \u0625\u0634\u0627\u0631\u0629 \u0628\u064a\u0639 \u0642\u0648\u064a\u0629':'\u{1F4C9} <b>MACD:</b> Bear cross \u2014 strong sell signal');
+  /* 10. Volume */
+  if(data.volT>1.5)rsns.push(lang==='ar'?'\u{1F4CA} <b>\u0627\u0644\u062d\u062c\u0645:</b> '+data.volT.toFixed(1)+'x \u0641\u0648\u0642 \u0627\u0644\u0645\u0639\u062f\u0644 \u2014 \u0633\u064a\u0648\u0644\u0629 \u0642\u0648\u064a\u0629 \u062a\u062f\u0639\u0645 \u0627\u0644\u062d\u0631\u0643\u0629':'\u{1F4CA} <b>Volume:</b> '+data.volT.toFixed(1)+'x above avg \u2014 strong liquidity backs the move');
+  if(data.volT<0.5)wrns.push(lang==='ar'?'\u{1F4CA} <b>\u062d\u062c\u0645 \u0636\u0639\u064a\u0641:</b> '+data.volT.toFixed(1)+'x \u2014 \u0627\u0644\u062d\u0631\u0643\u0629 \u063a\u064a\u0631 \u0645\u062f\u0639\u0648\u0645\u0629\u060c \u0642\u062f \u062a\u0643\u0648\u0646 \u0641\u062e':'\u{1F4CA} <b>Weak volume:</b> '+data.volT.toFixed(1)+'x \u2014 move not backed, could be a trap');
+  /* 11. Divergence */
+  if(data.divRSI==='bearish')wrns.push(lang==='ar'?'\u26a0\ufe0f <b>RSI Div 4H:</b> \u0627\u0644\u0633\u0639\u0631 \u064a\u0633\u062c\u0644 \u0642\u0645\u0645 \u0623\u0639\u0644\u0649 \u0644\u0643\u0646 RSI \u0642\u0645\u0645 \u0623\u062f\u0646\u0649 \u2014 \u0636\u0639\u0641 \u0627\u0644\u0632\u062e\u0645 \u0648\u0627\u062d\u062a\u0645\u0627\u0644 \u0627\u0646\u0639\u0643\u0627\u0633':'\u26a0\ufe0f <b>RSI Div 4H:</b> Price higher highs but RSI lower highs \u2014 momentum fading, reversal possible');
+  if(data.divRSI1d==='bearish')wrns.push(lang==='ar'?'\u26a0\ufe0f <b>RSI Div \u064a\u0648\u0645\u064a:</b> \u062a\u0628\u0627\u064a\u0646 \u0639\u0644\u0649 \u0627\u0644\u0641\u0631\u064a\u0645 \u0627\u0644\u064a\u0648\u0645\u064a \u2014 \u0623\u062e\u0637\u0631 \u0644\u0623\u0646\u0647 \u064a\u0645\u062b\u0644 \u0636\u0639\u0641 \u0645\u062a\u0648\u0633\u0637 \u0627\u0644\u0645\u062f\u0649':'\u26a0\ufe0f <b>RSI Div Daily:</b> More dangerous \u2014 medium-term weakness');
+  /* 12. Structure */
+  if(data.struct==='HH/HL')rsns.push(lang==='ar'?'\u{1F3D7} <b>\u0627\u0644\u0647\u064a\u0643\u0644:</b> \u0642\u0645\u0645 \u0623\u0639\u0644\u0649 \u0648\u0642\u064a\u0639\u0627\u0646 \u0623\u0639\u0644\u0649 (HH/HL) \u2014 \u0647\u064a\u0643\u0644 \u0635\u0639\u0648\u062f\u064a \u0643\u0644\u0627\u0633\u064a\u0643\u064a\u060c \u0643\u0644 \u0647\u0628\u0648\u0637 \u064a\u062a\u0648\u0642\u0641 \u0639\u0646\u062f \u0645\u0633\u062a\u0648\u0649 \u0623\u0639\u0644\u0649':'\u{1F3D7} <b>Structure:</b> HH/HL \u2014 classic bullish, each dip stops higher');
+  if(data.struct==='LH/LL')rsns.push(lang==='ar'?'\u{1F3D7} <b>\u0627\u0644\u0647\u064a\u0643\u0644:</b> \u0642\u0645\u0645 \u0623\u062f\u0646\u0649 \u0648\u0642\u064a\u0639\u0627\u0646 \u0623\u062f\u0646\u0649 (LH/LL) \u2014 \u0647\u064a\u0643\u0644 \u0647\u0628\u0648\u0637\u064a\u060c \u0643\u0644 \u0635\u0639\u0648\u062f \u064a\u0641\u0634\u0644 \u0639\u0646\u062f \u0645\u0633\u062a\u0648\u0649 \u0623\u062f\u0646\u0649':'\u{1F3D7} <b>Structure:</b> LH/LL \u2014 classic bearish, each rally fails lower');
+  /* 13. Confluence */
+  rsns.push(lang==='ar'?'\u{1F504} <b>\u0627\u0644\u062a\u0648\u0627\u0641\u0642:</b> '+data.bullTFs+'/4 \u0641\u0631\u064a\u0645\u0627\u062a (1H/4H/D/W) '+(data.bullTFs>=3?'\u0635\u0639\u0648\u062f\u064a\u0629 \u2014 \u062a\u0648\u0627\u0641\u0642 \u0642\u0648\u064a':data.bullTFs<=1?'\u0647\u0628\u0648\u0637\u064a\u0629 \u2014 \u0623\u063a\u0644\u0628 \u0627\u0644\u0641\u0631\u064a\u0645\u0627\u062a \u0647\u0627\u0628\u0637\u0629':'\u0645\u062e\u062a\u0644\u0637\u0629 \u2014 \u0644\u0627 \u062a\u0648\u0627\u0641\u0642'):'\u{1F504} <b>Confluence:</b> '+data.bullTFs+'/4 frames '+(data.bullTFs>=3?'bullish \u2014 strong alignment':data.bullTFs<=1?'bearish \u2014 most frames down':'mixed \u2014 no alignment'));
+  /* Render */
+  if(rsns.length){h+='<div style="padding:10px;background:'+(isBull?'rgba(0,255,136,.03)':isBear?'rgba(255,56,96,.03)':'rgba(255,184,0,.03)')+';border:1px solid '+(isBull?'rgba(0,255,136,.06)':isBear?'rgba(255,56,96,.06)':'rgba(255,184,0,.06)')+';border-radius:10px;margin-bottom:8px">';
+    h+='<div style="font-size:12px;font-weight:800;color:'+(isBull?'var(--up)':isBear?'var(--dn)':'var(--warn)')+';margin-bottom:8px">'+data.dIc+' '+(lang==='ar'?(isBull?'\u0644\u0645\u0627\u0630\u0627 '+cn+' \u0641\u064a \u0627\u062a\u062c\u0627\u0647 \u0635\u0639\u0648\u062f\u064a\u061f':isBear?'\u0644\u0645\u0627\u0630\u0627 '+cn+' \u0641\u064a \u0627\u062a\u062c\u0627\u0647 \u0647\u0628\u0648\u0637\u064a\u061f':'\u0644\u0645\u0627\u0630\u0627 '+cn+' \u0645\u062d\u0627\u064a\u062f\u061f'):(isBull?'Why is '+cn+' bullish?':isBear?'Why is '+cn+' bearish?':'Why is '+cn+' neutral?'))+'</div>';
+    rsns.forEach(function(r,i){h+='<div style="font-size:10px;color:var(--t1);line-height:1.9;padding:6px 0;'+(i<rsns.length-1?'border-bottom:1px solid rgba(255,255,255,.04)':'')+'">'+(i+1)+'. '+r+'</div>'});
+    h+='</div>'}
+  if(wrns.length){h+='<div style="padding:10px;background:rgba(255,184,0,.03);border:1px solid rgba(255,184,0,.06);border-radius:10px;margin-bottom:8px">';
+    h+='<div style="font-size:12px;font-weight:800;color:var(--warn);margin-bottom:6px">'+(lang==='ar'?'\u26a0\ufe0f \u062a\u062d\u0630\u064a\u0631\u0627\u062a \u064a\u062c\u0628 \u0645\u0631\u0627\u0642\u0628\u062a\u0647\u0627:':'\u26a0\ufe0f Warnings to watch:')+'</div>';
+    wrns.forEach(function(w){h+='<div style="font-size:10px;color:var(--t1);line-height:1.9;padding:5px 0">'+w+'</div>'});
+    h+='</div>'}
+  h+='<div style="padding:10px;background:var(--bg2);border-radius:10px;margin-bottom:8px;text-align:center"><div style="font-size:10px;color:var(--t2);margin-bottom:3px">'+(lang==='ar'?'\u0627\u0644\u062a\u0642\u064a\u064a\u0645 \u0627\u0644\u0646\u0647\u0627\u0626\u064a':'Final Score')+'</div><div style="font-size:24px;font-weight:800;color:'+(data.sc>=7?'var(--up)':data.sc>=5?'var(--warn)':'var(--dn)')+'">'+data.sc+'/10</div><div style="font-size:9px;color:var(--t2);margin-top:3px;direction:ltr">'+(lang==='ar'?'\u0627\u0644\u0646\u0637\u0627\u0642: ':'Range: ')+rP(data.supp)+' \u2014 '+rP(data.resist)+'</div></div>';
+
+  /* ════ Section 14b: Short-Term Analysis (next 24h) ════ */
+  h+='<div style="padding:10px;background:rgba(91,156,255,.03);border:1px solid rgba(91,156,255,.06);border-radius:10px;margin-bottom:8px">';
+  h+='<div style="font-size:12px;font-weight:800;color:var(--blue);margin-bottom:6px">\u{1F554} '+(lang==='ar'?'\u062a\u062d\u0644\u064a\u0644 \u0627\u0644\u0645\u062f\u0649 \u0627\u0644\u0642\u0631\u064a\u0628 (\u0627\u0644\u0640 24 \u0633\u0627\u0639\u0629 \u0627\u0644\u0642\u0627\u062f\u0645\u0629)':'Short-Term Analysis (next 24h)')+'</div>';
+  /* Short-term direction */
+  var stDir=data.tf.h1==='bull'&&data.tf.h4==='bull'?'bull':data.tf.h1==='bear'&&data.tf.h4==='bear'?'bear':'neutral';
+  var stIc=stDir==='bull'?'\u{1F7E2}':stDir==='bear'?'\u{1F534}':'\u{1F7E1}';
+  h+='<div style="font-size:10px;color:var(--t1);line-height:1.9;margin-bottom:6px">';
+  if(lang==='ar'){
+    h+=stIc+' <b>\u0627\u0644\u0627\u062a\u062c\u0627\u0647:</b> '+(stDir==='bull'?'\u0635\u0639\u0648\u062f\u064a \u0639\u0644\u0649 1H \u0648 4H':stDir==='bear'?'\u0647\u0628\u0648\u0637\u064a \u0639\u0644\u0649 1H \u0648 4H':'\u0645\u062e\u062a\u0644\u0637 \u0628\u064a\u0646 \u0627\u0644\u0641\u0631\u064a\u0645\u0627\u062a')+'<br>';
+    h+='\u{1F3AF} <b>\u0647\u062f\u0641 \u0642\u0631\u064a\u0628:</b> <span style="font-family:var(--fm);color:'+(stDir==='bull'?'var(--up)':'var(--dn)');
+    h+='">'+rP(stDir==='bull'?data.resist:data.supp)+'</span> '+(stDir==='bull'?'(\u0645\u0642\u0627\u0648\u0645\u0629 \u0642\u0631\u064a\u0628\u0629)':'(\u062f\u0639\u0645 \u0642\u0631\u064a\u0628)')+'<br>';
+    h+='\u{1F6D1} <b>\u0648\u0642\u0641 \u0627\u0644\u062e\u0633\u0627\u0631\u0629:</b> <span style="font-family:var(--fm);color:var(--dn)">'+rP(stDir==='bull'?data.supp:data.resist)+'</span><br>';
+    h+='\u{1F4CA} RSI 4H: <span style="font-family:var(--fm)">'+data.rsi.toFixed(0)+'</span> '+(data.rsi>70?'(\u062a\u0634\u0628\u0639 \u0634\u0631\u0627\u0626\u064a \u2014 \u062d\u0630\u0631!)':data.rsi<30?'(\u062a\u0634\u0628\u0639 \u0628\u064a\u0639\u064a \u2014 \u0641\u0631\u0635\u0629!)':'(\u0645\u0646\u0637\u0642\u0629 \u0637\u0628\u064a\u0639\u064a\u0629)')+'<br>';
+  }else{
+    h+=stIc+' <b>Direction:</b> '+(stDir==='bull'?'Bullish on 1H & 4H':stDir==='bear'?'Bearish on 1H & 4H':'Mixed between frames')+'<br>';
+    h+='\u{1F3AF} <b>Near target:</b> <span style="font-family:var(--fm);color:'+(stDir==='bull'?'var(--up)':'var(--dn)')+'">'+rP(stDir==='bull'?data.resist:data.supp)+'</span><br>';
+    h+='\u{1F6D1} <b>Stop loss:</b> <span style="font-family:var(--fm);color:var(--dn)">'+rP(stDir==='bull'?data.supp:data.resist)+'</span><br>';
+    h+='\u{1F4CA} RSI 4H: <span style="font-family:var(--fm)">'+data.rsi.toFixed(0)+'</span> '+(data.rsi>70?'(overbought \u2014 caution!)':data.rsi<30?'(oversold \u2014 opportunity!)':'(normal zone)')+'<br>';
+  }
+  /* FVG targets */
+  if(data.fvgs&&data.fvgs.length){var nearFvg=data.fvgs[0];
+    h+=(lang==='ar'?'\u{1F573} <b>\u0641\u062c\u0648\u0629 \u0633\u0639\u0631\u064a\u0629 \u0642\u0631\u064a\u0628\u0629:</b> ':'\u{1F573} <b>Nearest FVG:</b> ')+'<span style="font-family:var(--fm);color:'+(nearFvg.type==='bullish'?'var(--up)':'var(--dn)')+'">'+nearFvg.bot+' \u2014 '+nearFvg.top+'</span> '+(nearFvg.type==='bullish'?(lang==='ar'?'(\u0627\u0644\u0633\u0639\u0631 \u0642\u062f \u064a\u0631\u062a\u062f \u0645\u0646\u0647\u0627)':'(price may bounce here)'):(lang==='ar'?'(\u0627\u0644\u0633\u0639\u0631 \u0642\u062f \u064a\u0647\u0628\u0637 \u0645\u0646\u0647\u0627)':'(price may drop here)'))+'<br>';}
+  /* Spread */
+  var spd2=bookTickers[sym];
+  if(spd2){h+=(lang==='ar'?'\u{1F4D0} <b>\u0627\u0644\u0633\u064a\u0648\u0644\u0629:</b> ':'\u{1F4D0} <b>Liquidity:</b> ')+'Spread <span style="font-family:var(--fm)">'+spd2.spread.toFixed(3)+'%</span> '+(spd2.spread>0.05?(lang==='ar'?'(\u0636\u0639\u064a\u0641\u0629 \u2014 \u0627\u062d\u0630\u0631 \u0627\u0644\u0627\u0646\u0632\u0644\u0627\u0642)':'(weak \u2014 watch slippage)'):(lang==='ar'?'(\u062c\u064a\u062f\u0629)':'(good)'));}
   h+='</div>';
-  /* Story summary */
-  h+='<div class="mkt-summary" style="border-right:3px solid '+coinColor+'20;background:var(--bg2)">'+buildStory(sym,data)+'</div>';
+  /* Short-term targets visual */
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px;background:rgba(255,255,255,.02);border-radius:6px;font-size:9px;direction:ltr">';
+  h+='<div style="text-align:center"><div style="color:var(--dn);font-weight:700">\u{1F6D1}</div><div style="font-family:var(--fm);font-size:10px">'+rP(stDir==='bull'?data.supp:data.resist)+'</div><div style="color:var(--t3)">'+(lang==='ar'?'\u0648\u0642\u0641':'Stop')+'</div></div>';
+  h+='<div style="color:var(--t3)">\u2190</div>';
+  h+='<div style="text-align:center"><div style="color:var(--blue);font-weight:700">\u25B6</div><div style="font-family:var(--fm);font-size:10px;font-weight:800">'+rP(data.price)+'</div><div style="color:var(--t3)">'+(lang==='ar'?'\u0627\u0644\u0633\u0639\u0631':'Price')+'</div></div>';
+  h+='<div style="color:var(--t3)">\u2192</div>';
+  h+='<div style="text-align:center"><div style="color:var(--up);font-weight:700">\u{1F3AF}</div><div style="font-family:var(--fm);font-size:10px">'+rP(stDir==='bull'?data.resist:data.supp)+'</div><div style="color:var(--t3)">'+(lang==='ar'?'\u0647\u062f\u0641 1':'T1')+'</div></div>';
+  h+='<div style="color:var(--t3)">\u2192</div>';
+  h+='<div style="text-align:center"><div style="color:var(--up);font-weight:700">\u{1F3AF}\u{1F3AF}</div><div style="font-family:var(--fm);font-size:10px">'+rP(stDir==='bull'?data.f618U:data.f618D)+'</div><div style="color:var(--t3)">'+(lang==='ar'?'\u0647\u062f\u0641 2':'T2')+'</div></div>';
+  h+='</div></div>';
+
+  /* ════ Section 14c: Long-Term Analysis (next 7 days) ════ */
+  h+='<div style="padding:10px;background:rgba(176,124,255,.03);border:1px solid rgba(176,124,255,.06);border-radius:10px;margin-bottom:8px">';
+  h+='<div style="font-size:12px;font-weight:800;color:var(--purple);margin-bottom:6px">\u{1F4C5} '+(lang==='ar'?'\u062a\u062d\u0644\u064a\u0644 \u0627\u0644\u0645\u062f\u0649 \u0627\u0644\u0628\u0639\u064a\u062f (7 \u0623\u064a\u0627\u0645 \u0627\u0644\u0642\u0627\u062f\u0645\u0629)':'Long-Term Analysis (next 7 days)')+'</div>';
+  var ltDir=data.tf.d==='bull'&&data.tf.w==='bull'?'bull':data.tf.d==='bear'&&data.tf.w==='bear'?'bear':'neutral';
+  var ltIc=ltDir==='bull'?'\u{1F7E2}':ltDir==='bear'?'\u{1F534}':'\u{1F7E1}';
+  h+='<div style="font-size:10px;color:var(--t1);line-height:1.9;margin-bottom:6px">';
+  if(lang==='ar'){
+    h+=ltIc+' <b>\u0627\u0644\u0627\u062a\u062c\u0627\u0647 \u0627\u0644\u0623\u0633\u0628\u0648\u0639\u064a:</b> '+(ltDir==='bull'?'\u0635\u0639\u0648\u062f\u064a \u0639\u0644\u0649 \u0627\u0644\u064a\u0648\u0645\u064a + \u0627\u0644\u0623\u0633\u0628\u0648\u0639\u064a':ltDir==='bear'?'\u0647\u0628\u0648\u0637\u064a \u0639\u0644\u0649 \u0627\u0644\u064a\u0648\u0645\u064a + \u0627\u0644\u0623\u0633\u0628\u0648\u0639\u064a':'\u0645\u062e\u062a\u0644\u0637 \u2014 \u0627\u0644\u064a\u0648\u0645\u064a \u0648\u0627\u0644\u0623\u0633\u0628\u0648\u0639\u064a \u063a\u064a\u0631 \u0645\u062a\u0648\u0627\u0641\u0642\u064a\u0646')+'<br>';
+    h+='\u{1F4CA} RSI \u0627\u0644\u064a\u0648\u0645\u064a: <span style="font-family:var(--fm)">'+data.rsi1d.toFixed(0)+'</span> '+(data.rsi1d>70?'(\u062a\u0634\u0628\u0639 \u0634\u0631\u0627\u0626\u064a \u2014 \u062a\u0635\u062d\u064a\u062d \u0645\u0645\u0643\u0646)':data.rsi1d<30?'(\u062a\u0634\u0628\u0639 \u0628\u064a\u0639\u064a \u2014 \u0627\u0631\u062a\u062f\u0627\u062f \u0645\u062a\u0648\u0642\u0639)':'(\u0645\u0646\u0637\u0642\u0629 \u0635\u062d\u064a\u0629)')+'<br>';
+    h+='\u{1F3D7} <b>\u0627\u0644\u0647\u064a\u0643\u0644:</b> '+(data.struct==='HH/HL'?'\u0642\u0645\u0645 \u0623\u0639\u0644\u0649 \u0648\u0642\u064a\u0639\u0627\u0646 \u0623\u0639\u0644\u0649 (HH/HL) \u2014 \u0627\u0644\u0627\u062a\u062c\u0627\u0647 \u0627\u0644\u0639\u0627\u0645 \u0635\u0639\u0648\u062f\u064a':data.struct==='LH/LL'?'\u0642\u0645\u0645 \u0623\u062f\u0646\u0649 \u0648\u0642\u064a\u0639\u0627\u0646 \u0623\u062f\u0646\u0649 (LH/LL) \u2014 \u0627\u0644\u0627\u062a\u062c\u0627\u0647 \u0627\u0644\u0639\u0627\u0645 \u0647\u0628\u0648\u0637\u064a':'\u063a\u064a\u0631 \u0648\u0627\u0636\u062d \u2014 \u062a\u062c\u0645\u064a\u0639 \u0623\u0648 \u062a\u0648\u0632\u064a\u0639')+'<br>';
+    h+='\u{1F3AF} <b>\u0647\u062f\u0641 \u0623\u0633\u0628\u0648\u0639\u064a:</b> <span style="font-family:var(--fm);color:'+(ltDir==='bull'?'var(--up)':'var(--dn)')+'">'+rP(ltDir==='bull'?data.f100U:data.f618D)+'</span><br>';
+    h+='\u{1F7E2} <b>\u062f\u0639\u0645 \u0631\u0626\u064a\u0633\u064a:</b> <span style="font-family:var(--fm);color:var(--up)">'+rP(data.ema50<data.supp?data.ema50:data.supp)+'</span> (EMA50/'+(lang==='ar'?'\u062f\u0639\u0645':'Support')+')<br>';
+    h+='\u{1F534} <b>\u0645\u0642\u0627\u0648\u0645\u0629 \u0631\u0626\u064a\u0633\u064a\u0629:</b> <span style="font-family:var(--fm);color:var(--dn)">'+rP(data.f100U)+'</span>';
+    if(data.ch.d7!==undefined)h+='<br>\u{1F4C8} <b>\u0623\u062f\u0627\u0621 7 \u0623\u064a\u0627\u0645:</b> <span style="font-family:var(--fm);color:'+(data.ch.d7>=0?'var(--up)':'var(--dn)');
+    if(data.ch.d7!==undefined)h+='">'+(data.ch.d7>=0?'+':'')+data.ch.d7.toFixed(1)+'%</span>';
+  }else{
+    h+=ltIc+' <b>Weekly trend:</b> '+(ltDir==='bull'?'Bullish on Daily + Weekly':ltDir==='bear'?'Bearish on Daily + Weekly':'Mixed \u2014 Daily and Weekly not aligned')+'<br>';
+    h+='\u{1F4CA} Daily RSI: <span style="font-family:var(--fm)">'+data.rsi1d.toFixed(0)+'</span> '+(data.rsi1d>70?'(overbought \u2014 correction possible)':data.rsi1d<30?'(oversold \u2014 bounce expected)':'(healthy zone)')+'<br>';
+    h+='\u{1F3D7} <b>Structure:</b> '+(data.struct==='HH/HL'?'HH/HL \u2014 overall bullish':data.struct==='LH/LL'?'LH/LL \u2014 overall bearish':'Unclear \u2014 accumulation or distribution')+'<br>';
+    h+='\u{1F3AF} <b>Weekly target:</b> <span style="font-family:var(--fm);color:'+(ltDir==='bull'?'var(--up)':'var(--dn)')+'">'+rP(ltDir==='bull'?data.f100U:data.f618D)+'</span><br>';
+    h+='\u{1F7E2} <b>Major support:</b> <span style="font-family:var(--fm);color:var(--up)">'+rP(data.ema50<data.supp?data.ema50:data.supp)+'</span><br>';
+    h+='\u{1F534} <b>Major resistance:</b> <span style="font-family:var(--fm);color:var(--dn)">'+rP(data.f100U)+'</span>';
+    if(data.ch.d7!==undefined)h+='<br>\u{1F4C8} <b>7-day performance:</b> <span style="font-family:var(--fm);color:'+(data.ch.d7>=0?'var(--up)':'var(--dn)');
+    if(data.ch.d7!==undefined)h+='">'+(data.ch.d7>=0?'+':'')+data.ch.d7.toFixed(1)+'%</span>';
+  }
+  h+='</div>';
+  /* Long-term target visual */
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px;background:rgba(255,255,255,.02);border-radius:6px;font-size:9px;direction:ltr">';
+  h+='<div style="text-align:center"><div style="color:var(--up);font-size:7px">'+(lang==='ar'?'\u062f\u0639\u0645 \u0631\u0626\u064a\u0633\u064a':'Major S')+'</div><div style="font-family:var(--fm);font-size:10px;color:var(--up)">'+rP(data.ema50<data.supp?data.ema50:data.supp)+'</div></div>';
+  h+='<div style="color:var(--t3)">\u2190</div>';
+  h+='<div style="text-align:center"><div style="color:var(--up);font-size:7px">S1</div><div style="font-family:var(--fm);font-size:10px">'+rP(data.supp)+'</div></div>';
+  h+='<div style="color:var(--t3)">\u2190</div>';
+  h+='<div style="text-align:center;background:rgba(91,156,255,.08);padding:4px 6px;border-radius:4px"><div style="color:var(--blue);font-size:7px;font-weight:700">'+(lang==='ar'?'\u0627\u0644\u0622\u0646':'NOW')+'</div><div style="font-family:var(--fm);font-size:10px;font-weight:800">'+rP(data.price)+'</div></div>';
+  h+='<div style="color:var(--t3)">\u2192</div>';
+  h+='<div style="text-align:center"><div style="color:var(--dn);font-size:7px">R1</div><div style="font-family:var(--fm);font-size:10px">'+rP(data.resist)+'</div></div>';
+  h+='<div style="color:var(--t3)">\u2192</div>';
+  h+='<div style="text-align:center"><div style="color:var(--dn);font-size:7px">'+(lang==='ar'?'\u0645\u0642\u0627\u0648\u0645\u0629 \u0631\u0626\u064a\u0633\u064a\u0629':'Major R')+'</div><div style="font-family:var(--fm);font-size:10px;color:var(--dn)">'+rP(data.f100U)+'</div></div>';
+  h+='</div></div>';
+
+
+  var evs=getUpcomingEvents();
+  if(evs.length){h+='<div class="mkt-events">';evs.forEach(function(e){h+='<div class="mkt-event-i"><span>'+e.ic+'</span><span>'+e.txt+'</span></div>'+(e.warn?'<div style="font-size:8px;color:var(--warn);padding:0 0 2px 22px">'+e.warn+'</div>':'')});h+='</div>'}
+  /* Correlations */
+  h+='<div class="mkt-cor"><div class="mkt-cor-i"><div class="mkt-cor-v">'+btcDom.toFixed(1)+'%</div><div class="mkt-cor-l">BTC Dom</div></div><div class="mkt-cor-i"><div class="mkt-cor-v">'+(T.ETH&&T.BTC?(T.ETH.p/T.BTC.p).toFixed(4):'--')+'</div><div class="mkt-cor-l">ETH/BTC</div></div><div class="mkt-cor-i"><div class="mkt-cor-v" style="color:'+(fgValue<30?'var(--dn)':fgValue>60?'var(--up)':'var(--warn)')+'">'+fgValue+'</div><div class="mkt-cor-l">Fear&Greed</div></div></div>';
   /* Risk cards */
   h+='<div class="mkt-risk-grid">';
   var riskLbl=data.riskPct>=4?(lang==='ar'?'\u0645\u062e\u0627\u0637\u0631\u0629 \u0639\u0627\u0644\u064a\u0629':'High Risk'):data.riskPct>=2?(lang==='ar'?'\u0645\u062e\u0627\u0637\u0631\u0629 \u0645\u062a\u0648\u0633\u0637\u0629':'Medium'):data.riskPct>=1?(lang==='ar'?'\u0645\u062e\u0627\u0637\u0631\u0629 \u0645\u0646\u062e\u0641\u0636\u0629':'Low Risk'):(lang==='ar'?'\u0644\u0627 \u062f\u062e\u0648\u0644':'No Entry');
   h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v" style="color:'+(data.riskPct>=4?'var(--dn)':data.riskPct>=2?'var(--warn)':'var(--up)')+'">'+riskLbl+'</div><div class="mkt-risk-card-l">'+(lang==='ar'?'\u0627\u0644\u0645\u062e\u0627\u0637\u0631\u0629':'Risk')+'</div></div>';
   h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v">1:'+rr.toFixed(1)+'</div><div class="mkt-risk-card-l">R:R</div></div>';
   h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v">4H</div><div class="mkt-risk-card-l">'+(lang==='ar'?'\u0627\u0644\u0641\u0631\u064a\u0645':'Frame')+'</div></div>';
-  h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v">3-5d</div><div class="mkt-risk-card-l">'+(lang==='ar'?'\u0627\u0644\u0645\u062f\u0629':'Duration')+'</div></div>';
+  h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v">'+data.sc+'/10</div><div class="mkt-risk-card-l">Score</div></div>';
   h+='</div>';
-  /* Disclaimer */
+  /* Disclaimer + Signature */
   h+='<div style="text-align:center;font-size:8px;color:var(--t3);margin:6px 0">\u26a0\ufe0f '+(lang==='ar'?'\u062a\u062d\u0644\u064a\u0644 \u0641\u0646\u064a \u2014 \u0644\u064a\u0633 \u0646\u0635\u064a\u062d\u0629 \u0645\u0627\u0644\u064a\u0629':'Technical analysis \u2014 not financial advice')+'</div>';
-  /* Signature */
   h+=mktSignature();
   h+='</div>';
 
@@ -3571,10 +8506,12 @@ async function loadMarket(){if(curMktTab===0)loadBTCChart();else loadETHChart()}
 setInterval(function(){var pgEl=document.getElementById('pg-market');if(pgEl&&pgEl.classList.contains('act')){if(curMktTab===0&&Date.now()-btcCache.t>=MKT_TTL)loadBTCChart();else if(curMktTab===1&&Date.now()-ethCache.t>=MKT_TTL)loadETHChart()}},60000);
 /* 🤖 DATA VALIDATOR + AUTO-REPAIR + CONNECTION QUALITY */
 var validatorLog=[];var lastDataTime=Date.now();var validatorStatus='ok';
-var connMetrics={apiOk:0,apiFail:0,wsUp:false,lastLatency:0,lastCheck:Date.now()};
+var connMetrics={apiOk:0,apiFail:0,wsUp:false,lastLatency:0,lastCheck:Date.now(),wsMessages:0,wsSubs:0,fallbackLevel:'websocket'};
 function addVLog(type,msg){validatorLog.unshift({type:type,msg:msg,time:Date.now()});if(validatorLog.length>30)validatorLog=validatorLog.slice(0,30)}
 function getConnQuality(){
   var score=100;
+  /* WebSocket status */
+  if(typeof NexusWS!=='undefined'){var wsS=NexusWS.getStats();if(!wsS.ws.wsConnects||wsS.level!=='websocket')score-=20;if(wsS.ws.avgLatency>1000)score-=15;else if(wsS.ws.avgLatency>500)score-=5;if(wsS.level==='polling')score-=10;else if(wsS.level==='cache')score-=30;connMetrics.wsUp=wsS.level==='websocket';connMetrics.lastLatency=wsS.ws.avgLatency;connMetrics.wsMessages=wsS.ws.wsMsgs;connMetrics.wsSubs=wsS.subs.spot+wsS.subs.futures;connMetrics.fallbackLevel=wsS.level}
   /* Data freshness */
   var age=Date.now()-lastDataTime;
   if(age>30000)score-=40;else if(age>15000)score-=15;
@@ -3592,6 +8529,7 @@ function updateConnStatus(){
   else if(q>=50){txt=lang==='ar'?'جيدة':'Good';col='var(--neon)'}
   else if(q>=30){txt=lang==='ar'?'عادية':'Fair';col='var(--warn)'}
   else{txt=lang==='ar'?'ضعيفة':'Poor';col='var(--dn)'}
+  if(typeof NexusWS!=='undefined'){var lv=NexusWS.Fallback.getLevel();var ic=lv==='websocket'?'⚡':lv==='polling'?'📡':'📦';txt=ic+' '+txt}
   if(el){el.textContent=txt;el.style.color=col}
   if(dot){dot.style.background=col;dot.style.boxShadow='0 0 6px '+col}}
 async function runValidator(){
@@ -3642,6 +8580,13 @@ async function scanBybitGainers(){
 async function init(){try{document.getElementById('sInp').placeholder=t('search_ph')}catch(e){}try{document.getElementById('notifB').dataset.c='0'}catch(e){}
   loadProfile();loadToneUI();updateMenuLang();updateMenuTheme();
   if(tg){try{tg.setHeaderColor(document.body.dataset.theme==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(document.body.dataset.theme==='dark'?'#020408':'#f0f4f8')}catch(e){}}
+  /* === Security + Monitor Init === */
+  if(typeof NexusSecurity!=="undefined")NexusSecurity.init();
+  if(typeof NexusMonitor!=="undefined")NexusMonitor.init({errorEndpoint:PROXY+"/api/errors"});
+  /* === WS: تشغيل نظام WebSocket المتقدم === */
+  if(typeof NexusWS!=='undefined'){NexusWS.init();console.log('[NEXUS] ⚡ WebSocket System V2.0 — نشط')}
+  /* === WS: Web Worker (Inline Blob) === */
+  _initWorker();
   try{await loadDash()}catch(e){console.error('init loadDash:',e)}
   try{renderPort()}catch(e){}
   try{updateConnStatus()}catch(e){}
@@ -3656,8 +8601,9 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   },15000);
   /* ═══ TOP 100 AUTO-UPDATE: CoinGecko every hour ═══ */
   setTimeout(updateTop100,5000);setInterval(updateTop100,3600000);
-  /* ═══ MAIN POLLING: fetch /api/all every 5 seconds ═══ */
-  setInterval(async function(){try{await loadTk();checkWatchlistAlerts();updateConnStatus()}catch(e){connMetrics.apiFail++;updateConnStatus()}},5000);
+  /* ═══ MAIN DATA: WebSocket handles real-time prices, slow-poll handles FR/OI/LS ═══ */
+  /* OLD polling removed — NexusWS FallbackChain handles this automatically */
+  /* Fallback: if WS not available, FallbackChain polls every 5s */
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))try{await loadDash()}catch(e){}},120000);
   setInterval(monitorTrades,10000);
   setInterval(function(){try{renderTop3()}catch(e){}},60000); /* Auto-update VIP trades every minute */

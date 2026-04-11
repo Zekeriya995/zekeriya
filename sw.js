@@ -1,8 +1,10 @@
-var CACHE_NAME='nexus-v10-v3';
+var CACHE_NAME='nexus-v10-v4';
 var ASSETS=[
   './',
   './index.html',
   './app.js',
+  './websocket.js',
+  './ws-worker.js',
   './manifest.json',
   'https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@400;500;600;700;800&display=swap'
 ];
@@ -32,7 +34,7 @@ self.addEventListener('fetch',function(e){
   var url=e.request.url;
 
   /* API calls — network only, never cache */
-  if(url.includes('/api/')||url.includes('api.binance')||url.includes('fapi.binance')||url.includes('api.bybit')||url.includes('api.coingecko')||url.includes('alternative.me')||url.includes('llama.fi')||url.includes('tokenomist')||url.includes('cryptocompare')){
+  if(url.includes('/api/')||url.includes('api.binance')||url.includes('fapi.binance')||url.includes('stream.binance')||url.includes('fstream.binance')||url.includes('stream.bybit')||url.includes('api.bybit')||url.includes('api.coingecko')||url.includes('alternative.me')||url.includes('llama.fi')||url.includes('tokenomist')||url.includes('cryptocompare')){
     e.respondWith(fetch(e.request).catch(function(){return new Response(JSON.stringify({error:'offline'}),{headers:{'Content-Type':'application/json'}})}));
     return;
   }

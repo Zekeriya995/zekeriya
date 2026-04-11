@@ -883,7 +883,8 @@ function signalQualityGate(sym, type, score) {
   var hasWhale = ww && ww.waves && ww.waves.length > 0;
   var g6 = hasWhale || type === 'whale';
   results.push({name: lang === 'ar' ? 'دعم حيتان' : 'Whale support', pass: g6});
-  if (!g6 && type !== 'fast') pass = false;
+  /* Whale support is now a BONUS, not a blocker — signals still pass without it */
+  /* if (!g6 && type !== 'fast') pass = false; ← REMOVED: was blocking all signals */
 
   var openCount = activeTrades ? activeTrades.filter(function(x){return x.status==='OPEN'}).length : 0;
   var g7 = openCount < 5;
@@ -1219,25 +1220,41 @@ async function loadTrading(){var trLoadEl=document.getElementById('tradeList');i
     var cvd=analyzeCVD(x.s);if(cvd.divergence==='BULLISH')reasons.push({ic:'📈',t:lang==='ar'?'CVD صاعد — تجميع صامت':'CVD rising — accumulation'});
     var fr=FR[x.s];if(fr&&fr.rate<-0.02)reasons.push({ic:'💰',t:lang==='ar'?'FR سلبي — فرصة':'Neg FR — opportunity'});
     if(x.checks&&x.checks.ob)reasons.push({ic:'📗',t:lang==='ar'?'ضغط شراء OB':'OB buy pressure'});
-    var conf=Math.min(100,Math.round(Math.min(40,x.score*0.5)+(ww&&ww.engine?Math.min(25,ww.engine.confidence*0.3):0)+(T.BTC&&T.BTC.c>=1?10:T.BTC&&T.BTC.c<-2?-15:0)));
+    var conf=Math.min(100,Math.round(
+      Math.min(50,x.score*0.6)                                                    /* Technical score: up to 50 (was 40) */
+      +(ww&&ww.engine?Math.min(20,ww.engine.confidence*0.25):0)                    /* Whale bonus: up to 20 (was 25) */
+      +(x.passed>=5?10:x.passed>=4?7:x.passed>=3?4:0)                             /* NEW: checks passed bonus */
+      +(T.BTC&&T.BTC.c>=1?8:T.BTC&&T.BTC.c>=-1?3:T.BTC&&T.BTC.c<-2?-12:0)       /* BTC health */
+      +(FR[x.s]&&FR[x.s].rate<-0.01?5:0)                                          /* NEW: negative FR bonus */
+    ));
     var sec=getCoinSector(x.s);
     sigs.push({s:x.s,p:d.p,c:d.c,v:d.v,type:type,conf:conf,entry:entry,target:target,stop:stop,rr:rr,dur:dur,reasons:reasons,score:x.score,checks:x.checks,passed:x.passed,total:x.total,ultra:x.ultra,confirmed:x.confirmed,tags:x.tags,sec:sec,detectedAt:x.detectedAt})}
   sigs.sort(function(a,b){return b.conf-a.conf});renderTrading(sigs)}
 function filterTrade(f,btn){curTradeFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadTrading()}
 function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter(function(x){return x.type==='fast'});else if(curTradeFilter==='daily')f=sigs.filter(function(x){return x.type==='daily'});else if(curTradeFilter!=='all'){f=sigs.filter(function(x){return x.sec===curTradeFilter})}
-  /* Part B: Quality filter — min 65% confidence, max 8 */
-  f=f.filter(function(s){return s.conf>=65}).slice(0,8);
+  /* Part B: Quality filter — min 50% confidence (was 65%), max 12 */
+  f=f.filter(function(s){return s.conf>=50}).slice(0,12);
   var scanIEl=document.getElementById('scanI');if(scanIEl)scanIEl.innerHTML='📊 '+f.length+' '+t('scan_signals')+' | '+t('scan_updated')+': '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
-  if(!f.length){var trEl=document.getElementById('tradeList');if(trEl)trEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">📡</div><div style="font-size:13px;font-weight:700;color:var(--t0);margin-bottom:4px">'+(lang==='ar'?'السوق هادئ — لا فرص قوية الحين':'Market quiet — No strong signals')+'</div><div style="font-size:11px;color:var(--t2)">'+(lang==='ar'?'البوابة الذكية ترفض الإشارات الضعيفة — الانتظار أفضل':'Smart gate blocks weak signals — Waiting is better')+'</div></div>';return}
+  if(!f.length){var trEl=document.getElementById('tradeList');if(trEl){
+    /* Diagnose WHY no results */
+    var coinCount=Object.keys(T).length;
+    var frCount=Object.keys(FR).length;
+    var depthCount=Object.keys(depthSnapshots||{}).length;
+    var diagMsg='';
+    if(coinCount<10)diagMsg=lang==='ar'?'⚠️ البيانات لم تُحمَّل بعد — تأكد من اتصال السيرفر':'⚠️ Data not loaded — check server connection';
+    else if(frCount<5)diagMsg=lang==='ar'?'⚠️ بيانات Funding Rate ناقصة — السيرفر لا يرسل FR':'⚠️ Missing FR data from server';
+    else diagMsg=lang==='ar'?'السوق هادئ — لا فرص قوية الحين. '+coinCount+' عملة محمّلة، '+c.length+' مرشح':'Market quiet — '+coinCount+' coins loaded, '+c.length+' candidates';
+    trEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">📡</div><div style="font-size:13px;font-weight:700;color:var(--t0);margin-bottom:4px">'+(coinCount<10?(lang==='ar'?'لا بيانات — السيرفر غير متصل':'No data — Server disconnected'):(lang==='ar'?'لا فرص قوية حالياً':'No strong signals now'))+'</div><div style="font-size:11px;color:var(--t2)">'+diagMsg+'</div><div style="font-size:9px;color:var(--t3);margin-top:8px">🔧 '+(lang==='ar'?'عملات: '+coinCount+' | FR: '+frCount+' | Depth: '+depthCount:'Coins: '+coinCount+' | FR: '+frCount+' | Depth: '+depthCount)+'</div></div>'};return}
   var h='';f.forEach(function(s,i){
     var tCol=s.type==='fast'?'var(--blue)':'var(--up)';var tLbl=s.type==='fast'?t('scan_fast'):t('scan_daily');
     var tb=getTierBadge(s.s);var ta=timeAgo(s.detectedAt||Date.now());
     /* Verdict (Part B) */
     var verdict,vCol,vBg;
     if(s.conf>=85&&s.ultra){verdict=lang==='ar'?'🟢 إشارة ممتازة — ادخل بثقة':'🟢 Excellent — Enter Now';vCol='var(--up)';vBg='rgba(0,255,136,.08)'}
-    else if(s.conf>=80){verdict=lang==='ar'?'🟢 إشارة قوية — فرصة حقيقية':'🟢 Strong Signal';vCol='var(--up)';vBg='rgba(0,255,136,.06)'}
-    else if(s.conf>=70){verdict=lang==='ar'?'🟡 فرصة جيدة — ادخل بحذر':'🟡 Good — Enter Carefully';vCol='var(--warn)';vBg='rgba(255,184,0,.04)'}
-    else{verdict=lang==='ar'?'⚪ فرصة محتملة — راقب فقط':'⚪ Watch Only';vCol='var(--t2)';vBg='rgba(56,72,96,.04)'}
+    else if(s.conf>=75){verdict=lang==='ar'?'🟢 إشارة قوية — فرصة حقيقية':'🟢 Strong Signal';vCol='var(--up)';vBg='rgba(0,255,136,.06)'}
+    else if(s.conf>=60){verdict=lang==='ar'?'🟡 فرصة جيدة — ادخل بحذر':'🟡 Good — Enter Carefully';vCol='var(--warn)';vBg='rgba(255,184,0,.04)'}
+    else if(s.conf>=50){verdict=lang==='ar'?'⚪ فرصة محتملة — راقب أولاً':'⚪ Possible — Watch First';vCol='var(--t2)';vBg='rgba(56,72,96,.04)'}
+    else{verdict=lang==='ar'?'⚪ ضعيفة — تجنب':'⚪ Weak — Avoid';vCol='var(--t3)';vBg='rgba(56,72,96,.02)'}
     var wConf=0;var ww=whaleWaves[s.s];if(ww&&ww.engine)wConf=ww.engine.confidence||0;
     var btcChg=T.BTC?T.BTC.c:0;var btcCol=btcChg>=1?'var(--up)':btcChg<=-1?'var(--dn)':'var(--t2)';
     h+='<div class="scan-card"><div class="scan-card-bar" style="background:'+(s.ultra?'var(--ultra)':s.type==='fast'?'var(--blue)':'var(--up)')+'"></div><div class="scan-card-body">'

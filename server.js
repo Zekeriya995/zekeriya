@@ -1,0 +1,510 @@
+/*
+ * ═══════════════════════════════════════════════════════════════
+ *  NEXUS PRO V10.1 — Proxy Server
+ *  يجمع البيانات من Binance + Bybit + CoinGecko + Coinbase
+ *  ويرسلها للتطبيق عبر endpoint واحد: /api/all
+ * ═══════════════════════════════════════════════════════════════
+ *
+ *  التثبيت:
+ *    1. ارفع هذا المجلد على الـ VPS
+ *    2. npm install
+ *    3. انسخ .env.example إلى .env وعدّل القيم
+ *    4. npm start
+ *
+ *  أو مع PM2 (يشتغل بالخلفية ويعيد التشغيل تلقائياً):
+ *    pm2 start server.js --name nexus-proxy
+ *    pm2 save
+ *    pm2 startup
+ * ═══════════════════════════════════════════════════════════════
+ */
+
+const express = require('express');
+const cors = require('cors');
+const axios = require('axios');
+const rateLimit = require('express-rate-limit');
+require('dotenv').config();
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+/* ═══ CONFIGURATION ═══ */
+const CONFIG = {
+  /* Refresh intervals (ms) */
+  TICKER_INTERVAL: 10000,     /* 10 seconds */
+  FR_INTERVAL: 60000,         /* 1 minute */
+  OI_INTERVAL: 60000,         /* 1 minute */
+  LS_INTERVAL: 120000,        /* 2 minutes */
+  MARKET_INTERVAL: 300000,    /* 5 minutes */
+  TAKER_INTERVAL: 60000,      /* 1 minute */
+  DEPTH_INTERVAL: 15000,      /* 15 seconds — critical for whale engine */
+  LIQ_INTERVAL: 30000,        /* 30 seconds */
+
+  /* API URLs */
+  BINANCE_SPOT: 'https://api.binance.com/api/v3',
+  BINANCE_FUTURES: 'https://fapi.binance.com/fapi/v1',
+  COINGECKO: 'https://api.coingecko.com/api/v3',
+  COINBASE: 'https://api.coinbase.com/v2',
+  BYBIT: 'https://api.bybit.com/v5',
+  FEAR_GREED: 'https://api.alternative.me/fng',
+
+  /* Telegram Bot (optional) */
+  TG_BOT_TOKEN: process.env.TG_BOT_TOKEN || '',
+  TG_CHAT_ID: process.env.TG_CHAT_ID || '',
+
+  /* Allowed origins for CORS */
+  ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS
+    ? process.env.ALLOWED_ORIGINS.split(',')
+    : ['*'],
+
+  /* Request timeout */
+  TIMEOUT: 8000
+};
+
+/* ═══ MIDDLEWARE ═══ */
+
+/* CORS — restrict to your app's domain */
+app.use(cors({
+  origin: function (origin, callback) {
+    if (CONFIG.ALLOWED_ORIGINS.includes('*') || !origin || CONFIG.ALLOWED_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  }
+}));
+
+app.use(express.json());
+
+/* Rate limiting — 30 requests per minute per IP */
+const limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { error: 'Too many requests, slow down' }
+});
+app.use('/api/', limiter);
+
+/* ═══ DATA CACHE ═══ */
+const cache = {
+  tickers: {},      /* { BTC: { price, change, volume, high, low, src } } */
+  fr: {},           /* { BTC: { rate, mark } } */
+  oi: {},           /* { BTC: number } */
+  ls: {},           /* { BTC: { long, short, ratio, hist } } */
+  taker: {},        /* { BTC: { ratio, buyVol, sellVol, trend } } */
+  liq: [],          /* [ { sym, side, price, value, time } ] */
+  depth: {},        /* { BTC: { bids, asks } } */
+  market: {         /* Market overview */
+    fgi: 50,
+    fgiLabel: 'Neutral',
+    btcDom: 50,
+    cbp: {}         /* Coinbase prices */
+  },
+  lastUpdate: {}
+};
+
+/* ═══ SAFE FETCH — with timeout and error handling ═══ */
+async function safeFetch(url, label) {
+  try {
+    const res = await axios.get(url, { timeout: CONFIG.TIMEOUT });
+    return res.data;
+  } catch (err) {
+    console.error(`[${label}] Failed: ${err.message}`);
+    return null;
+  }
+}
+
+/* ═══ DATA FETCHERS ═══ */
+
+/* 1. TICKERS — Binance Spot + Bybit */
+async function fetchTickers() {
+  try {
+    /* Binance 24hr tickers */
+    const bnData = await safeFetch(
+      CONFIG.BINANCE_SPOT + '/ticker/24hr',
+      'BN-TICKERS'
+    );
+
+    if (bnData) {
+      bnData
+        .filter(t => t.symbol.endsWith('USDT'))
+        .forEach(t => {
+          const sym = t.symbol.replace('USDT', '');
+          cache.tickers[sym] = {
+            price: parseFloat(t.lastPrice),
+            change: parseFloat(t.priceChangePercent),
+            volume: parseFloat(t.quoteVolume),
+            high: parseFloat(t.highPrice),
+            low: parseFloat(t.lowPrice),
+            src: 'BN'
+          };
+        });
+    }
+
+    /* Bybit spot tickers */
+    const byData = await safeFetch(
+      CONFIG.BYBIT + '/market/tickers?category=spot',
+      'BY-TICKERS'
+    );
+
+    if (byData && byData.result && byData.result.list) {
+      byData.result.list
+        .filter(t => t.symbol.endsWith('USDT'))
+        .forEach(t => {
+          const sym = t.symbol.replace('USDT', '');
+          if (cache.tickers[sym]) {
+            cache.tickers[sym].by = parseFloat(t.lastPrice);
+          } else {
+            cache.tickers[sym] = {
+              price: parseFloat(t.lastPrice),
+              change: parseFloat(t.price24hPcnt) * 100,
+              volume: parseFloat(t.turnover24h),
+              high: parseFloat(t.highPrice24h),
+              low: parseFloat(t.lowPrice24h),
+              src: 'BY',
+              by: parseFloat(t.lastPrice)
+            };
+          }
+        });
+    }
+
+    cache.lastUpdate.tickers = Date.now();
+    console.log(`[TICKERS] Updated: ${Object.keys(cache.tickers).length} coins`);
+  } catch (err) {
+    console.error('[TICKERS] Error:', err.message);
+  }
+}
+
+/* 2. FUNDING RATES — Binance Futures */
+async function fetchFundingRates() {
+  try {
+    const data = await safeFetch(
+      CONFIG.BINANCE_FUTURES + '/premiumIndex',
+      'FR'
+    );
+
+    if (data) {
+      data.forEach(item => {
+        const sym = item.symbol.replace('USDT', '');
+        cache.fr[sym] = {
+          rate: parseFloat(item.lastFundingRate) * 100,
+          mark: parseFloat(item.markPrice)
+        };
+      });
+      cache.lastUpdate.fr = Date.now();
+      console.log(`[FR] Updated: ${Object.keys(cache.fr).length} pairs`);
+    }
+  } catch (err) {
+    console.error('[FR] Error:', err.message);
+  }
+}
+
+/* 3. OPEN INTEREST — Binance Futures */
+async function fetchOpenInterest() {
+  try {
+    /* Get top symbols */
+    const topSymbols = Object.keys(cache.tickers)
+      .filter(s => cache.tickers[s].volume > 5000000)
+      .slice(0, 50);
+
+    const promises = topSymbols.map(sym =>
+      safeFetch(
+        CONFIG.BINANCE_FUTURES + '/openInterest?symbol=' + sym + 'USDT',
+        'OI-' + sym
+      ).then(data => {
+        if (data && data.openInterest) {
+          cache.oi[sym] = parseFloat(data.openInterest) * (cache.tickers[sym] ? cache.tickers[sym].price : 0);
+        }
+      })
+    );
+
+    await Promise.allSettled(promises);
+    cache.lastUpdate.oi = Date.now();
+    console.log(`[OI] Updated: ${Object.keys(cache.oi).length} pairs`);
+  } catch (err) {
+    console.error('[OI] Error:', err.message);
+  }
+}
+
+/* 4. LONG/SHORT RATIO — Binance Futures */
+async function fetchLongShort() {
+  try {
+    const topSymbols = Object.keys(cache.tickers)
+      .filter(s => cache.tickers[s].volume > 10000000)
+      .slice(0, 30);
+
+    const promises = topSymbols.map(sym =>
+      safeFetch(
+        CONFIG.BINANCE_FUTURES + '/topLongShortPositionRatio?symbol=' + sym + 'USDT&period=1h&limit=4',
+        'LS-' + sym
+      ).then(data => {
+        if (data && data.length) {
+          const latest = data[data.length - 1];
+          cache.ls[sym] = {
+            long: parseFloat(latest.longAccount) * 100,
+            short: parseFloat(latest.shortAccount) * 100,
+            ratio: parseFloat(latest.longShortRatio),
+            hist: data.map(d => ({
+              long: parseFloat(d.longAccount) * 100,
+              short: parseFloat(d.shortAccount) * 100,
+              ratio: parseFloat(d.longShortRatio),
+              time: d.timestamp
+            }))
+          };
+        }
+      })
+    );
+
+    await Promise.allSettled(promises);
+    cache.lastUpdate.ls = Date.now();
+    console.log(`[LS] Updated: ${Object.keys(cache.ls).length} pairs`);
+  } catch (err) {
+    console.error('[LS] Error:', err.message);
+  }
+}
+
+/* 5. TAKER BUY/SELL — Binance Futures */
+async function fetchTaker() {
+  try {
+    const topSymbols = Object.keys(cache.tickers)
+      .filter(s => cache.tickers[s].volume > 10000000)
+      .slice(0, 30);
+
+    const promises = topSymbols.map(sym =>
+      safeFetch(
+        CONFIG.BINANCE_FUTURES + '/takerlongshortRatio?symbol=' + sym + 'USDT&period=1h&limit=4',
+        'TAKER-' + sym
+      ).then(data => {
+        if (data && data.length) {
+          const latest = data[data.length - 1];
+          const buyVol = parseFloat(latest.buyVol);
+          const sellVol = parseFloat(latest.sellVol);
+          const ratio = sellVol > 0 ? buyVol / sellVol : 1;
+          const avg = data.reduce((s, d) => s + parseFloat(d.buyVol) / Math.max(1, parseFloat(d.sellVol)), 0) / data.length;
+
+          cache.taker[sym] = {
+            ratio: Math.round(ratio * 100) / 100,
+            avg: Math.round(avg * 100) / 100,
+            buyVol: buyVol,
+            sellVol: sellVol,
+            trend: ratio > 1.3 ? 'BUY_HEAVY' : ratio < 0.7 ? 'SELL_HEAVY' : 'FLAT'
+          };
+        }
+      })
+    );
+
+    await Promise.allSettled(promises);
+    cache.lastUpdate.taker = Date.now();
+    console.log(`[TAKER] Updated: ${Object.keys(cache.taker).length} pairs`);
+  } catch (err) {
+    console.error('[TAKER] Error:', err.message);
+  }
+}
+
+/* 6. ORDER BOOK DEPTH — critical for whale engine */
+async function fetchDepth() {
+  try {
+    const topSymbols = Object.keys(cache.tickers)
+      .filter(s => cache.tickers[s].volume > 10000000)
+      .sort((a, b) => cache.tickers[b].volume - cache.tickers[a].volume)
+      .slice(0, 20);
+
+    const promises = topSymbols.map(sym =>
+      safeFetch(
+        CONFIG.BINANCE_SPOT + '/depth?symbol=' + sym + 'USDT&limit=20',
+        'DEPTH-' + sym
+      ).then(data => {
+        if (data && data.bids && data.asks) {
+          cache.depth[sym] = {
+            bids: data.bids.slice(0, 10),
+            asks: data.asks.slice(0, 10),
+            time: Date.now()
+          };
+        }
+      })
+    );
+
+    await Promise.allSettled(promises);
+    cache.lastUpdate.depth = Date.now();
+    console.log(`[DEPTH] Updated: ${Object.keys(cache.depth).length} pairs`);
+  } catch (err) {
+    console.error('[DEPTH] Error:', err.message);
+  }
+}
+
+/* 7. LIQUIDATION DATA — from Binance Futures forceOrders */
+async function fetchLiquidations() {
+  try {
+    const data = await safeFetch(
+      CONFIG.BINANCE_FUTURES + '/allForceOrders?limit=50',
+      'LIQ'
+    );
+
+    if (data && data.length) {
+      cache.liq = data
+        .filter(item => item.symbol.endsWith('USDT'))
+        .map(item => ({
+          sym: item.symbol.replace('USDT', ''),
+          side: item.side,
+          price: parseFloat(item.price),
+          qty: parseFloat(item.origQty),
+          value: parseFloat(item.price) * parseFloat(item.origQty),
+          time: item.time
+        }))
+        .slice(-100);
+
+      cache.lastUpdate.liq = Date.now();
+      console.log(`[LIQ] Updated: ${cache.liq.length} liquidations`);
+    }
+  } catch (err) {
+    console.error('[LIQ] Error:', err.message);
+  }
+}
+
+/* 8. MARKET OVERVIEW — Fear & Greed + BTC Dominance + Coinbase */
+async function fetchMarket() {
+  try {
+    /* Fear & Greed Index */
+    const fgData = await safeFetch(CONFIG.FEAR_GREED + '/?limit=1', 'FGI');
+    if (fgData && fgData.data && fgData.data.length) {
+      cache.market.fgi = parseInt(fgData.data[0].value);
+      cache.market.fgiLabel = fgData.data[0].value_classification;
+    }
+
+    /* BTC Dominance from CoinGecko */
+    const globalData = await safeFetch(CONFIG.COINGECKO + '/global', 'GLOBAL');
+    if (globalData && globalData.data && globalData.data.market_cap_percentage) {
+      cache.market.btcDom = Math.round(globalData.data.market_cap_percentage.btc * 10) / 10;
+    }
+
+    /* Coinbase prices for top coins */
+    const cbCoins = ['BTC', 'ETH', 'SOL', 'XRP'];
+    for (const coin of cbCoins) {
+      const cbData = await safeFetch(
+        CONFIG.COINBASE + '/prices/' + coin + '-USD/spot',
+        'CB-' + coin
+      );
+      if (cbData && cbData.data && cbData.data.amount) {
+        cache.market.cbp[coin] = parseFloat(cbData.data.amount);
+      }
+    }
+
+    cache.lastUpdate.market = Date.now();
+    console.log(`[MARKET] FGI: ${cache.market.fgi} | BTC Dom: ${cache.market.btcDom}%`);
+  } catch (err) {
+    console.error('[MARKET] Error:', err.message);
+  }
+}
+
+/* ═══ API ROUTES ═══ */
+
+/* Main endpoint — returns ALL data */
+app.get('/api/all', (req, res) => {
+  res.json({
+    tickers: cache.tickers,
+    fr: cache.fr,
+    oi: cache.oi,
+    ls: cache.ls,
+    taker: cache.taker,
+    liq: cache.liq,
+    depth: cache.depth,
+    market: cache.market,
+    meta: {
+      coins: Object.keys(cache.tickers).length,
+      lastUpdate: cache.lastUpdate,
+      uptime: Math.floor(process.uptime()),
+      version: '10.1'
+    }
+  });
+});
+
+/* Health check */
+app.get('/api/health', (req, res) => {
+  const age = Date.now() - (cache.lastUpdate.tickers || 0);
+  res.json({
+    status: age < 30000 ? 'healthy' : age < 60000 ? 'stale' : 'down',
+    coins: Object.keys(cache.tickers).length,
+    fr: Object.keys(cache.fr).length,
+    oi: Object.keys(cache.oi).length,
+    ls: Object.keys(cache.ls).length,
+    uptime: Math.floor(process.uptime()),
+    lastUpdate: cache.lastUpdate
+  });
+});
+
+/* Telegram notification proxy */
+app.post('/notify', async (req, res) => {
+  if (!CONFIG.TG_BOT_TOKEN || !CONFIG.TG_CHAT_ID) {
+    return res.json({ ok: false, error: 'Telegram not configured' });
+  }
+
+  try {
+    const { message } = req.body;
+    if (!message) return res.json({ ok: false, error: 'No message' });
+
+    /* Sanitize message — remove script tags */
+    const cleanMsg = message.replace(/<script[^>]*>.*?<\/script>/gi, '');
+
+    await axios.post(
+      `https://api.telegram.org/bot${CONFIG.TG_BOT_TOKEN}/sendMessage`,
+      {
+        chat_id: CONFIG.TG_CHAT_ID,
+        text: cleanMsg,
+        parse_mode: 'HTML',
+        disable_web_page_preview: true
+      },
+      { timeout: 5000 }
+    );
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+/* ═══ STARTUP ═══ */
+async function startDataLoops() {
+  console.log('═══ NEXUS PRO Proxy Server V10.1 ═══');
+  console.log(`Starting on port ${PORT}...`);
+
+  /* Initial load — sequential to avoid rate limits */
+  console.log('[INIT] Loading tickers...');
+  await fetchTickers();
+
+  console.log('[INIT] Loading funding rates...');
+  await fetchFundingRates();
+
+  console.log('[INIT] Loading open interest...');
+  await fetchOpenInterest();
+
+  console.log('[INIT] Loading long/short...');
+  await fetchLongShort();
+
+  console.log('[INIT] Loading taker data...');
+  await fetchTaker();
+
+  console.log('[INIT] Loading order book depth...');
+  await fetchDepth();
+
+  console.log('[INIT] Loading liquidations...');
+  await fetchLiquidations();
+
+  console.log('[INIT] Loading market data...');
+  await fetchMarket();
+
+  console.log(`[INIT] ✅ Ready — ${Object.keys(cache.tickers).length} coins loaded`);
+
+  /* Set up refresh intervals */
+  setInterval(fetchTickers, CONFIG.TICKER_INTERVAL);
+  setInterval(fetchFundingRates, CONFIG.FR_INTERVAL);
+  setInterval(fetchOpenInterest, CONFIG.OI_INTERVAL);
+  setInterval(fetchLongShort, CONFIG.LS_INTERVAL);
+  setInterval(fetchTaker, CONFIG.TAKER_INTERVAL);
+  setInterval(fetchDepth, CONFIG.DEPTH_INTERVAL);
+  setInterval(fetchLiquidations, CONFIG.LIQ_INTERVAL);
+  setInterval(fetchMarket, CONFIG.MARKET_INTERVAL);
+}
+
+/* Start server */
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Server listening on port ${PORT}`);
+  startDataLoops();
+});

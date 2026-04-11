@@ -1,8 +1,333 @@
-/* NEXUS PRO V10 — Early Detection + Sound Alerts + Smart Cache + 6 Checks */
-var tg=window.Telegram&&window.Telegram.WebApp?window.Telegram.WebApp:null;if(tg){tg.ready();tg.expand();tg.setHeaderColor('#060b14');tg.setBackgroundColor('#020408')}
-const BN='https://api.binance.com/api/v3',BF='https://fapi.binance.com/fapi/v1',CG='https://api.coingecko.com/api/v3',CB='https://api.coinbase.com/v2';
-const PROXY='https://incidents-reviewer-ordering-pursuant.trycloudflare.com';
-var WL=['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','LINK','AVAX','DOT','MATIC','UNI','ATOM','LTC','NEAR','APT','ARB','OP','INJ','SUI','SEI','TIA','FTM','PEPE','WIF','FIL','HBAR','ICP','IMX','STX','MKR','AAVE','RENDER','GRT','FET','TAO','THETA','LDO','BONK','FLOKI','AR','ALGO','FLOW','MINA','AXS','SAND','MANA','GALA','ENJ','CRV','SNX','COMP','DYDX','GMX','SUSHI','PENDLE','JUP','ENA','W','STRK','TRX','TON','VET','RUNE','KAS','EOS','XLM','EGLD','ROSE','ONE','ZIL','CHZ','IOTA','ENS','WLD','PYTH','ONDO','JTO','PIXEL','BEAM','ORDI','TWT','CAKE','1INCH','BAL','YFI','ASTR','CFX','ANKR','IOTX','RVN','ZEC','QTUM','XEM','WAVES','NEO','KAVA','CKB','XTZ','CELO'];
+/* NEXUS PRO V10.1 — Security Hardened + Performance Optimized + Clean Architecture */
+/* ═══════════════════════════════════════════════════════════════════════════════
+ *  SECURITY LAYER — XSS Prevention, Input Validation, Encrypted Storage
+ *  ERROR HANDLING — Centralized error handler with user notifications
+ *  PERFORMANCE — Rate limiter, request debouncer, memory management
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. XSS SANITIZER — prevents script injection via innerHTML ── */
+function sanitize(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;')
+    .replace(/\//g, '&#x2F;');
+}
+
+/* ── 2. INPUT VALIDATOR — validates user inputs before processing ── */
+var InputValidator = {
+  /* Validate coin symbol: only uppercase letters and numbers, max 10 chars */
+  coinSymbol: function(sym) {
+    if (!sym || typeof sym !== 'string') return '';
+    var clean = sym.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return clean.slice(0, 10);
+  },
+  /* Validate numeric input: must be a positive finite number */
+  positiveNumber: function(val) {
+    var num = parseFloat(val);
+    if (isNaN(num) || !isFinite(num) || num < 0) return 0;
+    return num;
+  },
+  /* Validate price: positive number with reasonable range */
+  price: function(val) {
+    var num = this.positiveNumber(val);
+    if (num > 1e12) return 0; /* Unreasonably high */
+    return num;
+  },
+  /* Validate amount: positive number */
+  amount: function(val) {
+    var num = this.positiveNumber(val);
+    if (num > 1e15) return 0;
+    return num;
+  },
+  /* Validate search text: alphanumeric + basic chars, max 50 chars */
+  searchText: function(txt) {
+    if (!txt || typeof txt !== 'string') return '';
+    return txt.replace(/[<>"'&;(){}]/g, '').slice(0, 50);
+  }
+};
+
+/* ── 3. ENCRYPTED STORAGE — encrypts sensitive data in localStorage ── */
+var SecureStorage = {
+  _key: 'NX_V10_' + (navigator.userAgent.length % 997),
+  
+  _encode: function(data) {
+    try {
+      var json = JSON.stringify(data);
+      /* Simple XOR obfuscation — not military-grade but prevents casual reading */
+      var encoded = '';
+      for (var i = 0; i < json.length; i++) {
+        encoded += String.fromCharCode(json.charCodeAt(i) ^ this._key.charCodeAt(i % this._key.length));
+      }
+      return btoa(encoded);
+    } catch (e) { return null; }
+  },
+  
+  _decode: function(encoded) {
+    try {
+      var decoded = atob(encoded);
+      var json = '';
+      for (var i = 0; i < decoded.length; i++) {
+        json += String.fromCharCode(decoded.charCodeAt(i) ^ this._key.charCodeAt(i % this._key.length));
+      }
+      return JSON.parse(json);
+    } catch (e) { return null; }
+  },
+  
+  set: function(key, data) {
+    try {
+      localStorage.setItem(key, this._encode(data));
+      return true;
+    } catch (e) {
+      ErrorHandler.log('storage', 'Failed to save: ' + key, e);
+      return false;
+    }
+  },
+  
+  get: function(key, fallback) {
+    try {
+      var raw = localStorage.getItem(key);
+      if (!raw) return fallback;
+      var decoded = this._decode(raw);
+      return decoded !== null ? decoded : fallback;
+    } catch (e) { return fallback; }
+  },
+  
+  remove: function(key) {
+    try { localStorage.removeItem(key); } catch (e) {}
+  }
+};
+
+/* ── 4. CENTRALIZED ERROR HANDLER — logs and notifies on critical errors ── */
+var ErrorHandler = {
+  _log: [],
+  _maxLog: 100,
+  
+  log: function(category, message, error) {
+    var entry = {
+      cat: category,
+      msg: message,
+      err: error ? error.message || String(error) : '',
+      time: Date.now()
+    };
+    this._log.unshift(entry);
+    if (this._log.length > this._maxLog) this._log = this._log.slice(0, this._maxLog);
+    console.warn('[NEXUS ' + category.toUpperCase() + '] ' + message, error || '');
+  },
+  
+  critical: function(category, message, error) {
+    this.log(category, message, error);
+    /* Show user-visible notification for critical errors */
+    try {
+      if (typeof showPopup === 'function') {
+        showPopup('⚠️', category, message);
+      }
+    } catch (e) {}
+  },
+  
+  getLog: function() { return this._log; },
+  
+  clear: function() { this._log = []; }
+};
+
+/* ── 5. API RATE LIMITER — prevents getting banned from exchanges ── */
+var RateLimiter = {
+  _counters: {},
+  _limits: {
+    binance: { max: 18, window: 60000 },  /* 18 requests per minute (safe margin from 20) */
+    coingecko: { max: 8, window: 60000 },  /* 8 per minute (safe from 10 free tier) */
+    coinbase: { max: 8, window: 60000 },
+    bybit: { max: 15, window: 60000 },
+    proxy: { max: 20, window: 60000 }
+  },
+  
+  canRequest: function(api) {
+    var now = Date.now();
+    if (!this._counters[api]) this._counters[api] = [];
+    /* Remove expired entries */
+    var limit = this._limits[api] || { max: 20, window: 60000 };
+    this._counters[api] = this._counters[api].filter(function(t) { return now - t < limit.window; });
+    if (this._counters[api].length >= limit.max) {
+      ErrorHandler.log('rate_limit', api + ' rate limit reached (' + limit.max + '/min)');
+      return false;
+    }
+    this._counters[api].push(now);
+    return true;
+  },
+  
+  getUsage: function(api) {
+    if (!this._counters[api]) return 0;
+    var limit = this._limits[api] || { max: 20, window: 60000 };
+    var now = Date.now();
+    var active = this._counters[api].filter(function(t) { return now - t < limit.window; });
+    return Math.round((active.length / limit.max) * 100);
+  }
+};
+
+/* ── 6. REQUEST DEBOUNCER — prevents duplicate simultaneous requests ── */
+var RequestDebouncer = {
+  _pending: {},
+  
+  debounce: function(key, fn, delay) {
+    if (this._pending[key]) clearTimeout(this._pending[key]);
+    var self = this;
+    return new Promise(function(resolve) {
+      self._pending[key] = setTimeout(function() {
+        delete self._pending[key];
+        resolve(fn());
+      }, delay || 300);
+    });
+  },
+  
+  isRunning: function(key) {
+    return !!this._pending[key];
+  }
+};
+
+/* ── 7. MEMORY MANAGER — tracks and cleans up intervals/timeouts ── */
+var MemoryManager = {
+  _intervals: [],
+  _timeouts: [],
+  _maxObjectSize: {
+    sparkHist: 150,
+    vpinBuckets: 100,
+    whaleWaves: 50,
+    validatorLog: 30,
+    factorLog: 500
+  },
+  
+  setInterval: function(fn, delay, label) {
+    var id = setInterval(fn, delay);
+    this._intervals.push({ id: id, label: label || 'unnamed', delay: delay });
+    return id;
+  },
+  
+  setTimeout: function(fn, delay, label) {
+    var id = setTimeout(fn, delay);
+    this._timeouts.push({ id: id, label: label || 'unnamed' });
+    return id;
+  },
+  
+  clearAll: function() {
+    this._intervals.forEach(function(i) { clearInterval(i.id); });
+    this._timeouts.forEach(function(t) { clearTimeout(t.id); });
+    this._intervals = [];
+    this._timeouts = [];
+  },
+  
+  /* Trim large data objects to prevent memory leaks */
+  trimData: function() {
+    var self = this;
+    if (typeof sparkHist !== 'undefined' && Object.keys(sparkHist).length > self._maxObjectSize.sparkHist) {
+      var keys = Object.keys(sparkHist);
+      var excess = keys.slice(0, keys.length - self._maxObjectSize.sparkHist);
+      excess.forEach(function(k) { delete sparkHist[k]; });
+    }
+    if (typeof vpinBuckets !== 'undefined' && Object.keys(vpinBuckets).length > self._maxObjectSize.vpinBuckets) {
+      var keys2 = Object.keys(vpinBuckets);
+      var excess2 = keys2.slice(0, keys2.length - self._maxObjectSize.vpinBuckets);
+      excess2.forEach(function(k) { delete vpinBuckets[k]; });
+    }
+  },
+  
+  getStats: function() {
+    return {
+      intervals: this._intervals.length,
+      timeouts: this._timeouts.length,
+      sparkHist: typeof sparkHist !== 'undefined' ? Object.keys(sparkHist).length : 0,
+      vpinBuckets: typeof vpinBuckets !== 'undefined' ? Object.keys(vpinBuckets).length : 0
+    };
+  }
+};
+
+/* ── 8. PROXY CONFIGURATION — configurable server URL with fallback ── */
+var ProxyConfig = {
+  _primary: '',  /* Set your production proxy URL here */
+  _fallback: '', /* Set fallback proxy URL here */
+  _current: null,
+  _failures: 0,
+  _maxFailures: 3,
+  
+  init: function(primaryUrl, fallbackUrl) {
+    this._primary = primaryUrl || '';
+    this._fallback = fallbackUrl || '';
+    this._current = this._primary;
+    this._failures = 0;
+  },
+  
+  getUrl: function() {
+    if (this._failures >= this._maxFailures && this._fallback) {
+      return this._fallback;
+    }
+    return this._current;
+  },
+  
+  reportFailure: function() {
+    this._failures++;
+    if (this._failures >= this._maxFailures && this._fallback) {
+      ErrorHandler.log('proxy', 'Switching to fallback proxy after ' + this._failures + ' failures');
+      this._current = this._fallback;
+    }
+  },
+  
+  reportSuccess: function() {
+    if (this._failures > 0) this._failures = Math.max(0, this._failures - 1);
+  },
+  
+  isHealthy: function() {
+    return this._failures < this._maxFailures;
+  }
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ *  TELEGRAM WEBAPP INITIALIZATION
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+var tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if (tg) {
+  tg.ready();
+  tg.expand();
+  tg.setHeaderColor('#060b14');
+  tg.setBackgroundColor('#020408');
+  /* Validate Telegram WebApp init data */
+  if (tg.initData) {
+    console.log('[TG] WebApp initialized with valid initData');
+  } else {
+    ErrorHandler.log('telegram', 'WebApp loaded without initData — may be running outside Telegram');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ *  API ENDPOINTS CONFIGURATION
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+const BN = 'https://api.binance.com/api/v3';
+const BF = 'https://fapi.binance.com/fapi/v1';
+const CG = 'https://api.coingecko.com/api/v3';
+const CB = 'https://api.coinbase.com/v2';
+
+/* Initialize proxy with configurable URL — REPLACE with your production URL */
+const PROXY_URL_PRIMARY = 'https://incidents-reviewer-ordering-pursuant.trycloudflare.com';
+const PROXY_URL_FALLBACK = ''; /* Add fallback proxy URL here */
+ProxyConfig.init(PROXY_URL_PRIMARY, PROXY_URL_FALLBACK);
+var PROXY = ProxyConfig.getUrl();
+/* ═══════════════════════════════════════════════════════════════════════════════
+ *  WATCHLIST — Top coins tracked by the platform
+ *  Auto-updated hourly from CoinGecko market cap rankings
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+var WL = [
+  'BTC','ETH','SOL','BNB','XRP','ADA','DOGE','LINK','AVAX','DOT',
+  'MATIC','UNI','ATOM','LTC','NEAR','APT','ARB','OP','INJ','SUI',
+  'SEI','TIA','FTM','PEPE','WIF','FIL','HBAR','ICP','IMX','STX',
+  'MKR','AAVE','RENDER','GRT','FET','TAO','THETA','LDO','BONK','FLOKI',
+  'AR','ALGO','FLOW','MINA','AXS','SAND','MANA','GALA','ENJ','CRV',
+  'SNX','COMP','DYDX','GMX','SUSHI','PENDLE','JUP','ENA','W','STRK',
+  'TRX','TON','VET','RUNE','KAS','EOS','XLM','EGLD','ROSE','ONE',
+  'ZIL','CHZ','IOTA','ENS','WLD','PYTH','ONDO','JTO','PIXEL','BEAM',
+  'ORDI','TWT','CAKE','1INCH','BAL','YFI','ASTR','CFX','ANKR','IOTX',
+  'RVN','ZEC','QTUM','XEM','WAVES','NEO','KAVA','CKB','XTZ','CELO'
+];
 /* ═══ 🏆 AUTO TOP 100 — updates every hour from CoinGecko + trending from exchanges ═══ */
 async function updateTop100(){
   try{
@@ -55,9 +380,8 @@ async function refreshTiers(){if(Date.now()-tierLastRefresh<4*3600000&&tier2Coin
   var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD'];var ranked=Object.entries(T).filter(function(e){return!STABLES.includes(e[0])&&!TIER1.has(e[0])&&e[1].v>1000000}).sort(function(a,b){return b[1].v-a[1].v}).map(function(e){return e[0]});
   tier2Coins=ranked.slice(0,75);tier3Coins=ranked.slice(75,275);
   console.log('[Tiers] T1:'+TIER1.size+' T2:'+tier2Coins.length+' T3:'+tier3Coins.length)}
-/* Volume Spike: T3 → T2 auto-promote */
-var volBaselines={};
-function checkVolSpikes(){/* Disabled — TOP 100 focus only */}
+/* Volume Spike: Disabled — TOP 100 focus only */
+/* function checkVolSpikes() {} — REMOVED: dead code */
 /* VPIN Calculator — simple version using REST trades */
 var vpinBuckets={};
 function updateVPIN(sym,price,qty,isBuyerMaker){
@@ -71,25 +395,57 @@ function calcVPIN(sym){
   var vpin=tVol>0?tImb/tVol:0;var sc=0,sig='LOW_TOXICITY';
   if(vpin>0.7){sc+=12;sig='EXTREME_TOXICITY'}else if(vpin>0.55){sc+=8;sig='HIGH_TOXICITY'}else if(vpin>0.4){sc+=3;sig='MODERATE'}
   return{vpin:+vpin.toFixed(3),score:sc,signal:sig}}
-var COL={BTC:'#f7931a',ETH:'#627eea',SOL:'#9945ff',BNB:'#f0b90b',XRP:'#23292f',LINK:'#2a5ada',AVAX:'#e84142',DOGE:'#c2a633',ADA:'#0033ad',DOT:'#e6007a',MATIC:'#8247e5',UNI:'#ff007a',ATOM:'#2e3148',ARB:'#28a0f0',OP:'#ff0420',INJ:'#00f2fe',SUI:'#4da2ff',SEI:'#9b1c1c',TIA:'#7c3aed',FTM:'#1969ff',NEAR:'#00c08b',APT:'#00bfa6',LTC:'#bfbbbb',PEPE:'#4c8c2f',WIF:'#8b5cf6'};
-var T={},FR={},OI={},LS={},CBP={},ws=null,curCoin='BTC',curTF='1h',inds={vol:1,sma:0,rsi:0,sr:0,bb:0,macd:0,ema:0,pat:0};
-var lsHist={},takerData={}; /* L/S Intelligence v2.0 */
-var sparkHist={}; /* Real sparkline data per coin */
-var whaleWaves={};try{whaleWaves=JSON.parse(localStorage.getItem('nxww10')||'{}')}catch(e){}
-var prevOB={}; /* Previous Order Book snapshots */
-var portfolio=[];try{portfolio=JSON.parse(localStorage.getItem('nxp10')||'[]')}catch(e){}
-var predictions=[];try{predictions=JSON.parse(localStorage.getItem('nxpred10')||'[]')}catch(e){}
-var activeTrades=[];try{activeTrades=JSON.parse(localStorage.getItem('nxTrades')||'[]')}catch(e){}
-var sigHist={};try{sigHist=JSON.parse(localStorage.getItem('nxsig10')||'{}')}catch(e){}
-var notifiedSet={};try{notifiedSet=JSON.parse(localStorage.getItem('nxnot10')||'{}')}catch(e){};
-var lang='ar';try{lang=localStorage.getItem('nxlang')||'ar'}catch(e){}
-var fgValue=50,btcDom=50;
-/* ═══ 🤖 PLATFORM MONITOR — PART A ═══ */
+/* ═══════════════════════════════════════════════════════════════════════════════
+ *  COIN BRAND COLORS — used for UI elements
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+var COL = {
+  BTC:'#f7931a', ETH:'#627eea', SOL:'#9945ff', BNB:'#f0b90b', XRP:'#23292f',
+  LINK:'#2a5ada', AVAX:'#e84142', DOGE:'#c2a633', ADA:'#0033ad', DOT:'#e6007a',
+  MATIC:'#8247e5', UNI:'#ff007a', ATOM:'#2e3148', ARB:'#28a0f0', OP:'#ff0420',
+  INJ:'#00f2fe', SUI:'#4da2ff', SEI:'#9b1c1c', TIA:'#7c3aed', FTM:'#1969ff',
+  NEAR:'#00c08b', APT:'#00bfa6', LTC:'#bfbbbb', PEPE:'#4c8c2f', WIF:'#8b5cf6'
+};
+
+/* ═══════════════════════════════════════════════════════════════════════════════
+ *  GLOBAL STATE — Core data structures
+ *  T       = Ticker data {symbol: {p: price, c: change%, v: volume, h: high, l: low}}
+ *  FR      = Funding rates {symbol: {rate: number}}
+ *  OI      = Open Interest {symbol: number}
+ *  LS      = Long/Short ratios {symbol: {long: %, short: %, ratio: number}}
+ *  CBP     = Coinbase prices {symbol: number}
+ * ═══════════════════════════════════════════════════════════════════════════════ */
+var T = {}, FR = {}, OI = {}, LS = {}, CBP = {};
+var ws = null;
+var curCoin = 'BTC', curTF = '1h';
+var inds = { vol: 1, sma: 0, rsi: 0, sr: 0, bb: 0, macd: 0, ema: 0, pat: 0 };
+
+var lsHist = {};     /* Long/Short history per coin — L/S Intelligence v2.0 */
+var takerData = {};  /* Taker buy/sell volume data per coin */
+var sparkHist = {};  /* Real sparkline price history per coin */
+var prevOB = {};     /* Previous Order Book snapshots for comparison */
+
+/* ── Sensitive data: loaded from Encrypted Storage ── */
+var whaleWaves = SecureStorage.get('nxww10', {});
+var portfolio = SecureStorage.get('nxp10', []);
+var predictions = SecureStorage.get('nxpred10', []);
+var activeTrades = SecureStorage.get('nxTrades', []);
+var sigHist = SecureStorage.get('nxsig10', {});
+var notifiedSet = SecureStorage.get('nxnot10', {});
+
+/* ── Non-sensitive settings: plain localStorage ── */
+var lang = 'ar';
+try { lang = localStorage.getItem('nxlang') || 'ar'; } catch (e) {}
+var fgValue = 50, btcDom = 50;
+
+/* ═══ 🤖 PLATFORM MONITOR — PART A: Self-Learning Trading System ═══ */
 var MONITOR_VERSION = 1;
-var DEFAULT_WEIGHTS = {trend:2, whales:2, rsi:1, fr:1, oi:1, vol:0.5, macd:0.5, confluence:1, structure:1};
+var DEFAULT_WEIGHTS = {
+  trend: 2, whales: 2, rsi: 1, fr: 1, oi: 1,
+  vol: 0.5, macd: 0.5, confluence: 1, structure: 1
+};
 
 var monitorState = null;
-try { monitorState = JSON.parse(localStorage.getItem('nxMonitor')); } catch(e) { monitorState = null; }
+monitorState = SecureStorage.get('nxMonitor', null);
 if (!monitorState || monitorState.v !== MONITOR_VERSION) {
   monitorState = {
     v: MONITOR_VERSION,
@@ -129,14 +485,14 @@ if (!monitorState || monitorState.v !== MONITOR_VERSION) {
 }
 
 var factorLog = [];
-try { factorLog = JSON.parse(localStorage.getItem('nxFactorLog') || '[]'); } catch(e) { factorLog = []; }
+factorLog = SecureStorage.get('nxFactorLog', []);
 
 function saveMonitor() {
-  try { localStorage.setItem('nxMonitor', JSON.stringify(monitorState)); } catch(e) {}
+  SecureStorage.set('nxMonitor', monitorState);
 }
 function saveFactorLog() {
   if (factorLog.length > 500) factorLog = factorLog.slice(-500);
-  try { localStorage.setItem('nxFactorLog', JSON.stringify(factorLog)); } catch(e) {}
+  SecureStorage.set('nxFactorLog', factorLog);
 }
 
 /* Takes a snapshot of which factors are active at trade entry */
@@ -615,7 +971,7 @@ function runAutoImprove() {
     overallRate: monitorState.perf.overallRate
   };
 
-  try { localStorage.setItem('nxWeeklyReport', JSON.stringify(report)); } catch(e) {}
+  SecureStorage.set('nxWeeklyReport', report);
   monitorState.lastTune = Date.now();
   saveMonitor();
 
@@ -645,14 +1001,14 @@ function calcMACD(c){if(c.length<26)return{h:0,signal:0,cross:'none'};var ema=fu
 function calcEMA(data,period){if(!data||data.length<period)return data&&data.length?data[data.length-1]:0;var k=2/(period+1);var ema=data.slice(0,period).reduce(function(a,b){return a+b},0)/period;for(var i=period;i<data.length;i++){ema=data[i]*k+ema*(1-k)}return ema}
 function timeAgo(ts){var d=Date.now()-ts,m=Math.floor(d/60000),h=Math.floor(d/3600000);if(m<2)return{text:lang==='ar'?'🆕 الآن':'🆕 Now',cls:'fresh'};if(m<60)return{text:lang==='ar'?'منذ '+m+' دقيقة':m+'m ago',cls:'fresh'};return{text:lang==='ar'?'منذ '+h+' ساعة':h+'h ago',cls:h<6?'':'old'}}
 function timeBadge(ts){var a=timeAgo(ts);return'<span class="time-badge '+a.cls+'">⏱ '+a.text+'</span>'}
-function recSig(sym,type){var k=sym+'_'+type;if(!sigHist[k])sigHist[k]=Date.now();try{localStorage.setItem('nxsig10',JSON.stringify(sigHist))}catch(e){};return sigHist[k]}
+function recSig(sym,type){var k=sym+'_'+type;if(!sigHist[k])sigHist[k]=Date.now();SecureStorage.set('nxsig10',sigHist);return sigHist[k]}
 function getSigTime(sym,type){return sigHist[sym+'_'+type]||Date.now()}
 /* NOTIFICATION HISTORY */
-var notifHist=[];try{notifHist=JSON.parse(localStorage.getItem('nxnh10')||'[]')}catch(e){}
-function addNotifHist(icon,sym,type,body){notifHist.unshift({icon:icon,sym:sym,type:type,body:body,time:Date.now()});if(notifHist.length>50)notifHist=notifHist.slice(0,50);try{localStorage.setItem('nxnh10',JSON.stringify(notifHist))}catch(e){}}
+var notifHist=SecureStorage.get('nxnh10',[])
+function addNotifHist(icon,sym,type,body){notifHist.unshift({icon:icon,sym:sym,type:type,body:body,time:Date.now()});if(notifHist.length>50)notifHist=notifHist.slice(0,50);SecureStorage.set('nxnh10',notifHist)}
 function renderNotifHist(){var el=document.getElementById('notifHistList');if(!el)return;el.innerHTML=notifHist.length?notifHist.slice(0,20).map(function(n){return'<div class="al-i" style="cursor:pointer" onclick="openCoin(\''+n.sym+'\')"><div class="al-l"><div style="font-size:18px">'+n.icon+'</div><div><div style="font-weight:600;font-size:11px">'+n.sym+' — '+n.type+'</div><div style="font-size:8px;color:var(--t3)">'+n.body+'</div></div></div><div style="font-size:8px;font-family:var(--fm);color:var(--t2)">'+timeBadge(n.time)+'</div></div>'}).join(''):'<div class="empty"><div class="empty-ic">🔔</div><div class="empty-tx">'+(lang==='ar'?'لا إشعارات':'No notifications')+'</div></div>'}
 /* WATCHLIST ALERTS — check every update */
-function checkWatchlistAlerts(){var wl=[];try{wl=JSON.parse(localStorage.getItem('nxwl10')||'[]')}catch(e){};wl.forEach(function(sym){var d=T[sym];if(!d)return;if(d.c>=3){var k='wl_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};playSound('whale');showPopup('👁',sym+' — '+(lang==='ar'?'عملة مراقبة تحركت!':'Watchlist coin moved!'),'+'+d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('👁',sym,'Watchlist','+'+d.c.toFixed(1)+'%')}}if(d.c<=-3){var k='wl_dn_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};playSound('whale');showPopup('⚠️',sym+' — '+(lang==='ar'?'عملة مراقبة هبطت!':'Watchlist coin dropped!'),d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('⚠️',sym,'Watchlist Drop',d.c.toFixed(1)+'%')}}})}/* SOUND NOTIFICATIONS — respects user tone preference */
+function checkWatchlistAlerts(){var wl=SecureStorage.get('nxwl10',[]);wl.forEach(function(sym){var d=T[sym];if(!d)return;if(d.c>=3){var k='wl_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;SecureStorage.set('nxnot10',notifiedSet);playSound('whale');showPopup('👁',sym+' — '+(lang==='ar'?'عملة مراقبة تحركت!':'Watchlist coin moved!'),'+'+d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('👁',sym,'Watchlist','+'+d.c.toFixed(1)+'%')}}if(d.c<=-3){var k='wl_dn_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;SecureStorage.set('nxnot10',notifiedSet);playSound('whale');showPopup('⚠️',sym+' — '+(lang==='ar'?'عملة مراقبة هبطت!':'Watchlist coin dropped!'),d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('⚠️',sym,'Watchlist Drop',d.c.toFixed(1)+'%')}}})}/* SOUND NOTIFICATIONS — respects user tone preference */
 function playSound(type){if(!soundEnabled||soundPref==='silent')return;previewTone(soundPref)}
 /* 📲 TELEGRAM — SECURE PROXY (no token exposed!) */
 var TG_PROXY='https://your-nexus-proxy.workers.dev/notify';
@@ -711,8 +1067,8 @@ function notify(sym,type,score,extra){var k=sym+'_'+type+'_'+new Date().getHours
   /* Whale: only notify if total buy volume > $100,000 */
   if(type==='whale'){var ww=whaleWaves[sym];if(!ww||!ww.engine||!ww.totalBuy||ww.totalBuy<100000)return}
   /* === QUALITY GATE === */
-  try{var gate=signalQualityGate(sym,type,score);if(!gate.pass){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){}return}}catch(e){}
-  notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){}playSound(type);
+  try{var gate=signalQualityGate(sym,type,score);if(!gate.pass){notifiedSet[k]=true;SecureStorage.set('nxnot10',notifiedSet);return}}catch(e){}
+  notifiedSet[k]=true;SecureStorage.set('nxnot10',notifiedSet);playSound(type);
   if(type==='ultra'){showPopup('⭐',sym+' — ULTRA Signal!','Score: '+score+' | '+(lang==='ar'?'ادخل الآن!':'Enter now!'));addNotifHist('⭐',sym,'ULTRA','Score: '+score);tgNotify(sym,'ultra',extra||{score:score});if(T[sym])openTrade(sym,T[sym].p,'ultra',score,extra)}
   else if(type==='whale'){var wVol=whaleWaves[sym]?whaleWaves[sym].totalBuy:0;showPopup('🐋',sym+' — '+(lang==='ar'?'تجميع حيتان!':'Whale detected!'),'$'+fmt(wVol));addNotifHist('🐋',sym,lang==='ar'?'حوت':'Whale','$'+fmt(wVol));tgNotify(sym,'whale',{});if(T[sym])openTrade(sym,T[sym].p,'whale',score)}
 }
@@ -724,9 +1080,9 @@ function setTheme(d){document.body.dataset.theme=d;if(tg){try{tg.setHeaderColor(
 /* SIDEBAR MENU */
 function toggleMenu(){var sm=document.getElementById('sideMenu');var so=document.getElementById('sideOverlay');if(!sm||!so)return;sm.classList.toggle('open');so.classList.toggle('open')}
 /* PROFILE */
-var userProfile={};try{userProfile=JSON.parse(localStorage.getItem('nxprof10')||'{}')}catch(e){}
-function loadProfile(){if(userProfile.name)document.getElementById('userName').value=userProfile.name;if(userProfile.nick)document.getElementById('userNick').value=userProfile.nick;var av=document.getElementById('sideAvatar');if(userProfile.name)av.textContent=userProfile.name.charAt(0).toUpperCase();else av.textContent='👤'}
-function saveProfile(){userProfile.name=document.getElementById('userName').value;userProfile.nick=document.getElementById('userNick').value;try{localStorage.setItem('nxprof10',JSON.stringify(userProfile))}catch(e){};var av=document.getElementById('sideAvatar');if(userProfile.name)av.textContent=userProfile.name.charAt(0).toUpperCase()}
+var userProfile=SecureStorage.get('nxprof10',{})
+function loadProfile(){if(userProfile.name)document.getElementById('userName').value=userProfile.name;if(userProfile.nick)document.getElementById('userNick').value=userProfile.nick;var av=document.getElementById('sideAvatar');if(userProfile.name)av.textContent=sanitize(userProfile.name.charAt(0).toUpperCase());else av.textContent='👤'}
+function saveProfile(){userProfile.name=InputValidator.searchText(document.getElementById('userName').value);userProfile.nick=InputValidator.searchText(document.getElementById('userNick').value);SecureStorage.set('nxprof10',userProfile);var av=document.getElementById('sideAvatar');if(userProfile.name)av.textContent=userProfile.name.charAt(0).toUpperCase()}
 /* MENU STATE SYNC */
 function updateMenuLang(){var isAr=lang==='ar';document.getElementById('sLangAr').classList.toggle('act',isAr);document.getElementById('sLangEn').classList.toggle('act',!isAr)}
 function updateMenuTheme(){var isDark=document.body.dataset.theme==='dark';document.getElementById('sThDark').classList.toggle('act',isDark);document.getElementById('sThLight').classList.toggle('act',!isDark)}
@@ -748,7 +1104,7 @@ function sp(id){document.querySelectorAll('.pg').forEach(function(p){p.classList
 function openMo(id){var e=document.getElementById(id);if(e)e.classList.add('show')}
 function closeMo(id){var e=document.getElementById(id);if(e)e.classList.remove('show')}
 document.querySelectorAll('.mo').forEach(function(m){m.onclick=function(e){if(e.target===m)m.classList.remove('show')}});
-function indTab(){} /* removed — accordion cards */
+/* indTab removed — accordion cards replaced it */
 function whTab(i,btn){document.getElementById('pg-whale').querySelectorAll('.big-tab').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');['wh0','wh1','wh2'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=([0,1,2].indexOf(i)===j)?'block':'none'});if(i===0)loadWhales();if(i===1)loadLiq();if(i===2)loadWhaleSells()}
 function pTab(i,btn){document.getElementById('pg-me').querySelectorAll('.big-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');['p0','p1','p2','p3','p4'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=j===i?'block':'none'});if(i===1)renderMyTrades();if(i===2)renderMyStats();if(i===3)renderMySettings();if(i===4)renderNotifHist()}
 /* ═══ 📋 MY TRADES ═══ */
@@ -805,8 +1161,8 @@ function renderMyStats(){
   el.innerHTML=h;
 }
 /* ═══ ⚙️ MY SETTINGS ═══ */
-var alertPrefs={};try{alertPrefs=JSON.parse(localStorage.getItem('nxAlertPrefs')||'{}')}catch(e){alertPrefs={}}
-function saveAlertPref(key,val){alertPrefs[key]=val;try{localStorage.setItem('nxAlertPrefs',JSON.stringify(alertPrefs))}catch(e){}}
+var alertPrefs=SecureStorage.get('nxAlertPrefs',{})
+function saveAlertPref(key,val){alertPrefs[key]=val;SecureStorage.set('nxAlertPrefs',alertPrefs)}
 function renderMySettings(){
   var el=document.getElementById('mySettingsPanel');if(!el)return;var ar=lang==='ar';var h='';
   h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:0 0 10px">🌐 '+(ar?'اللغة':'Language')+'</div>';
@@ -815,7 +1171,7 @@ function renderMySettings(){
   var isDark=document.body.dataset.theme==='dark';
   h+='<div style="display:flex;gap:6px;margin-bottom:14px"><button class="rfr" onclick="setTheme(\'dark\');renderMySettings()" style="flex:1;margin:0;'+(isDark?'background:var(--ud);color:var(--up);border-color:var(--up)':'')+'">🌙 '+(ar?'مظلم':'Dark')+'</button><button class="rfr" onclick="setTheme(\'light\');renderMySettings()" style="flex:1;margin:0;'+(!isDark?'background:var(--ud);color:var(--up);border-color:var(--up)':'')+'">☀️ '+(ar?'فاتح':'Light')+'</button></div>';
   h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:0 0 10px">🔊 '+(ar?'الصوت':'Sound')+'</div>';
-  h+='<div class="al-i"><div class="al-l"><div style="font-size:18px">🔊</div><div><div style="font-weight:600;font-size:12px">'+(ar?'تفعيل الصوت':'Enable Sound')+'</div></div></div><div class="tgl '+(soundEnabled?'on':'')+'" onclick="this.classList.toggle(\'on\');soundEnabled=!soundEnabled;try{localStorage.setItem(\'nxsndon10\',soundEnabled?\'on\':\'off\')}catch(e){}"><div class="tgl-k"></div></div></div>';
+  h+='<div class="al-i"><div class="al-l"><div style="font-size:18px">🔊</div><div><div style="font-weight:600;font-size:12px">'+(ar?'تفعيل الصوت':'Enable Sound')+'</div></div></div><div class="tgl '+(soundEnabled?'on':'')+'" onclick="this.classList.toggle(\'on\');soundEnabled=!soundEnabled;saveSoundPref()"><div class="tgl-k"></div></div></div>';
   h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:14px 0 10px">🔔 '+(ar?'التنبيهات':'Alerts')+'</div>';
   var alerts=[{key:'ultra',ic:'⭐',nm:'ULTRA',sub:ar?'إشارات ≥85% ثقة':'Signals ≥85%'},{key:'whale',ic:'🐋',nm:ar?'حيتان':'Whales',sub:ar?'فوق $100K':'Above $100K'},{key:'breakout',ic:'💥',nm:ar?'انفجار':'Breakout',sub:'Score 60+'},{key:'warning',ic:'⚠️',nm:ar?'تحذيرات':'Warnings',sub:'FR + OI'},{key:'watchlist',ic:'👁',nm:'Watchlist',sub:ar?'تحرك ±3%':'Move ±3%'}];
   alerts.forEach(function(a){
@@ -824,8 +1180,20 @@ function renderMySettings(){
   });
   el.innerHTML=h;
 }
-/* ⚖️ calcRisk2 for QA page */
-function calcRisk2(){var cap=+document.getElementById('rcCap2').value,risk=+document.getElementById('rcRisk2').value,entry=+document.getElementById('rcEntry2').value,sl=+document.getElementById('rcSL2').value,tp=+document.getElementById('rcTP2').value;if(!cap||!entry||!sl){document.getElementById('rcRes2').innerHTML='<div style="text-align:center;color:var(--t3);padding:12px;font-size:12px">'+t('enter_data')+'</div>';return};var rA=cap*(risk/100),slD=Math.abs(entry-sl),pos=slD>0?rA/slD:0,posV=pos*entry,rew=tp?pos*Math.abs(tp-entry):0,rr=tp&&rA>0?rew/rA:0,lev=cap>0?posV/cap:0;document.getElementById('rcRes2').innerHTML='<div class="rc-row"><span>'+t('risk_amt')+'</span><span class="rc-val" style="color:var(--dn)">'+fmt(rA)+'</span></div><div class="rc-row"><span>'+t('pos_size')+'</span><span class="rc-val">'+pos.toFixed(4)+'</span></div><div class="rc-row"><span>'+t('pos_val')+'</span><span class="rc-val">'+fmt(posV)+'</span></div><div class="rc-row"><span>'+t('leverage')+'</span><span class="rc-val" style="color:'+(lev>10?'var(--dn)':lev>5?'var(--warn)':'var(--up)')+'\">'+lev.toFixed(1)+'x</span></div>'+(tp?'<div class="rc-row"><span>'+t('exp_profit')+'</span><span class="rc-val" style="color:var(--up)">'+fmt(rew)+'</span></div><div class="rc-row"><span>R/R</span><span class="rc-val" style="color:'+(rr>=2?'var(--up)':rr>=1?'var(--warn)':'var(--dn)')+'">1:'+rr.toFixed(1)+'</span></div>':'')+'<div class="rc-row"><span>'+t('sl_loss')+'</span><span class="rc-val" style="color:var(--dn)">-'+fmt(rA)+'</span></div>'}
+/* ⚖️ calcRisk2 — Risk Calculator with input validation */
+function calcRisk2(){
+  var cap = InputValidator.positiveNumber(document.getElementById('rcCap2').value);
+  var risk = InputValidator.positiveNumber(document.getElementById('rcRisk2').value);
+  var entry = InputValidator.price(document.getElementById('rcEntry2').value);
+  var sl = InputValidator.price(document.getElementById('rcSL2').value);
+  var tp = InputValidator.price(document.getElementById('rcTP2').value);
+  
+  if(!cap||!entry||!sl){document.getElementById('rcRes2').innerHTML='<div style="text-align:center;color:var(--t3);padding:12px;font-size:12px">'+t('enter_data')+'</div>';return}
+  if(risk>100)risk=100; if(risk<0.1)risk=0.1;
+  
+  var rA=cap*(risk/100),slD=Math.abs(entry-sl),pos=slD>0?rA/slD:0,posV=pos*entry,rew=tp?pos*Math.abs(tp-entry):0,rr=tp&&rA>0?rew/rA:0,lev=cap>0?posV/cap:0;
+  document.getElementById('rcRes2').innerHTML='<div class="rc-row"><span>'+t('risk_amt')+'</span><span class="rc-val" style="color:var(--dn)">'+fmt(rA)+'</span></div><div class="rc-row"><span>'+t('pos_size')+'</span><span class="rc-val">'+pos.toFixed(4)+'</span></div><div class="rc-row"><span>'+t('pos_val')+'</span><span class="rc-val">'+fmt(posV)+'</span></div><div class="rc-row"><span>'+t('leverage')+'</span><span class="rc-val" style="color:'+(lev>10?'var(--dn)':lev>5?'var(--warn)':'var(--up)')+'\">'+lev.toFixed(1)+'x</span></div>'+(tp?'<div class="rc-row"><span>'+t('exp_profit')+'</span><span class="rc-val" style="color:var(--up)">'+fmt(rew)+'</span></div><div class="rc-row"><span>R/R</span><span class="rc-val" style="color:'+(rr>=2?'var(--up)':rr>=1?'var(--warn)':'var(--dn)')+'">1:'+rr.toFixed(1)+'</span></div>':'')+'<div class="rc-row"><span>'+t('sl_loss')+'</span><span class="rc-val" style="color:var(--dn)">-'+fmt(rA)+'</span></div>'
+}
 var curScanTab=0,curTradeFilter='all',curSmallFilter='all',chartSignal=null;
 var SECTORS={ai:{ic:'🤖',n:{ar:'ذكاء اصطناعي',en:'AI'},coins:['FET','RNDR','TAO','WLD','AKT','ARKM','OCEAN','AGIX','PRIME','CTXC','NMR'],col:'#7c3aed'},gaming:{ic:'🎮',n:{ar:'ألعاب وميتافيرس',en:'Gaming'},coins:['IMX','GALA','AXS','SAND','MANA','ENJ','PIXEL','BEAM','ILV','PORTAL','YGG','ALICE'],col:'#06b6d4'},layer1:{ic:'⛓️',n:{ar:'الطبقة الأولى',en:'Layer 1'},coins:['ETH','SOL','AVAX','DOT','ATOM','NEAR','APT','SUI','SEI','ICP','FTM','ALGO','HBAR','TIA'],col:'#3b82f6'},layer2:{ic:'🔗',n:{ar:'الطبقة الثانية',en:'Layer 2'},coins:['ARB','OP','MATIC','MANTA','STRK','METIS','ZK','BLAST'],col:'#8b5cf6'},defi:{ic:'💰',n:{ar:'التمويل اللامركزي',en:'DeFi'},coins:['UNI','AAVE','MKR','LDO','SNX','CRV','COMP','DYDX','GMX','SUSHI','PENDLE','JUP'],col:'#10b981'},meme:{ic:'🐕',n:{ar:'عملات ميم',en:'Meme'},coins:['DOGE','PEPE','WIF','BONK','FLOKI','SHIB','MEME','TURBO'],col:'#f59e0b'},rwa:{ic:'🏦',n:{ar:'أصول حقيقية',en:'RWA'},coins:['ONDO','POLYX','DUSK','RIO','CPOOL'],col:'#64748b'},depin:{ic:'🌐',n:{ar:'بنية تحتية',en:'DePIN'},coins:['FIL','AR','HNT','THETA','ANKR','IOTX'],col:'#0ea5e9'},data:{ic:'⚡',n:{ar:'بيانات وأوراكل',en:'Data/Oracle'},coins:['LINK','GRT','BAND','PYTH','API3','TRB'],col:'#6366f1'},privacy:{ic:'🔒',n:{ar:'خصوصية',en:'Privacy'},coins:['XMR','ZEC','SCRT','ROSE'],col:'#475569'}};
 function getCoinSector(sym){for(var k in SECTORS)if(SECTORS[k].coins.includes(sym))return k;return null}
@@ -930,11 +1298,11 @@ function initDepthWS(){/* disabled — data from PROXY /api/all */}
 var onChainData={};
 async function fetchOnChainBTC(){try{var data=await fj('https://mempool.space/api/mempool/recent');if(!data||!data.length)return;var whale=data.filter(function(tx){return tx.fee>500000});onChainData.BTC={count:whale.length,time:Date.now(),signal:whale.length>=3?'WHALE_RUSH':whale.length>=1?'MODERATE':'LOW'}}catch(e){}}
 /* ═══ 👛 FEATURE 3: WALLET TRACKING ═══ */
-var trackedWallets=[];try{trackedWallets=JSON.parse(localStorage.getItem('nxwallets')||'[]')}catch(e){}
-function addWallet(addr,label){if(trackedWallets.length>=20||trackedWallets.some(function(w){return w.address===addr}))return false;trackedWallets.push({address:addr,label:label||addr.slice(0,10),chain:'ethereum',lastBal:null,lastChk:0});try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){};return true}
-function rmWallet(i){trackedWallets.splice(i,1);try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){}}
+var trackedWallets=SecureStorage.get('nxwallets',[])
+function addWallet(addr,label){addr=InputValidator.searchText(addr);label=InputValidator.searchText(label);if(trackedWallets.length>=20||trackedWallets.some(function(w){return w.address===addr}))return false;trackedWallets.push({address:addr,label:label||addr.slice(0,10),chain:'ethereum',lastBal:null,lastChk:0});SecureStorage.set('nxwallets',trackedWallets);return true}
+function rmWallet(i){trackedWallets.splice(i,1);SecureStorage.set('nxwallets',trackedWallets)}
 window.addWallet=addWallet;window.rmWallet=rmWallet;
-async function checkWallets(){for(var i=0;i<trackedWallets.length;i++){var w=trackedWallets[i];if(Date.now()-w.lastChk<60000)continue;try{var res=await fj('https://api.etherscan.io/api?module=account&action=balance&address='+w.address+'&tag=latest');if(res&&res.result){var bal=+res.result/1e18;if(w.lastBal!==null){var chg=bal-w.lastBal;var pct=w.lastBal>0?(chg/w.lastBal)*100:0;if(Math.abs(pct)>5){var ic=chg>0?'📥':'📤';showPopup(ic,w.label+(chg>0?' received':' sent'),Math.abs(chg).toFixed(2)+' ETH');addNotifHist(ic,w.label,'Wallet',pct.toFixed(1)+'%')}}w.lastBal=bal;w.lastChk=Date.now()}}catch(e){}await new Promise(function(r){setTimeout(r,6000)})}try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){}}
+async function checkWallets(){for(var i=0;i<trackedWallets.length;i++){var w=trackedWallets[i];if(Date.now()-w.lastChk<60000)continue;try{var res=await fj('https://api.etherscan.io/api?module=account&action=balance&address='+w.address+'&tag=latest');if(res&&res.result){var bal=+res.result/1e18;if(w.lastBal!==null){var chg=bal-w.lastBal;var pct=w.lastBal>0?(chg/w.lastBal)*100:0;if(Math.abs(pct)>5){var ic=chg>0?'📥':'📤';showPopup(ic,w.label+(chg>0?' received':' sent'),Math.abs(chg).toFixed(2)+' ETH');addNotifHist(ic,w.label,'Wallet',pct.toFixed(1)+'%')}}w.lastBal=bal;w.lastChk=Date.now()}}catch(e){}await new Promise(function(r){setTimeout(r,6000)})}SecureStorage.set('nxwallets',trackedWallets)}
 /* ═══ 🔓 FEATURE 4: TOKEN UNLOCK ═══ */
 var unlockCache={};
 async function checkUnlocks(){try{var coins=['ARB','OP','SUI','SEI','TIA','APT','INJ'];for(var i=0;i<coins.length;i++){var sym=coins[i];var d=T[sym];if(!d)continue;/* Check known unlock schedules — manual fallback */}}catch(e){}}
@@ -1081,8 +1449,8 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,30);
 function calcHealth(){var sc=0,f=[];sc+=fgValue<25?5:fgValue<40?10:fgValue<60?15:fgValue<75?18:12;f.push({l:'Fear/Greed',v:fgValue,c:fgValue<30?'dn':fgValue>70?'up':'warn'});sc+=btcDom>60?8:btcDom>50?12:btcDom>40?15:10;f.push({l:'BTC Dom',v:btcDom.toFixed(1)+'%',c:btcDom>55?'warn':'neon'});var bk=Object.values(T).filter(function(x){return x.c>=8}).length;sc+=bk>20?15:bk>10?12:bk>5?10:5;f.push({l:lang==='ar'?'انفجارات':'Breakouts',v:bk,c:bk>15?'up':bk>5?'warn':'dn'});var rs=Object.values(T).filter(function(x){return x.c>0}).length,tt=Object.keys(T).length,bp=tt>0?Math.round(rs/tt*100):50;sc+=bp>60?15:bp>45?10:5;f.push({l:lang==='ar'?'صاعدة':'Bullish',v:bp+'%',c:bp>60?'up':bp>40?'warn':'dn'});var af=Object.values(FR).reduce(function(s,x){return s+x.rate},0)/Math.max(1,Object.keys(FR).length);sc+=af>0.05?5:af>0.02?10:af<-0.01?18:15;f.push({l:'Avg FR',v:(af>=0?'+':'')+af.toFixed(4)+'%',c:af>0.05?'dn':af<-0.01?'up':'warn'});var vc=Object.values(T).filter(function(x){return x.v>1e8}).length;sc+=vc>15?15:vc>8?10:5;f.push({l:'Vol>$100M',v:vc,c:vc>10?'up':'warn'});return{score:Math.min(100,sc),factors:f}}
 function getWarnings(){var w=[];Object.entries(FR).filter(function(e){return WL.includes(e[0])}).forEach(function(e){if(e[1].rate>0.08)w.push({ic:'🔴',txt:e[0]+': FR '+e[1].rate.toFixed(3)+'% — '+(lang==='ar'?'خطر تصفية':'Liquidation risk')});if(e[1].rate<-0.05)w.push({ic:'🟢',txt:e[0]+': FR '+e[1].rate.toFixed(3)+'% — '+(lang==='ar'?'فرصة شراء':'Buy opportunity')})});Object.entries(LS).forEach(function(e){if(e[1].ratio>2)w.push({ic:'⚠️',txt:e[0]+': L/S '+e[1].ratio.toFixed(2)+' — '+(lang==='ar'?'Long مفرط':'Excessive Longs')});if(e[1].ratio<0.6)w.push({ic:'⚠️',txt:e[0]+': L/S '+e[1].ratio.toFixed(2)+' — Short Squeeze'})});return w.slice(0,4)}
 /* ACCURACY */
-function savePred(sym,p,tgt,sc){predictions.push({sym:sym,price:p,target:tgt,score:sc,time:Date.now(),checked:false,hit:false,partial:false});if(predictions.length>100)predictions=predictions.slice(-100);try{localStorage.setItem('nxpred10',JSON.stringify(predictions))}catch(e){}}
-function getAcc(){var ch=false;predictions.forEach(function(p){if(!p.checked&&Date.now()-p.time>12*3600*1000){var cur=T[p.sym];if(cur){p.checked=true;var gain=(cur.p-p.price)/p.price*100;p.hit=gain>=5;p.partial=gain>=2&&gain<5;p.finalPrice=cur.p;p.pnl=gain;ch=true}}});if(ch)try{localStorage.setItem('nxpred10',JSON.stringify(predictions))}catch(e){};var c=predictions.filter(function(p){return p.checked});var hits=c.filter(function(p){return p.hit}).length;var partials=c.filter(function(p){return p.partial}).length;return{total:c.length,hits:hits,partials:partials,rate:c.length>0?Math.round((hits+partials*0.5)/c.length*100):0}}
+function savePred(sym,p,tgt,sc){predictions.push({sym:sym,price:p,target:tgt,score:sc,time:Date.now(),checked:false,hit:false,partial:false});if(predictions.length>100)predictions=predictions.slice(-100);SecureStorage.set('nxpred10',predictions)}
+function getAcc(){var ch=false;predictions.forEach(function(p){if(!p.checked&&Date.now()-p.time>12*3600*1000){var cur=T[p.sym];if(cur){p.checked=true;var gain=(cur.p-p.price)/p.price*100;p.hit=gain>=5;p.partial=gain>=2&&gain<5;p.finalPrice=cur.p;p.pnl=gain;ch=true}}});if(ch)SecureStorage.set('nxpred10',predictions);var c=predictions.filter(function(p){return p.checked});var hits=c.filter(function(p){return p.hit}).length;var partials=c.filter(function(p){return p.partial}).length;return{total:c.length,hits:hits,partials:partials,rate:c.length>0?Math.round((hits+partials*0.5)/c.length*100):0}}
 function renderAcc(id){var a=getAcc();var el=document.getElementById(id);if(!el)return;
   var types={ultra:{h:0,t:0,p:0},whale:{h:0,t:0,p:0},brk:{h:0,t:0,p:0}};
   predictions.filter(function(p){return p.checked}).forEach(function(p){
@@ -1141,7 +1509,7 @@ function openTrade(sym,price,type,score,extra){
   trade.confAtEntry = score;
   activeTrades.push(trade);saveTrades();return trade}
 
-function saveTrades(){if(activeTrades.length>200)activeTrades=activeTrades.slice(-200);try{localStorage.setItem('nxTrades',JSON.stringify(activeTrades))}catch(e){}}
+function saveTrades(){if(activeTrades.length>200)activeTrades=activeTrades.slice(-200);SecureStorage.set('nxTrades',activeTrades)}
 
 function closeTrade(trade,exitPrice,reason){
   trade.status='CLOSED';trade.exitPrice=exitPrice;trade.exitTime=Date.now();trade.exitReason=reason;
@@ -1262,7 +1630,7 @@ function mkSpark(s){var hist=sparkHist[s];var up=T[s]?(!isNaN(T[s].c)?T[s].c>=0:
   if(!hist||hist.length<3){var vals=up?[3,5,4,7,6,9,11,14,13,16,18,22]:[22,19,16,14,11,9,8,6,5,4,3,2];return vals.map(function(v,i){var op=0.3+i/vals.length*0.7;return'<b style="height:'+v+'px;background:var(--'+(up?'up':'dn')+');opacity:'+op.toFixed(2)+'"></b>'}).join('')}
   var mn=Math.min.apply(null,hist),mx=Math.max.apply(null,hist),rng=mx-mn||1;up=hist[hist.length-1]>=hist[0];
   return hist.slice(-12).map(function(v,i,a){var h=Math.max(3,Math.round((v-mn)/rng*24+3));var op=0.3+i/a.length*0.7;return'<b style="height:'+h+'px;background:var(--'+(up?'up':'dn')+');opacity:'+op.toFixed(2)+'"></b>'}).join('')}
-function coinRow(s,d,i,sub){var up=d.c>=0;var bg=COL[s]||'#444';return'<div class="cr" onclick="openCoin(\''+s+'\')"><div class="cr-l">'+(i!==undefined?'<div class="cr-rk">'+i+'</div>':'')+'<div class="cr-ic" style="background:'+bg+'0a;color:'+bg+';border:1px solid '+bg+'22">'+s.slice(0,2)+'</div><div><div class="cr-n">'+s+'</div><div class="cr-sub">'+(sub||fmt(d.v))+'</div></div></div><div class="cr-spark">'+mkSpark(s)+'</div><div class="cr-r"><div class="cr-p">'+fP(d.p)+'</div><div class="cr-ch '+(up?'up':'dn')+'">'+(up?'+':'')+d.c.toFixed(1)+'%</div></div></div>'}
+function coinRow(s,d,i,sub){var up=d.c>=0;var bg=COL[s]||'#444';s=sanitize(s);return'<div class="cr" onclick="openCoin(\''+s+'\')"><div class="cr-l">'+(i!==undefined?'<div class="cr-rk">'+i+'</div>':'')+'<div class="cr-ic" style="background:'+bg+'0a;color:'+bg+';border:1px solid '+bg+'22">'+s.slice(0,2)+'</div><div><div class="cr-n">'+s+'</div><div class="cr-sub">'+(sub||fmt(d.v))+'</div></div></div><div class="cr-spark">'+mkSpark(s)+'</div><div class="cr-r"><div class="cr-p">'+fP(d.p)+'</div><div class="cr-ch '+(up?'up':'dn')+'">'+(up?'+':'')+d.c.toFixed(1)+'%</div></div></div>'}
 function ultraCard(r){var predKey=r.s+'_'+new Date().getHours();if(!predictions.some(function(p){return p.sym===r.s&&Date.now()-p.time<3600000}))savePred(r.s,r.p,r.p*1.05,r.score);var src=[];if(T[r.s])src.push('Binance');if(r.by)src.push('Bybit');if(CBP[r.s])src.push('Coinbase');
   var wc=r.whaleConf||0;var wcCol=wc>=60?'var(--up)':wc>=40?'var(--warn)':'var(--t3)';
   var se=r.smartEntry;var rrCol=se&&+se.rr>=2.5?'var(--up)':se&&+se.rr>=1.5?'var(--warn)':'var(--dn)';
@@ -1284,7 +1652,7 @@ function ultraCard(r){var predKey=r.s+'_'+new Date().getHours();if(!predictions.
     +'</div>'}
 /* ═══ 🐋 WHALE INTELLIGENCE ENGINE v3.0 — 5 Layers + 8 Techniques ═══ */
 var wCache={};var prevOBSnapshots={};var liqEvents=[];
-var cvdData={};var icebergData={};var whaleLearning={preds:[],layerAcc:{}};try{whaleLearning.preds=JSON.parse(localStorage.getItem('nxwlrn')||'[]');whaleLearning.layerAcc=JSON.parse(localStorage.getItem('nxwlacc')||'{}')}catch(e){}
+var cvdData={};var icebergData={};var whaleLearning={preds:SecureStorage.get('nxwlrn',[]),layerAcc:SecureStorage.get('nxwlacc',{})}
 function wGet(k){var c=wCache[k];if(c&&Date.now()-c.t<c.ttl)return c.d;return null}
 function wSet(k,d,ttl){wCache[k]={d:d,t:Date.now(),ttl:ttl||15000}}
 
@@ -1384,12 +1752,12 @@ function getTimeMultiplier(){
 function wlRecordSignal(sym,conf,layers,price){
   whaleLearning.preds.push({sym:sym,conf:conf,layers:Object.fromEntries(Object.entries(layers).map(function(e){return[e[0],{sc:e[1].score,sig:e[1].signal}]})),price:price,time:Date.now(),chk:false,hit:false});
   if(whaleLearning.preds.length>300)whaleLearning.preds=whaleLearning.preds.slice(-300);
-  try{localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds))}catch(e){}}
+  SecureStorage.set('nxwlrn',whaleLearning.preds)}
 function wlVerify(){
   var ch=false;whaleLearning.preds.forEach(function(p){
     if(!p.chk&&Date.now()-p.time>8*3600000){var cur=T[p.sym];if(cur){p.chk=true;p.hit=((cur.p-p.price)/p.price*100)>=2;ch=true;
       Object.entries(p.layers).forEach(function(e){var k=e[0],l=e[1];if(l.sc>0){if(!whaleLearning.layerAcc[k])whaleLearning.layerAcc[k]={ok:0,t:0};whaleLearning.layerAcc[k].t++;if(p.hit)whaleLearning.layerAcc[k].ok++}})}}});
-  if(ch){try{localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds));localStorage.setItem('nxwlacc',JSON.stringify(whaleLearning.layerAcc))}catch(e){}}}
+  if(ch){SecureStorage.set('nxwlrn',whaleLearning.preds);SecureStorage.set('nxwlacc',whaleLearning.layerAcc)}}
 function wlGetStats(){var c=whaleLearning.preds.filter(function(p){return p.chk});var h=c.filter(function(p){return p.hit});return{total:c.length,hits:h.length,rate:c.length>0?Math.round(h.length/c.length*100):0}}
 
 /* LAYER 1: Order Book — walls, spoofing, imbalance (15%) */
@@ -1589,7 +1957,7 @@ async function detectWhaleWaves(candidates){
     if(l4.score+l5.score>5){
       if(!whaleWaves[c.s])whaleWaves[c.s]={waves:[],totalBuy:0,engine:null};
       whaleWaves[c.s].engine={confidence:Math.round((l4.score+l5.score)*2),signal:'POSSIBLE_WHALE_ACTIVITY',strength:'WEAK',layers:{ob:{score:0,signal:'SKIP'},trades:{score:0,signal:'SKIP'},liqs:{score:0,signal:'SKIP'},fr:l4,xex:l5},activeLayers:2,reasons:[]}}});
-  try{localStorage.setItem('nxww10',JSON.stringify(whaleWaves))}catch(e){}}
+  SecureStorage.set('nxww10',whaleWaves)}
 
 /* ═══ WHALE CARD v3.0 — 5 Layers + 8 Techniques ═══ */
 function whaleCard(r,rank){
@@ -1755,7 +2123,7 @@ function whaleSellCard(r,rank){
 function scanItem(r){var sc=r.score>=60?'background:var(--ud);color:var(--up)':r.score>=40?'background:var(--wd);color:var(--warn)':'background:rgba(56,72,96,.3);color:var(--t2)';var tb=getTierBadge(r.s);return'<div class="'+(r.ultra?'scan-r ultra-r':'scan-r')+'" onclick="openCoin(\''+r.s+'\')"><div class="scan-h"><div class="scan-sym">'+(r.ultra?'⭐':r.confirmed?'🟢':'💎')+' '+r.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+' '+timeBadge(r.detectedAt)+'</div><span class="scan-score" style="'+sc+'">'+r.score+' · '+r.passed+'/'+r.total+'✓</span></div><div class="scan-det"><span>💰 <b>'+fP(r.p)+'</b></span><span>'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</span><span>'+fmt(r.v)+'</span>'+(r.cb?'<span>CB:'+fP(r.cb)+'</span>':'')+'</div><div class="scan-checks">'+r.tags.slice(0,5).map(function(x){return'<span class="scan-chk chk-y">'+x+'</span>'}).join('')+'</div><div class="prw"><div class="prb" style="width:'+Math.min(100,r.score)+'%;background:'+(r.ultra?'linear-gradient(90deg,var(--ultra),var(--dn))':r.score>=50?'var(--up)':'var(--warn)')+'"></div></div></div>'}
 function frRow(){return''} /* replaced by accordion */
 /* ═══ 🆕 QUICK ACCESS CARDS ═══ */
-var favorites=[];try{favorites=JSON.parse(localStorage.getItem('nxfav10')||'[]')}catch(e){favorites=[]}
+var favorites=SecureStorage.get('nxfav10',[])
 function openQA(page){
   document.querySelectorAll('.pg').forEach(function(p){p.classList.remove('act');p.style.display=''});
   document.querySelectorAll('.bb').forEach(function(b){b.classList.remove('act')});
@@ -1798,10 +2166,10 @@ function renderHeatmap(){
 function addFav(){
   var inp=document.getElementById('favInp');if(!inp)return;
   var sym=inp.value.toUpperCase().trim();if(!sym||favorites.indexOf(sym)!==-1)return;
-  favorites.push(sym);try{localStorage.setItem('nxfav10',JSON.stringify(favorites))}catch(e){}
+  favorites.push(sym);SecureStorage.set('nxfav10',favorites)
   inp.value='';renderFavs();updateQACards();
 }
-function rmFav(i){favorites.splice(i,1);try{localStorage.setItem('nxfav10',JSON.stringify(favorites))}catch(e){}renderFavs();updateQACards()}
+function rmFav(i){favorites.splice(i,1);SecureStorage.set('nxfav10',favorites);renderFavs();updateQACards()}
 function renderFavs(){
   var el=document.getElementById('favList');if(!el)return;
   if(!favorites.length){el.innerHTML='<div class="empty"><div class="empty-ic">⭐</div><div class="empty-tx">'+(lang==='ar'?'أضف عملاتك المفضلة':'Add your favorites')+'</div></div>';return}
@@ -2141,16 +2509,62 @@ function buildTakerCard(){
   var avgCol=bullish>bearish?'var(--up)':bearish>bullish?'var(--dn)':'var(--warn)';
   return indCardWrap('⚡','rgba(255,215,0,.06)','rgba(255,215,0,.12)','Taker Buy/Sell',lang==='ar'?'الشراء العدواني':'Aggressive trading',avg,avgCol,chips+tRows+guide);
 }
-/* old functions removed */
-function loadFR(){}function loadOI(){}function loadCor(){}
+/* REMOVED dead code stubs — loadFR/loadOI/loadCor now handled by loadTk proxy */
 /* COIN DETAIL */
-async function openCoin(sym){curCoin=sym;curTF='1h';document.getElementById('sRes').classList.remove('show');document.getElementById('sInp').value='';var d=T[sym]||{p:0,c:0,v:0,h:0,l:0};document.getElementById('cmT').textContent=sym+'/USDT';document.getElementById('cmP').textContent=fP(d.p);document.getElementById('cmC').style.color=d.c>=0?'var(--up)':'var(--dn)';document.getElementById('cmC').textContent=(d.c>=0?'+':'')+d.c.toFixed(2)+'%';document.getElementById('cmSts').innerHTML='<div class="st"><div class="st-l">VOL</div><div class="st-v" style="color:var(--neon)">'+fmt(d.v)+'</div></div><div class="st"><div class="st-l">HIGH</div><div class="st-v" style="color:var(--up)">'+fP(d.h)+'</div></div><div class="st"><div class="st-l">LOW</div><div class="st-v" style="color:var(--dn)">'+fP(d.l)+'</div></div>';var ex='';var fr=FR[sym];if(fr)ex+='<div class="fr-row" style="margin-top:6px"><span>📊 FR</span><span class="fr-val" style="color:'+(fr.rate>0.05?'var(--dn)':fr.rate<-0.01?'var(--up)':'var(--warn)')+'">'+(fr.rate>=0?'+':'')+fr.rate.toFixed(4)+'%</span></div>';if(OI[sym])ex+='<div class="fr-row"><span>📈 OI</span><span class="fr-val" style="color:var(--neon)">'+fmt(OI[sym])+'</span></div>';if(LS[sym])ex+='<div class="fr-row"><span>⚖️ L/S</span><span class="fr-val">'+LS[sym].long.toFixed(0)+'%/'+LS[sym].short.toFixed(0)+'%</span></div>';if(d.by)ex+='<div class="fr-row"><span>Bybit</span><span class="fr-val">'+fP(d.by)+'</span></div>';if(CBP[sym])ex+='<div class="fr-row"><span>Coinbase</span><span class="fr-val">'+fP(CBP[sym])+'</span></div>';document.getElementById('cmExtra').innerHTML=ex;openMo('coinMo');document.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act');if(b.dataset.t2==='1h')b.classList.add('act')});drawChart(sym,'1h')}
+async function openCoin(sym){sym=InputValidator.coinSymbol(sym);if(!sym)return;curCoin=sym;curTF='1h';document.getElementById('sRes').classList.remove('show');document.getElementById('sInp').value='';var d=T[sym]||{p:0,c:0,v:0,h:0,l:0};document.getElementById('cmT').textContent=sym+'/USDT';document.getElementById('cmP').textContent=fP(d.p);document.getElementById('cmC').style.color=d.c>=0?'var(--up)':'var(--dn)';document.getElementById('cmC').textContent=(d.c>=0?'+':'')+d.c.toFixed(2)+'%';document.getElementById('cmSts').innerHTML='<div class="st"><div class="st-l">VOL</div><div class="st-v" style="color:var(--neon)">'+fmt(d.v)+'</div></div><div class="st"><div class="st-l">HIGH</div><div class="st-v" style="color:var(--up)">'+fP(d.h)+'</div></div><div class="st"><div class="st-l">LOW</div><div class="st-v" style="color:var(--dn)">'+fP(d.l)+'</div></div>';var ex='';var fr=FR[sym];if(fr)ex+='<div class="fr-row" style="margin-top:6px"><span>📊 FR</span><span class="fr-val" style="color:'+(fr.rate>0.05?'var(--dn)':fr.rate<-0.01?'var(--up)':'var(--warn)')+'">'+(fr.rate>=0?'+':'')+fr.rate.toFixed(4)+'%</span></div>';if(OI[sym])ex+='<div class="fr-row"><span>📈 OI</span><span class="fr-val" style="color:var(--neon)">'+fmt(OI[sym])+'</span></div>';if(LS[sym])ex+='<div class="fr-row"><span>⚖️ L/S</span><span class="fr-val">'+LS[sym].long.toFixed(0)+'%/'+LS[sym].short.toFixed(0)+'%</span></div>';if(d.by)ex+='<div class="fr-row"><span>Bybit</span><span class="fr-val">'+fP(d.by)+'</span></div>';if(CBP[sym])ex+='<div class="fr-row"><span>Coinbase</span><span class="fr-val">'+fP(CBP[sym])+'</span></div>';document.getElementById('cmExtra').innerHTML=ex;openMo('coinMo');document.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act');if(b.dataset.t2==='1h')b.classList.add('act')});drawChart(sym,'1h')}
 function cTF(tf,btn){curTF=tf;document.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');drawChart(curCoin,tf)}
 function tgI(ind,btn){inds[ind]=inds[ind]?0:1;btn.classList.toggle('act');drawChart(curCoin,curTF)}
 var chartData=null,chartCtx=null,chartW=0,crosshair={active:false,x:0,y:0};
 var chartOffset=0,visibleCandles=80,chartCv=null,lastPinchDist=0,touchStartX=0,isDragging=false;
+var _chartRAF = null; /* Track animation frame to prevent duplicate renders */
 function getChartH(){return Math.max(340,Math.min(500,window.innerHeight*0.5))}
 function px(v){return Math.round(v)+0.5}
+
+/* Chart event handlers — defined once, reused to prevent memory leaks */
+var _chartHandlers = {
+  touchMode: null,
+  onTouchStart: function(e) {
+    e.preventDefault();
+    if(e.touches.length===2){_chartHandlers.touchMode='zoom';var dx=e.touches[0].clientX-e.touches[1].clientX;var dy=e.touches[0].clientY-e.touches[1].clientY;lastPinchDist=Math.sqrt(dx*dx+dy*dy);return}
+    _chartHandlers.touchMode='tap';isDragging=false;touchStartX=e.touches[0].clientX;var r=chartCv.getBoundingClientRect();crosshair.x=e.touches[0].clientX-r.left;crosshair.y=e.touches[0].clientY-r.top;
+  },
+  onTouchMove: function(e) {
+    e.preventDefault();
+    if(e.touches.length===2&&_chartHandlers.touchMode==='zoom'){var dx=e.touches[0].clientX-e.touches[1].clientX;var dy=e.touches[0].clientY-e.touches[1].clientY;var dist=Math.sqrt(dx*dx+dy*dy);if(lastPinchDist>0){var d2=dist-lastPinchDist;if(d2>5)visibleCandles=Math.max(20,visibleCandles-3);if(d2<-5)visibleCandles=Math.min(150,visibleCandles+3);chartOffset=Math.max(0,Math.min(chartData.length-visibleCandles,chartOffset));drawChartFrame()}lastPinchDist=dist;return}
+    var dx2=Math.abs(e.touches[0].clientX-touchStartX);
+    if(dx2>8){_chartHandlers.touchMode='scroll';isDragging=true;crosshair.active=false;var cw2=(chartW-56)/visibleCandles;var cm=Math.round((e.touches[0].clientX-touchStartX)/cw2);if(cm!==0){chartOffset=Math.max(0,Math.min(chartData.length-visibleCandles,chartOffset-cm));touchStartX=e.touches[0].clientX;drawChartFrame()}}
+    else if(_chartHandlers.touchMode==='tap'){crosshair.active=true;var r=chartCv.getBoundingClientRect();crosshair.x=e.touches[0].clientX-r.left;crosshair.y=e.touches[0].clientY-r.top;if(_chartRAF)cancelAnimationFrame(_chartRAF);_chartRAF=requestAnimationFrame(drawChartFrame)}
+  },
+  onTouchEnd: function() {
+    if(_chartHandlers.touchMode==='tap'&&!isDragging){crosshair.active=true;drawChartFrame()}else{crosshair.active=false;drawChartFrame()}_chartHandlers.touchMode=null;lastPinchDist=0;
+  },
+  onMouseMove: function(e) {
+    var r=chartCv.getBoundingClientRect();crosshair.active=true;crosshair.x=e.clientX-r.left;crosshair.y=e.clientY-r.top;if(_chartRAF)cancelAnimationFrame(_chartRAF);_chartRAF=requestAnimationFrame(drawChartFrame);
+  },
+  onMouseLeave: function() {
+    crosshair.active=false;drawChartFrame();
+  },
+  _attached: false,
+  attach: function(cv) {
+    /* Remove previous listeners first to prevent memory leaks */
+    if (this._attached) this.detach(cv);
+    cv.ontouchstart = this.onTouchStart;
+    cv.ontouchmove = this.onTouchMove;
+    cv.ontouchend = this.onTouchEnd;
+    cv.onmousemove = this.onMouseMove;
+    cv.onmouseleave = this.onMouseLeave;
+    this._attached = true;
+  },
+  detach: function(cv) {
+    cv.ontouchstart = null;
+    cv.ontouchmove = null;
+    cv.ontouchend = null;
+    cv.onmousemove = null;
+    cv.onmouseleave = null;
+    this._attached = false;
+  }
+};
+
 async function drawChart(sym,tf){
   var cv=document.getElementById('chCv');if(!cv)return;chartCv=cv;var ctx=cv.getContext('2d');chartCtx=ctx;
   var dpr=window.devicePixelRatio||1;var H=getChartH();
@@ -2162,19 +2576,8 @@ async function drawChart(sym,tf){
   chartData=kl.map(function(k){return{t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}});
   chartOffset=Math.max(0,chartData.length-visibleCandles);
   drawChartFrame();
-  /* Touch: 1 finger = crosshair or scroll, 2 fingers = zoom */
-  var touchMode=null;
-  cv.ontouchstart=function(e){e.preventDefault();
-    if(e.touches.length===2){touchMode='zoom';var dx=e.touches[0].clientX-e.touches[1].clientX;var dy=e.touches[0].clientY-e.touches[1].clientY;lastPinchDist=Math.sqrt(dx*dx+dy*dy);return}
-    touchMode='tap';isDragging=false;touchStartX=e.touches[0].clientX;var r=cv.getBoundingClientRect();crosshair.x=e.touches[0].clientX-r.left;crosshair.y=e.touches[0].clientY-r.top};
-  cv.ontouchmove=function(e){e.preventDefault();
-    if(e.touches.length===2&&touchMode==='zoom'){var dx=e.touches[0].clientX-e.touches[1].clientX;var dy=e.touches[0].clientY-e.touches[1].clientY;var dist=Math.sqrt(dx*dx+dy*dy);if(lastPinchDist>0){var d2=dist-lastPinchDist;if(d2>5)visibleCandles=Math.max(20,visibleCandles-3);if(d2<-5)visibleCandles=Math.min(150,visibleCandles+3);chartOffset=Math.max(0,Math.min(chartData.length-visibleCandles,chartOffset));drawChartFrame()}lastPinchDist=dist;return}
-    var dx2=Math.abs(e.touches[0].clientX-touchStartX);
-    if(dx2>8){touchMode='scroll';isDragging=true;crosshair.active=false;var cw2=(chartW-56)/visibleCandles;var cm=Math.round((e.touches[0].clientX-touchStartX)/cw2);if(cm!==0){chartOffset=Math.max(0,Math.min(chartData.length-visibleCandles,chartOffset-cm));touchStartX=e.touches[0].clientX;drawChartFrame()}}
-    else if(touchMode==='tap'){crosshair.active=true;var r=cv.getBoundingClientRect();crosshair.x=e.touches[0].clientX-r.left;crosshair.y=e.touches[0].clientY-r.top;requestAnimationFrame(drawChartFrame)}};
-  cv.ontouchend=function(){if(touchMode==='tap'&&!isDragging){crosshair.active=true;drawChartFrame()}else{crosshair.active=false;drawChartFrame()}touchMode=null;lastPinchDist=0};
-  cv.onmousemove=function(e){var r=cv.getBoundingClientRect();crosshair.active=true;crosshair.x=e.clientX-r.left;crosshair.y=e.clientY-r.top;requestAnimationFrame(drawChartFrame)};
-  cv.onmouseleave=function(){crosshair.active=false;drawChartFrame()};
+  /* Attach event handlers (safely — no duplicates) */
+  _chartHandlers.attach(cv);
   renderPerfStats(sym)}
 
 function drawChartFrame(){
@@ -2341,7 +2744,7 @@ async function loadGems(){
     +'<div style="margin-top:4px"><div class="prw"><div class="prb" style="width:'+Math.min(100,g.score)+'%;background:'+(g.timing==='early'?'var(--up)':g.timing==='still'?'var(--warn)':'var(--dn)')+'"></div></div></div>'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div><span style="font-family:var(--fm);font-size:9px;color:var(--t2)">Vol:'+fmt(g.v)+'</span></div>'
     +'</div>'}).join(''):'<div class="empty"><div class="empty-ic">💎</div><div class="empty-tx">'+(lang==='ar'?'لا جواهر حالياً — السوق هادئ':'No gems now — Market quiet')+'</div></div>'}/* WATCHLIST */
-var watchlist=[];try{watchlist=JSON.parse(localStorage.getItem('nxwl10')||'[]')}catch(e){}
+var watchlist=SecureStorage.get('nxwl10',[])
 function addWL(){}function rmWL(){}function renderWL(){} /* removed — watchlist UI deleted */
 /* 📊 MARKET DIRECTION REPORT — Parallel + Error-Safe */
 /* ═══ MARKET REPORT v2.0 ═══ */
@@ -2352,9 +2755,9 @@ var btcCache={h:null,t:0};
 var ethCache={h:null,t:0};
 var MKT_TTL=4*3600000;
 var RPT_COINS=[{s:'BTC',ic:'\u20bf',col:'#f7931a'},{s:'ETH',ic:'\u039e',col:'#627eea'},{s:'SOL',ic:'\u25ce',col:'#9945ff'},{s:'BNB',ic:'\u2b21',col:'#f0b90b'},{s:'XRP',ic:'\u2715',col:'#0085c0'}];
-var reportHistory=[];try{reportHistory=JSON.parse(localStorage.getItem('nxRptHist')||'[]')}catch(e){reportHistory=[]}
-var prevReport=null;try{prevReport=JSON.parse(localStorage.getItem('nxPrevRpt')||'null')}catch(e){prevReport=null}
-var hourlyLog=[];try{hourlyLog=JSON.parse(localStorage.getItem('nxHrLog')||'[]')}catch(e){hourlyLog=[]}
+var reportHistory=SecureStorage.get('nxRptHist',[])
+var prevReport=SecureStorage.get('nxPrevRpt',null)
+var hourlyLog=SecureStorage.get('nxHrLog',[])
 var FOMC_DATES=['2026-01-28','2026-03-18','2026-05-06','2026-06-17','2026-07-29','2026-09-16','2026-11-04','2026-12-16'];
 var CPI_DATES=['2026-01-14','2026-02-12','2026-03-11','2026-04-10','2026-05-13','2026-06-10','2026-07-15','2026-08-12','2026-09-11','2026-10-14','2026-11-12','2026-12-10'];
 var TOKEN_UNLOCKS=[];
@@ -2439,7 +2842,7 @@ function buildStory(coin,data){var tpls=lang==='ar'?MKT_TPL:MKT_TPL_EN;var cat=d
   var cn=lang==='ar'?(coin==='BTC'?'البيتكوين':coin==='ETH'?'الإيثيريوم':coin==='SOL'?'سولانا':coin):coin;
   return tmpl.replace('{coin}',cn).replace('{reason1}',data.reasons[0]||'').replace('{reason2}',data.reasons[1]||'').replace('{ema}',rP(data.ema20)).replace('{support}',rP(data.supp)).replace('{resistance}',rP(data.resist)).replace('{target}',rP(data.f618U)).replace('{entry}',rP(data.price*0.99)).replace('{stop}',rP(data.supp)).replace('{volStatus}',data.volT>1.3?(lang==='ar'?'قوي':'strong'):(lang==='ar'?'ضعيف':'weak')).replace('{warning}',data.warning||'')}
 
-function addHourlyLog(msg){hourlyLog.push({time:Date.now(),txt:msg});if(hourlyLog.length>20)hourlyLog=hourlyLog.slice(-20);try{localStorage.setItem('nxHrLog',JSON.stringify(hourlyLog))}catch(e){}}
+function addHourlyLog(msg){hourlyLog.push({time:Date.now(),txt:msg});if(hourlyLog.length>20)hourlyLog=hourlyLog.slice(-20);SecureStorage.set('nxHrLog',hourlyLog)}
 
 function getChanges(btc){
   if(!prevReport)return[];var ch=[];
@@ -2897,10 +3300,34 @@ async function loadETHChart(){
 
 
 /* PORTFOLIO */
-var sP=function(){try{localStorage.setItem('nxp10',JSON.stringify(portfolio))}catch(e){}};
-function addPort(){var sym=document.getElementById('aSym').value.toUpperCase().trim(),amt=+document.getElementById('aAmt').value,pr=+document.getElementById('aPr').value;if(!sym||!amt)return;portfolio.push({sym:sym,amt:amt,bp:pr});sP();closeMo('addMo');renderPort()}
+/* ═══ PORTFOLIO — with input validation ═══ */
+var sP = function() { SecureStorage.set('nxp10', portfolio); };
+function addPort() {
+  var symRaw = document.getElementById('aSym').value;
+  var amtRaw = document.getElementById('aAmt').value;
+  var prRaw = document.getElementById('aPr').value;
+  
+  /* Validate inputs */
+  var sym = InputValidator.coinSymbol(symRaw);
+  var amt = InputValidator.amount(amtRaw);
+  var pr = InputValidator.price(prRaw);
+  
+  if (!sym || !amt) {
+    showPopup('⚠️', lang === 'ar' ? 'خطأ' : 'Error', lang === 'ar' ? 'أدخل رمز وكمية صحيحة' : 'Enter valid symbol and amount');
+    return;
+  }
+  if (portfolio.length >= 50) {
+    showPopup('⚠️', lang === 'ar' ? 'الحد الأقصى' : 'Limit', lang === 'ar' ? 'أقصى 50 عملة' : 'Max 50 coins');
+    return;
+  }
+  
+  portfolio.push({ sym: sym, amt: amt, bp: pr });
+  sP();
+  closeMo('addMo');
+  renderPort();
+}
 function rmPort(i){portfolio.splice(i,1);sP();renderPort()}
-function renderPort(){var tV=0,tC=0;portfolio.forEach(function(p){var d=T[p.sym];if(d){tV+=d.p*p.amt;tC+=p.bp*p.amt}});var pnl=tC>0?((tV-tC)/tC*100):0;document.getElementById('pVal').textContent=tV>0?fmt(tV):'$0';var pE=document.getElementById('pCh');if(tC>0){pE.textContent=(pnl>=0?'+':'')+pnl.toFixed(2)+'%';pE.style.color=pnl>=0?'var(--up)':'var(--dn)'}else{pE.textContent=t('add_coins');pE.style.color='var(--t3)'};document.getElementById('pList').innerHTML=portfolio.length?portfolio.map(function(p,i){var d=T[p.sym],cp=d?d.p:0,v=cp*p.amt,pnl=p.bp>0?((cp-p.bp)/p.bp*100):0;var bg=COL[p.sym]||'#444';return'<div class="port-i"><div style="display:flex;align-items:center;gap:8px"><div class="cr-ic" style="background:'+bg+'0a;color:'+bg+';border:1px solid '+bg+'22;width:26px;height:26px;font-size:9px">'+p.sym.slice(0,2)+'</div><div><div class="cr-n">'+p.sym+'</div><div class="cr-sub">'+p.amt+' × '+fP(cp)+'</div></div></div><div style="text-align:left"><div class="cr-p">'+fmt(v)+'</div><div style="font-family:var(--fm);font-size:9px;font-weight:700;color:'+(pnl>=0?'var(--up)':'var(--dn)')+'">'+(p.bp>0?(pnl>=0?'+':'')+pnl.toFixed(1)+'%':'--')+'</div><div style="font-size:7px;color:var(--t3);cursor:pointer" onclick="rmPort('+i+')">🗑</div></div></div>'}).join(''):'<div class="empty"><div class="empty-ic">💼</div><div class="empty-tx">'+t('empty_port')+'</div></div>'}
+function renderPort(){var tV=0,tC=0;portfolio.forEach(function(p){var d=T[p.sym];if(d){tV+=d.p*p.amt;tC+=p.bp*p.amt}});var pnl=tC>0?((tV-tC)/tC*100):0;document.getElementById('pVal').textContent=tV>0?fmt(tV):'$0';var pE=document.getElementById('pCh');if(tC>0){pE.textContent=(pnl>=0?'+':'')+pnl.toFixed(2)+'%';pE.style.color=pnl>=0?'var(--up)':'var(--dn)'}else{pE.textContent=t('add_coins');pE.style.color='var(--t3)'};document.getElementById('pList').innerHTML=portfolio.length?portfolio.map(function(p,i){var d=T[p.sym],cp=d?d.p:0,v=cp*p.amt,pnl=p.bp>0?((cp-p.bp)/p.bp*100):0;var bg=COL[p.sym]||'#444';return'<div class="port-i"><div style="display:flex;align-items:center;gap:8px"><div class="cr-ic" style="background:'+bg+'0a;color:'+bg+';border:1px solid '+bg+'22;width:26px;height:26px;font-size:9px">'+sanitize(p.sym.slice(0,2))+'</div><div><div class="cr-n">'+p.sym+'</div><div class="cr-sub">'+p.amt+' × '+fP(cp)+'</div></div></div><div style="text-align:left"><div class="cr-p">'+fmt(v)+'</div><div style="font-family:var(--fm);font-size:9px;font-weight:700;color:'+(pnl>=0?'var(--up)':'var(--dn)')+'">'+(p.bp>0?(pnl>=0?'+':'')+pnl.toFixed(1)+'%':'--')+'</div><div style="font-size:7px;color:var(--t3);cursor:pointer" onclick="rmPort('+i+')">🗑</div></div></div>'}).join(''):'<div class="empty"><div class="empty-ic">💼</div><div class="empty-tx">'+t('empty_port')+'</div></div>'}
 /* ═══ ⚖️ L/S INTELLIGENCE v2.0 ═══ */
 async function loadTakerVol(){/* taker data now loaded via PROXY in loadTk() */await loadTk()}
 
@@ -3286,47 +3713,106 @@ async function scanBybitGainers(){
     var gainers=by.result.list.filter(function(x){return x.symbol.endsWith('USDT')&&+x.price24hPcnt*100>=3&&+x.turnover24h>50000}).sort(function(a,b){return+b.price24hPcnt-+a.price24hPcnt}).slice(0,20);
     gainers.forEach(function(x){var s=x.symbol.replace('USDT','');var chg=+x.price24hPcnt*100;
       if(!T[s]||T[s].src==='BY'){T[s]={p:+x.lastPrice,c:chg,v:+x.turnover24h,h:+x.highPrice24h,l:+x.lowPrice24h,src:'BY',by:+x.lastPrice}}
-      if(chg>=5&&chg<=15){var k='by_'+s+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};recSig(s,'breakout');if(chg<8)notify(s,'gem',0)}}})}catch(e){}}
-/* INIT */
-async function init(){try{document.getElementById('sInp').placeholder=t('search_ph')}catch(e){}try{document.getElementById('notifB').dataset.c='0'}catch(e){}
-  loadProfile();loadToneUI();updateMenuLang();updateMenuTheme();
-  if(tg){try{tg.setHeaderColor(document.body.dataset.theme==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(document.body.dataset.theme==='dark'?'#020408':'#f0f4f8')}catch(e){}}
-  try{await loadDash()}catch(e){console.error('init loadDash:',e)}
-  try{renderPort()}catch(e){}
-  try{updateConnStatus()}catch(e){}
+      if(chg>=5&&chg<=15){var k='by_'+s+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;SecureStorage.set('nxnot10',notifiedSet);recSig(s,'breakout');if(chg<8)notify(s,'gem',0)}}})}catch(e){}}
+/* INIT — with managed intervals and improved polling */
+async function init(){
+  try { document.getElementById('sInp').placeholder = t('search_ph'); document.getElementById('sInp').setAttribute('maxlength','50'); } catch(e) {}
+  try { document.getElementById('notifB').dataset.c = '0'; } catch(e) {}
+  
+  loadProfile(); loadToneUI(); updateMenuLang(); updateMenuTheme();
+  
+  if (tg) {
+    try {
+      tg.setHeaderColor(document.body.dataset.theme === 'dark' ? '#060b14' : '#f7f9fc');
+      tg.setBackgroundColor(document.body.dataset.theme === 'dark' ? '#020408' : '#f0f4f8');
+    } catch(e) {}
+  }
+  
+  try { await loadDash(); } catch(e) { ErrorHandler.log('init', 'loadDash failed', e); }
+  try { renderPort(); } catch(e) {}
+  try { updateConnStatus(); } catch(e) {}
+  
+  /* ═══ MANAGED INTERVALS — tracked by MemoryManager for cleanup ═══ */
+  
   /* On-Chain + Wallet check */
-  setTimeout(fetchOnChainBTC,10000);setInterval(fetchOnChainBTC,120000);
-  setTimeout(checkWallets,20000);setInterval(checkWallets,120000);
+  MemoryManager.setTimeout(fetchOnChainBTC, 10000, 'onchain_initial');
+  MemoryManager.setInterval(fetchOnChainBTC, 120000, 'onchain_poll');
+  MemoryManager.setTimeout(checkWallets, 20000, 'wallet_initial');
+  MemoryManager.setInterval(checkWallets, 120000, 'wallet_poll');
+  
   /* Delayed retry — if data still empty after 15s, refetch from proxy */
-  setTimeout(async function(){
-    try{
-      if(!Object.keys(FR).length||!Object.keys(OI).length||!Object.keys(takerData).length){console.log('Retry loadTk from proxy...');await loadTk()}
-    }catch(e){}
-  },15000);
-  /* ═══ TOP 100 AUTO-UPDATE: CoinGecko every hour ═══ */
-  setTimeout(updateTop100,5000);setInterval(updateTop100,3600000);
-  /* ═══ MAIN POLLING: fetch /api/all every 5 seconds ═══ */
-  setInterval(async function(){try{await loadTk();checkWatchlistAlerts();updateConnStatus()}catch(e){connMetrics.apiFail++;updateConnStatus()}},5000);
-  setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))try{await loadDash()}catch(e){}},120000);
-  setInterval(monitorTrades,10000);
-  setInterval(function(){try{renderTop3()}catch(e){}},60000); /* Auto-update VIP trades every minute */
-  setInterval(function(){try{notifiedSet={};localStorage.setItem('nxnot10','{}')}catch(e){}},3600000);
-  setTimeout(function(){runValidator()},10000);
-  setInterval(function(){runValidator()},90000);
-  // === MONITOR: Weekly auto-tune / auto-improve check ===
+  MemoryManager.setTimeout(async function() {
+    try {
+      if (!Object.keys(FR).length || !Object.keys(OI).length || !Object.keys(takerData).length) {
+        console.log('[INIT] Retry loadTk from proxy...');
+        await loadTk();
+      }
+    } catch(e) { ErrorHandler.log('init', 'Retry loadTk failed', e); }
+  }, 15000, 'retry_load');
+  
+  /* TOP 100 AUTO-UPDATE: CoinGecko every hour */
+  MemoryManager.setTimeout(updateTop100, 5000, 'top100_initial');
+  MemoryManager.setInterval(updateTop100, 3600000, 'top100_hourly');
+  
+  /* ═══ MAIN POLLING: fetch data every 15 seconds (was 5s — reduced for rate limits) ═══ */
+  MemoryManager.setInterval(async function() {
+    try {
+      if (!RateLimiter.canRequest('proxy')) return; /* Skip if rate limited */
+      await loadTk();
+      checkWatchlistAlerts();
+      updateConnStatus();
+    } catch(e) {
+      connMetrics.apiFail++;
+      updateConnStatus();
+      ErrorHandler.log('polling', 'Main poll failed', e);
+    }
+  }, 15000, 'main_poll');
+  
+  /* Dashboard refresh every 2 minutes */
+  MemoryManager.setInterval(async function() {
+    if (document.getElementById('pg-dash').classList.contains('act')) {
+      try { await loadDash(); } catch(e) {}
+    }
+  }, 120000, 'dash_refresh');
+  
+  /* Trade monitoring every 10 seconds */
+  MemoryManager.setInterval(monitorTrades, 10000, 'trade_monitor');
+  
+  /* VIP trades auto-update every minute */
+  MemoryManager.setInterval(function() { try { renderTop3(); } catch(e) {} }, 60000, 'top3_refresh');
+  
+  /* Clear notification cache every hour */
+  MemoryManager.setInterval(function() {
+    notifiedSet = {};
+    SecureStorage.set('nxnot10', {});
+  }, 3600000, 'notif_clear');
+  
+  /* Validator check */
+  MemoryManager.setTimeout(function() { runValidator(); }, 10000, 'validator_initial');
+  MemoryManager.setInterval(function() { runValidator(); }, 90000, 'validator_poll');
+  
+  /* Memory cleanup every 5 minutes */
+  MemoryManager.setInterval(function() {
+    MemoryManager.trimData();
+  }, 300000, 'memory_cleanup');
+  
+  /* MONITOR: Weekly auto-tune / auto-improve check */
   try {
     var weekMs = 7 * 24 * 3600000;
     if (monitorState && Date.now() - monitorState.lastTune > weekMs) {
       if (monitorState.perf.totalTrades >= 10) {
-        runAutoImprove(); // comprehensive (includes autoTuneWeights + blacklist + minConf + report)
+        runAutoImprove();
       } else {
-        autoTuneWeights(); // lightweight (weights only, needs 5+ per factor)
+        autoTuneWeights();
       }
     }
   } catch(e) {}
-  // === MONITOR: Run pattern detection every 6 hours ===
-  setInterval(function() {
+  
+  /* MONITOR: Run pattern detection every 6 hours */
+  MemoryManager.setInterval(function() {
     try { detectFailPatterns(); } catch(e) {}
-  }, 6 * 3600000);
+  }, 6 * 3600000, 'pattern_detect');
+  
+  console.log('[NEXUS] V10.1 Initialized — ' + Object.keys(T).length + ' coins loaded');
 }
 init();

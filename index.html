@@ -178,6 +178,56 @@ body::before{content:'';position:fixed;top:-30%;right:-20%;width:70%;height:70%;
 .sc-coin-chip{display:flex;justify-content:space-between;align-items:center;padding:7px 10px;background:var(--bg2);border-radius:8px;cursor:pointer}
 .sc-coin-chip:active{background:rgba(30,40,60,.5)}
 .sc-declining{opacity:.55}
+/* ═══ SCANNER EMPTY STATE ═══ */
+.sc-empty{text-align:center;padding:30px 16px;background:var(--glass);backdrop-filter:var(--gb);border:1px solid var(--bdr);border-radius:16px;margin:10px 0}
+.sc-empty-ic{font-size:40px;margin-bottom:10px;filter:grayscale(.3)}
+.sc-empty-title{font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0);margin-bottom:6px}
+.sc-empty-sub{font-size:11px;color:var(--t2);line-height:1.6;max-width:280px;margin:0 auto}
+.sc-empty-retry{margin-top:12px}
+.sc-empty-retry .rfr{font-size:11px;padding:8px 20px}
+.sc-empty-stats{display:flex;justify-content:center;gap:16px;margin-top:12px;font-size:9px;color:var(--t3);font-family:var(--fm)}
+/* ═══ SCANNER ENTER BUTTON ═══ */
+.sc-btn-enter{background:var(--nd)!important;border-color:rgba(0,255,136,.2)!important;color:var(--up)!important}
+.sc-btn-enter:active{background:rgba(0,255,136,.15)!important}
+/* ═══ SCANNER REASON ICON ═══ */
+.sc-reason-ic{font-size:14px;flex-shrink:0;width:22px;text-align:center}
+/* ═══ SCANNER DATA SOURCE BADGE ═══ */
+.sc-src{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:5px;font-size:8px;font-family:var(--fm);font-weight:700}
+.sc-src.online{background:rgba(0,255,136,.08);color:var(--up)}
+.sc-src.offline{background:rgba(255,184,0,.08);color:var(--warn)}
+.sc-src.dead{background:rgba(255,56,96,.08);color:var(--dn)}
+/* ═══ SCANNER SUMMARY BAR ═══ */
+.sc-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:10px}
+.sc-sum-i{background:var(--glass);backdrop-filter:var(--gb);border:1px solid var(--bdr);border-radius:10px;padding:8px 6px;text-align:center}
+.sc-sum-v{font-family:var(--fm);font-size:16px;font-weight:800;color:var(--t0)}
+.sc-sum-l{font-size:8px;color:var(--t3);margin-top:2px}
+/* ═══ SCANNER LOADING PULSE ═══ */
+.sc-pulse{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;font-size:11px;color:var(--neon);font-family:var(--fm);font-weight:600}
+.sc-pulse::before{content:'';width:8px;height:8px;background:var(--neon);border-radius:50%;animation:pls 1.5s infinite}
+/* ═══ SCANNER CARD CHECKS GRID ═══ */
+.sc-checks-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:3px;margin:6px 0}
+.sc-chk-i{text-align:center;padding:3px 2px;border-radius:5px;font-size:7px;font-family:var(--fm);font-weight:700}
+.sc-chk-i.pass{background:var(--ud);color:var(--up)}
+.sc-chk-i.fail{background:rgba(56,72,96,.15);color:var(--t3)}
+/* ═══ SCANNER ENHANCED STYLES v2 ═══ */
+.sc-empty{text-align:center;padding:30px 20px;background:var(--glass);backdrop-filter:var(--gb);border:1px solid var(--bdr);border-radius:16px;margin:10px 0}
+.sc-empty-ic{font-size:42px;margin-bottom:12px;filter:grayscale(.3)}
+.sc-empty-title{font-size:14px;font-weight:800;color:var(--t0);margin-bottom:6px;font-family:var(--fd)}
+.sc-empty-sub{font-size:11px;color:var(--t2);line-height:1.6;max-width:280px;margin:0 auto}
+.sc-empty-retry{margin-top:14px}
+.sc-empty-stats{display:flex;justify-content:center;gap:16px;margin-top:12px;font-size:9px;font-family:var(--fm);color:var(--t3)}
+.sc-btn-enter{background:linear-gradient(135deg,rgba(0,255,136,.12),rgba(0,255,136,.04));color:var(--up);border-color:rgba(0,255,136,.2)}
+.sc-btn-enter:active{background:rgba(0,255,136,.2)}
+.sc-reason-ic{width:22px;height:22px;border-radius:6px;background:var(--bg2);display:grid;place-items:center;font-size:12px;flex-shrink:0}
+.scan-card{transition:transform .15s,box-shadow .3s}
+.scan-card:hover{box-shadow:0 4px 20px rgba(0,255,136,.06)}
+[data-theme="light"] .sc-empty{background:rgba(255,255,255,.8)}
+[data-theme="light"] .sc-btn-enter{background:rgba(5,150,105,.08);color:var(--up);border-color:rgba(5,150,105,.15)}
+/* Scanner data source badge */
+.sc-src-badge{display:inline-flex;align-items:center;gap:3px;padding:2px 6px;border-radius:4px;font-size:8px;font-family:var(--fm);font-weight:700}
+.sc-src-badge.live{background:var(--ud);color:var(--up)}
+.sc-src-badge.direct{background:var(--bd);color:var(--blue)}
+.sc-src-badge.offline{background:var(--dd);color:var(--dn)}
 /* ═══ MARKET REPORT v2.0 ═══ */
 /* ═══ MARKET CHARTS v2 ═══ */
 .mkt-tabs{display:flex;gap:6px;padding:8px 0;margin-bottom:8px}
@@ -661,6 +711,12 @@ canvas{width:100%!important;border-radius:4px}
 <!-- 📡 SCANNER -->
 <div class="pg" id="pg-scan">
 <div class="sec"><span class="sec-t">📡 NEXUS SCANNER PRO</span></div>
+<!-- Scanner summary stats -->
+<div class="sc-summary" id="scanSummary">
+<div class="sc-sum-i"><div class="sc-sum-v" id="scanCoinCount">--</div><div class="sc-sum-l" data-t="scan_coins_loaded">عملات</div></div>
+<div class="sc-sum-i"><div class="sc-sum-v" id="scanSigCount" style="color:var(--up)">--</div><div class="sc-sum-l" data-t="scan_signals">إشارات</div></div>
+<div class="sc-sum-i"><div class="sc-sum-v" id="scanSrcBadge">--</div><div class="sc-sum-l" data-t="scan_source">المصدر</div></div>
+</div>
 <div class="big-tabs">
 <div class="big-tab t-gold act" onclick="scanTab(0,this)"><div class="bt-ic">📊</div><span data-t="scan_trade">صفقات مضاربة</span></div>
 <div class="big-tab t-red" onclick="scanTab(1,this)"><div class="bt-ic">🔥</div><span data-t="scan_trend">ترند القطاعات</span></div>

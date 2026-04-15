@@ -678,7 +678,20 @@ function t(k){return TR[k]?TR[k][lang]:(k||'')}
 function fmt(n){if(n>=1e9)return'$'+(n/1e9).toFixed(1)+'B';if(n>=1e6)return'$'+(n/1e6).toFixed(1)+'M';if(n>=1e3)return'$'+(n/1e3).toFixed(1)+'K';return'$'+n.toFixed(0)}
 function fP(p){if(!p||isNaN(p))return'$0';if(p>=1e3)return'$'+p.toLocaleString('en',{maximumFractionDigits:2});if(p>=1)return'$'+p.toFixed(2);if(p>=.01)return'$'+p.toFixed(4);return'$'+p.toFixed(6)}
 function safeC(c){return(c&&!isNaN(c))?c:0} /* NaN-safe change % */
-async function fj(u){try{var c=new AbortController();var tm=setTimeout(function(){c.abort()},8000);var t0=Date.now();var r=await fetch(u,{signal:c.signal});clearTimeout(tm);connMetrics.lastLatency=Date.now()-t0;if(!r.ok){connMetrics.apiFail++;throw 0}connMetrics.apiOk++;return r.json()}catch(e){connMetrics.apiFail++;return null}}
+var apiCooldown={until:0,reason:''};
+async function fj(u){
+  if(Date.now()<apiCooldown.until)return null;
+  try{
+    var c=new AbortController();var tm=setTimeout(function(){c.abort()},8000);
+    var t0=Date.now();var r=await fetch(u,{signal:c.signal});clearTimeout(tm);
+    connMetrics.lastLatency=Date.now()-t0;
+    if(r.status===429){apiCooldown.until=Date.now()+60000;apiCooldown.reason='429 Rate Limited';connMetrics.apiFail++;return null}
+    if(r.status===418){apiCooldown.until=Date.now()+300000;apiCooldown.reason='418 IP Banned';connMetrics.apiFail++;return null}
+    if(r.status===403){apiCooldown.until=Date.now()+600000;apiCooldown.reason='403 Forbidden';connMetrics.apiFail++;return null}
+    if(!r.ok){connMetrics.apiFail++;return null}
+    connMetrics.apiOk++;return r.json()
+  }catch(e){connMetrics.apiFail++;return null}
+}
 function calcRSI(c,p){p=p||14;if(c.length<p+1)return 50;var g=0,l=0;for(var i=c.length-p;i<c.length;i++){var d=c[i]-c[i-1];if(d>0)g+=d;else l+=Math.abs(d)}return 100-100/(1+g/Math.max(l,.001))}
 function calcMACD(c){if(c.length<26)return{h:0,signal:0,cross:'none'};var ema=function(d,p){var k=2/(p+1),e=d[0];for(var i=1;i<d.length;i++)e=d[i]*k+e*(1-k);return e};var macdLine=ema(c.slice(-12),12)-ema(c,26);var macdHist=[];for(var i=26;i<=c.length;i++){macdHist.push(ema(c.slice(i-12,i),12)-ema(c.slice(0,i),26))}var signal=macdHist.length>=9?ema(macdHist.slice(-9),9):macdLine;var prev=macdHist.length>=2?macdHist[macdHist.length-2]:0;var cross=macdLine>signal&&prev<=signal?'bull':macdLine<signal&&prev>=signal?'bear':'none';return{h:macdLine,signal:signal,cross:cross}}
 function calcEMA(data,period){if(!data||data.length<period)return data&&data.length?data[data.length-1]:0;var k=2/(period+1);var ema=data.slice(0,period).reduce(function(a,b){return a+b},0)/period;for(var i=period;i<data.length;i++){ema=data[i]*k+ema*(1-k)}return ema}
@@ -1286,14 +1299,17 @@ async function fetchCoinbasePrices(){
   var coins=['BTC','ETH','SOL','XRP','DOGE','ADA','AVAX','LINK','DOT',
     'MATIC','UNI','ATOM','LTC','NEAR','APT','ARB','OP','SUI','SEI',
     'INJ','TIA','FIL','HBAR','ICP','PEPE','WIF','STX','IMX','FTM','AAVE'];
-  var proms=coins.map(function(s){
-    return fj(CB+'/prices/'+s+'-USD/spot').then(function(d){
-      if(d&&d.data&&d.data.amount){
-        CBP[s]=+d.data.amount;
-      }
-    }).catch(function(){})
-  });
-  try{await Promise.all(proms)}catch(e){}
+  var BATCH=6;
+  for(var i=0;i<coins.length;i+=BATCH){
+    var batch=coins.slice(i,i+BATCH);
+    var proms=batch.map(function(s){
+      return fj(CB+'/prices/'+s+'-USD/spot').then(function(d){
+        if(d&&d.data&&d.data.amount)CBP[s]=+d.data.amount;
+      }).catch(function(){})
+    });
+    try{await Promise.all(proms)}catch(e){}
+    if(i+BATCH<coins.length)await new Promise(function(r){setTimeout(r,200)});
+  }
   cbCache.t=Date.now();
 }
 
@@ -2795,7 +2811,16 @@ function renderMonPanel(){
   el.innerHTML=h;
 }
 /* DASHBOARD */
+var lastFullLoad=0;var LOAD_COOLDOWN=30000;
 async function loadDash(){
+  if(Date.now()-lastFullLoad<LOAD_COOLDOWN&&Object.keys(T).length>100){
+    try{renderTopCoins()}catch(e){}
+    try{renderTop3()}catch(e){}
+    try{updateQACards()}catch(e){}
+    try{renderAcc('accCard')}catch(e){}
+    return;
+  }
+  lastFullLoad=Date.now();
   try{ await loadTk(); }catch(e){ console.error('loadTk:',e); }
   try{ fetchBinanceAdvanced(); }catch(e){} /* non-blocking — data loads in background */
   try{ fetchCoinbasePrices(); }catch(e){} /* Coinbase — direct price fetch */

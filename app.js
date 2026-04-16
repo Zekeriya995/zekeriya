@@ -2811,15 +2811,16 @@ function renderMonPanel(){
   el.innerHTML=h;
 }
 /* DASHBOARD */
-var lastFullLoad=0;var LOAD_COOLDOWN=30000;
+var lastFullLoad=0;var LOAD_COOLDOWN=15000;var _forceLoad=false;
 async function loadDash(){
-  if(Date.now()-lastFullLoad<LOAD_COOLDOWN&&Object.keys(T).length>100){
+  if(!_forceLoad&&Date.now()-lastFullLoad<LOAD_COOLDOWN&&Object.keys(T).length>100){
     try{renderTopCoins()}catch(e){}
     try{renderTop3()}catch(e){}
     try{updateQACards()}catch(e){}
     try{renderAcc('accCard')}catch(e){}
     return;
   }
+  _forceLoad=false;
   lastFullLoad=Date.now();
   try{ await loadTk(); }catch(e){ console.error('loadTk:',e); }
   try{ fetchBinanceAdvanced(); }catch(e){} /* non-blocking — data loads in background */

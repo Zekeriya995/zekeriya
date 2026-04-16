@@ -1,4 +1,4 @@
-var CACHE_NAME='nexus-v10-v3';
+var CACHE_NAME='nexus-v10-v4-final';
 var ASSETS=[
   './',
   './index.html',
@@ -32,7 +32,7 @@ self.addEventListener('fetch',function(e){
   var url=e.request.url;
 
   /* API calls — network only, never cache */
-  if(url.includes('/api/')||url.includes('api.binance')||url.includes('fapi.binance')||url.includes('api.bybit')||url.includes('api.coingecko')||url.includes('alternative.me')||url.includes('llama.fi')||url.includes('tokenomist')||url.includes('cryptocompare')){
+  if(url.includes('/api/')||url.includes('api.binance')||url.includes('fapi.binance')||url.includes('api.bybit')||url.includes('api.coingecko')||url.includes('api.coinbase')||url.includes('alternative.me')||url.includes('llama.fi')||url.includes('tokenomist')||url.includes('cryptocompare')||url.includes('mempool.space')){
     e.respondWith(fetch(e.request).catch(function(){return new Response(JSON.stringify({error:'offline'}),{headers:{'Content-Type':'application/json'}})}));
     return;
   }

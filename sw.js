@@ -1,4 +1,4 @@
-var CACHE_NAME='nexus-v10-v4-final';
+var CACHE_NAME='nexus-v10-v5-supervisor';
 var ASSETS=[
   './',
   './index.html',

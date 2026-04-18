@@ -144,8 +144,20 @@ if (!monitorState || monitorState.v !== MONITOR_VERSION) {
 var factorLog = [];
 try { factorLog = JSON.parse(localStorage.getItem('nxFactorLog') || '[]'); } catch(e) { factorLog = []; }
 
-function saveMonitor() {
-  try { localStorage.setItem('nxMonitor', JSON.stringify(monitorState)); } catch(e) {}
+var _saveMonitorTimer=null;var _saveMonitorPending=false;
+function _saveMonitorNow(){
+  _saveMonitorPending=false;
+  try{localStorage.setItem('nxMonitor',JSON.stringify(monitorState))}catch(e){}
+}
+function saveMonitor(){
+  _saveMonitorPending=true;
+  if(_saveMonitorTimer)clearTimeout(_saveMonitorTimer);
+  _saveMonitorTimer=setTimeout(_saveMonitorNow,2000);
+}
+/* Flush pending save before page unload */
+if(typeof window!=='undefined'){
+  window.addEventListener('beforeunload',function(){if(_saveMonitorPending)_saveMonitorNow()});
+  window.addEventListener('pagehide',function(){if(_saveMonitorPending)_saveMonitorNow()});
 }
 function saveFactorLog() {
   if (factorLog.length > 500) factorLog = factorLog.slice(-500);
@@ -415,7 +427,11 @@ function processTradeOutcome(trade) {
     });
   }
 
-  var confBucket = Math.floor(trade.confAtEntry / 10) * 10;
+  /* P28: Clamp to same [0,90] range as getCalibratedConf read side, so write
+     and read buckets match. Previously, trades with raw score > 100 went to
+     buckets like "110-120" that the reader never consulted. */
+  var clampedConf = Math.max(0, Math.min(100, trade.confAtEntry || 0));
+  var confBucket = Math.min(90, Math.floor(clampedConf / 10) * 10);
   var bucketKey = confBucket + '-' + (confBucket + 10);
   if (!monitorState.confCalib[bucketKey]) {
     monitorState.confCalib[bucketKey] = {wins: 0, total: 0, realRate: 0};
@@ -586,14 +602,8 @@ function autoTuneWeights() {
     }
   });
 
-  var overallRate = monitorState.perf.overallRate;
-  if (overallRate < 40 && monitorState.minConf < 80) {
-    monitorState.minConf = Math.min(80, monitorState.minConf + 5);
-  } else if (overallRate < 55 && monitorState.minConf < 75) {
-    monitorState.minConf = Math.min(75, monitorState.minConf + 3);
-  } else if (overallRate > 70 && monitorState.minConf > 60) {
-    monitorState.minConf = Math.max(60, monitorState.minConf - 2);
-  }
+  /* minConf tuning moved to runAutoImprove() to avoid double-adjustment.
+     autoTuneWeights now only adjusts factor weights. */
 
   monitorState.perf.bestFactor = bestKey;
   monitorState.perf.worstFactor = worstKey;
@@ -654,15 +664,17 @@ function autoTuneWeights() {
   return {best: bestKey, bestRate: bestRate, worst: worstKey, worstRate: worstRate};
 }
 
-/* Calibrate displayed confidence based on actual outcomes */
+/* Calibrate displayed confidence based on actual outcomes.
+   Clamp input to [0,100] since some callers pass raw scanner scores >100. */
 function getCalibratedConf(rawConf) {
-  var bucket = Math.floor(rawConf / 10) * 10;
+  var clamped = Math.max(0, Math.min(100, rawConf || 0));
+  var bucket = Math.min(90, Math.floor(clamped / 10) * 10);
   var key = bucket + '-' + (bucket + 10);
-  var cb = monitorState.confCalib[key];
+  var cb = monitorState && monitorState.confCalib ? monitorState.confCalib[key] : null;
   if (cb && cb.total >= 5) {
     return cb.realRate;
   }
-  return rawConf;
+  return clamped;
 }
 
 /* Check if a signal matches any known failure pattern */
@@ -759,13 +771,13 @@ function signalQualityGate(sym, type, score) {
   results.push({name: lang === 'ar' ? 'السوق آمن' : 'Market safe', pass: g3, detail: mkt.level});
   if (!g3) pass = false;
 
-  /* Gate 4 — Blacklist (FIXED: require 5+ trades AND <25% win rate) */
+  /* Gate 4 — Blacklist: only block after 5+ trades AND <25% win rate.
+     The legacy monitorState.coinBlacklist (populated by runAutoImprove with a
+     looser 3-trade/30% threshold) is intentionally NOT consulted here. */
   var g4 = true;
   var coinStat = monitorState && monitorState.coinStats ? monitorState.coinStats[sym] : null;
   if (coinStat && coinStat.total >= 5 && coinStat.rate < 25) {
     g4 = false;
-  } else if (isCoinBlacklisted(sym) && coinStat && coinStat.total < 5) {
-    g4 = true;
   }
   results.push({name: lang === 'ar' ? 'عملة غير محظورة' : 'Not blacklisted', pass: g4});
   if (!g4) pass = false;
@@ -795,7 +807,7 @@ function signalQualityGate(sym, type, score) {
     if (hasStrongAlternative) g6 = true;
   }
   results.push({name: lang === 'ar' ? 'دعم حيتان' : 'Whale support', pass: g6});
-  if (!g6 && type !== 'fast') pass = false;
+  if (!g6) pass = false;  /* g6 already true for type==='fast' */
 
   /* Gate 7 — Max open trades (UNCHANGED) */
   var openCount = activeTrades ? activeTrades.filter(function(x){return x.status==='OPEN'}).length : 0;
@@ -897,8 +909,7 @@ function runAutoImprove() {
   return report;
 }
 
-/* ═══ ADMIN PANEL RENDERER ═══ */
-var adminTapCount=0;var adminTapTimer=null;
+/* ═══ MONITOR PANEL SHORTCUT (logo tap → monitor page — no admin auth) ═══ */
 function openAdminPanel(){try{openQA('monitor')}catch(e){}}
 /* ═══ END MONITOR ═══ */
 /* CACHE */
@@ -908,6 +919,13 @@ const TR={nav_home:{ar:'الرئيسية',en:'Home'},nav_scan:{ar:'السكان�
 function t(k){return TR[k]?TR[k][lang]:(k||'')}
 function fmt(n){if(n>=1e9)return'$'+(n/1e9).toFixed(1)+'B';if(n>=1e6)return'$'+(n/1e6).toFixed(1)+'M';if(n>=1e3)return'$'+(n/1e3).toFixed(1)+'K';return'$'+n.toFixed(0)}
 function fP(p){if(!p||isNaN(p))return'$0';if(p>=1e3)return'$'+p.toLocaleString('en',{maximumFractionDigits:2});if(p>=1)return'$'+p.toFixed(2);if(p>=.01)return'$'+p.toFixed(4);return'$'+p.toFixed(6)}
+/* HTML escape — wrap API-derived strings that enter innerHTML */
+function esc(s){
+  if(s==null)return'';
+  return String(s).replace(/[&<>"']/g,function(c){
+    return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+  });
+}
 function safeC(c){return(c&&!isNaN(c))?c:0} /* NaN-safe change % */
 var apiCooldown={until:0,reason:''};
 async function fj(u){
@@ -928,19 +946,46 @@ function calcMACD(c){if(c.length<26)return{h:0,signal:0,cross:'none'};var ema=fu
 function calcEMA(data,period){if(!data||data.length<period)return data&&data.length?data[data.length-1]:0;var k=2/(period+1);var ema=data.slice(0,period).reduce(function(a,b){return a+b},0)/period;for(var i=period;i<data.length;i++){ema=data[i]*k+ema*(1-k)}return ema}
 function timeAgo(ts){var d=Date.now()-ts,m=Math.floor(d/60000),h=Math.floor(d/3600000);if(m<2)return{text:lang==='ar'?'🆕 الآن':'🆕 Now',cls:'fresh'};if(m<60)return{text:lang==='ar'?'منذ '+m+' دقيقة':m+'m ago',cls:'fresh'};return{text:lang==='ar'?'منذ '+h+' ساعة':h+'h ago',cls:h<6?'':'old'}}
 function timeBadge(ts){var a=timeAgo(ts);return'<span class="time-badge '+a.cls+'">⏱ '+a.text+'</span>'}
-function recSig(sym,type,price){var k=sym+'_'+type;var now=Date.now();var existing=sigHist[k];if(typeof existing==='number'){existing={firstSeen:existing,lastSeen:existing,priceAtDetection:price||0,count:1};sigHist[k]=existing}if(!existing||(now-existing.lastSeen>3600000)){sigHist[k]={firstSeen:now,lastSeen:now,priceAtDetection:price||0,count:1}}else{existing.lastSeen=now;existing.count++}try{localStorage.setItem('nxsig10',JSON.stringify(sigHist))}catch(e){}return sigHist[k]}
+function recSig(sym,type,price){
+  var k=sym+'_'+type;var now=Date.now();var existing=sigHist[k];
+  /* Migrate legacy number entries: preserve firstSeen, set lastSeen=now so
+     the freshness check below doesn't immediately overwrite the migration. */
+  if(typeof existing==='number'){
+    existing={firstSeen:existing,lastSeen:now,priceAtDetection:price||0,count:1};
+    sigHist[k]=existing;
+  }
+  if(!existing||(now-existing.lastSeen>3600000)){
+    sigHist[k]={firstSeen:now,lastSeen:now,priceAtDetection:price||0,count:1};
+  }else{
+    existing.lastSeen=now;existing.count++;
+  }
+  try{localStorage.setItem('nxsig10',JSON.stringify(sigHist))}catch(e){}
+  return sigHist[k];
+}
 function getSigTime(sym,type){var v=sigHist[sym+'_'+type];if(!v)return Date.now();if(typeof v==='number')return v;return v.firstSeen||Date.now()}
 /* NOTIFICATION HISTORY */
 var notifHist=[];try{notifHist=JSON.parse(localStorage.getItem('nxnh10')||'[]')}catch(e){}
 function addNotifHist(icon,sym,type,body){notifHist.unshift({icon:icon,sym:sym,type:type,body:body,time:Date.now()});if(notifHist.length>50)notifHist=notifHist.slice(0,50);try{localStorage.setItem('nxnh10',JSON.stringify(notifHist))}catch(e){}}
-function renderNotifHist(){var el=document.getElementById('notifHistList');if(!el)return;el.innerHTML=notifHist.length?notifHist.slice(0,20).map(function(n){return'<div class="al-i" style="cursor:pointer" onclick="openCoin(\''+n.sym+'\')"><div class="al-l"><div style="font-size:18px">'+n.icon+'</div><div><div style="font-weight:600;font-size:11px">'+n.sym+' — '+n.type+'</div><div style="font-size:8px;color:var(--t3)">'+n.body+'</div></div></div><div style="font-size:8px;font-family:var(--fm);color:var(--t2)">'+timeBadge(n.time)+'</div></div>'}).join(''):'<div class="empty"><div class="empty-ic">🔔</div><div class="empty-tx">'+(lang==='ar'?'لا إشعارات':'No notifications')+'</div></div>'}
+function renderNotifHist(){var el=document.getElementById('notifHistList');if(!el)return;el.innerHTML=notifHist.length?notifHist.slice(0,20).map(function(n){return'<div class="al-i" style="cursor:pointer" onclick="openCoin(\''+esc(n.sym)+'\')"><div class="al-l"><div style="font-size:18px">'+esc(n.icon)+'</div><div><div style="font-weight:600;font-size:11px">'+esc(n.sym)+' — '+esc(n.type)+'</div><div style="font-size:8px;color:var(--t3)">'+esc(n.body)+'</div></div></div><div style="font-size:8px;font-family:var(--fm);color:var(--t2)">'+timeBadge(n.time)+'</div></div>'}).join(''):'<div class="empty"><div class="empty-ic">🔔</div><div class="empty-tx">'+(lang==='ar'?'لا إشعارات':'No notifications')+'</div></div>'}
 /* WATCHLIST ALERTS — check every update */
 function checkWatchlistAlerts(){var wl=[];try{wl=JSON.parse(localStorage.getItem('nxwl10')||'[]')}catch(e){};wl.forEach(function(sym){var d=T[sym];if(!d)return;if(d.c>=3){var k='wl_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};playSound('whale');showPopup('👁',sym+' — '+(lang==='ar'?'عملة مراقبة تحركت!':'Watchlist coin moved!'),'+'+d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('👁',sym,'Watchlist','+'+d.c.toFixed(1)+'%')}}if(d.c<=-3){var k='wl_dn_'+sym+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};playSound('whale');showPopup('⚠️',sym+' — '+(lang==='ar'?'عملة مراقبة هبطت!':'Watchlist coin dropped!'),d.c.toFixed(1)+'% | '+fP(d.p));addNotifHist('⚠️',sym,'Watchlist Drop',d.c.toFixed(1)+'%')}}})}/* SOUND NOTIFICATIONS — respects user tone preference */
 function playSound(type){if(!soundEnabled||soundPref==='silent')return;previewTone(soundPref)}
 /* 📲 TELEGRAM — SECURE PROXY (no token exposed!) */
-var TG_PROXY='https://your-nexus-proxy.workers.dev/notify';
-var tgSent={};
-function sendTG(html){try{fetch(TG_PROXY,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:html})})}catch(e){}}
+var TG_PROXY = PROXY + '/notify';
+var tgSent = {};
+if (/your-nexus-proxy|placeholder|example\.com/i.test(TG_PROXY)) {
+  console.warn('[TG] TG_PROXY looks like a placeholder — Telegram notifications disabled:', TG_PROXY);
+}
+function sendTG(html) {
+  if (/your-nexus-proxy|placeholder|example\.com/i.test(TG_PROXY)) return;
+  try {
+    fetch(TG_PROXY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: html })
+    }).catch(function(e){ console.warn('[TG] send failed:', e); });
+  } catch(e) { console.warn('[TG] send threw:', e); }
+}
 function tgNotify(sym,type,data){
   /* Dedup: same coin+type per hour */
   var k=sym+'_'+type+'_'+new Date().getHours();if(tgSent[k])return;tgSent[k]=true;
@@ -1323,13 +1368,28 @@ var onChainData={};
 async function fetchOnChainBTC(){try{var data=await fj('https://mempool.space/api/mempool/recent');if(!data||!data.length)return;var whale=data.filter(function(tx){return tx.fee>500000});onChainData.BTC={count:whale.length,time:Date.now(),signal:whale.length>=3?'WHALE_RUSH':whale.length>=1?'MODERATE':'LOW'}}catch(e){}}
 /* ═══ 👛 FEATURE 3: WALLET TRACKING ═══ */
 var trackedWallets=[];try{trackedWallets=JSON.parse(localStorage.getItem('nxwallets')||'[]')}catch(e){}
-function addWallet(addr,label){if(trackedWallets.length>=20||trackedWallets.some(function(w){return w.address===addr}))return false;trackedWallets.push({address:addr,label:label||addr.slice(0,10),chain:'ethereum',lastBal:null,lastChk:0});try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){};return true}
+function addWallet(addr,label){
+  if(trackedWallets.length>=20)return false;
+  /* Whitelist address: 0x + 40 hex chars only (Ethereum address shape) */
+  var cleanAddr=String(addr||'').trim();
+  if(!/^0x[a-fA-F0-9]{40}$/.test(cleanAddr))return false;
+  if(trackedWallets.some(function(w){return w.address===cleanAddr}))return false;
+  /* Label: strip HTML-significant chars, cap at 30 chars */
+  var cleanLabel=String(label||'').replace(/[<>"'&]/g,'').slice(0,30)||cleanAddr.slice(0,10);
+  trackedWallets.push({address:cleanAddr,label:cleanLabel,chain:'ethereum',lastBal:null,lastChk:0});
+  try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){}
+  return true;
+}
 function rmWallet(i){trackedWallets.splice(i,1);try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){}}
 window.addWallet=addWallet;window.rmWallet=rmWallet;
-async function checkWallets(){for(var i=0;i<trackedWallets.length;i++){var w=trackedWallets[i];if(Date.now()-w.lastChk<60000)continue;try{var res=await fj('https://api.etherscan.io/api?module=account&action=balance&address='+w.address+'&tag=latest');if(res&&res.result){var bal=+res.result/1e18;if(w.lastBal!==null){var chg=bal-w.lastBal;var pct=w.lastBal>0?(chg/w.lastBal)*100:0;if(Math.abs(pct)>5){var ic=chg>0?'📥':'📤';showPopup(ic,w.label+(chg>0?' received':' sent'),Math.abs(chg).toFixed(2)+' ETH');addNotifHist(ic,w.label,'Wallet',pct.toFixed(1)+'%')}}w.lastBal=bal;w.lastChk=Date.now()}}catch(e){}await new Promise(function(r){setTimeout(r,6000)})}try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){}}
+async function checkWallets(){for(var i=0;i<trackedWallets.length;i++){var w=trackedWallets[i];if(Date.now()-w.lastChk<60000)continue;try{var res=await fj('https://api.etherscan.io/api?module=account&action=balance&address='+encodeURIComponent(w.address)+'&tag=latest');if(res&&res.result){var bal=+res.result/1e18;if(w.lastBal!==null){var chg=bal-w.lastBal;var pct=w.lastBal>0?(chg/w.lastBal)*100:0;if(Math.abs(pct)>5){var ic=chg>0?'📥':'📤';showPopup(ic,w.label+(chg>0?' received':' sent'),Math.abs(chg).toFixed(2)+' ETH');addNotifHist(ic,w.label,'Wallet',pct.toFixed(1)+'%')}}w.lastBal=bal;w.lastChk=Date.now()}}catch(e){}await new Promise(function(r){setTimeout(r,6000)})}try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){}}
 /* LOAD TICKERS — ALL 3 EXCHANGES */
 var _proxyAlive=true,_directFallbackRunning=false,_lastDirectFetch=0;
+var _loadTkRunning=false;
 async function loadTk(){
+  if(_loadTkRunning)return; /* prevent concurrent calls from stacking */
+  _loadTkRunning=true;
+  try{
   var all=await fj(PROXY+'/api/all');
   if(all){
     _proxyAlive=true;
@@ -1419,6 +1479,7 @@ async function loadTk(){
   var el=document.getElementById('tkrEl');if(el){var items=WL.filter(function(s){return T[s]}).slice(0,16);var h='';for(var r=0;r<2;r++)items.forEach(function(s){var d=T[s],up=d.c>=0;h+='<div class="tkr-i"><span class="tkr-sym">'+s+'</span><span style="font-family:var(--fm);font-size:9px;color:var(--t2)">'+fP(d.p)+'</span><div class="spark">'+mkSpark(s)+'</div><span class="tkr-c '+(up?'up':'dn')+'">'+(up?'+':'')+d.c.toFixed(1)+'%</span></div>'});el.innerHTML=h}
   /* FR panel shortcut */
   var pfrE=document.getElementById('pFR');if(pfrE&&FR.BTC)pfrE.textContent=(FR.BTC.rate>=0?'+':'')+FR.BTC.rate.toFixed(4)+'%';
+  }finally{_loadTkRunning=false}
 }
 async function loadFutures(){/* FR/OI/LS now loaded via PROXY in loadTk() */await loadTk()}
 
@@ -2000,7 +2061,9 @@ function saveTrades(){if(activeTrades.length>200)activeTrades=activeTrades.slice
 
 function closeTrade(trade,exitPrice,reason){
   trade.status='CLOSED';trade.exitPrice=exitPrice;trade.exitTime=Date.now();trade.exitReason=reason;
-  trade.finalPnl=((exitPrice-trade.entry)/trade.entry*100);trade.duration=Date.now()-trade.entryTime;
+  var rawPnl=((exitPrice-trade.entry)/trade.entry*100);
+  trade.finalPnl=(trade.type==='SHORT')?-rawPnl:rawPnl;
+  trade.duration=Date.now()-trade.entryTime;
   saveTrades();
   // === MONITOR HOOK: Process outcome ===
   try { processTradeOutcome(trade); } catch(e) {}
@@ -2016,18 +2079,29 @@ function closeTrade(trade,exitPrice,reason){
     +(lang==='ar'?'المدة':'Duration')+': '+durH+'h '+durM+'m\n'
     +'📍 NEXUS PRO v10')}
 
-/* Whale profit-taking detection */
+/* Whale profit-taking detection — uses a 10-min trailing confidence baseline,
+   not the last-seen value, to avoid noise from 10-second polls. */
 function detectWhaleProfitTaking(sym){
   var ww=whaleWaves[sym];if(!ww||!ww.engine)return{taking:false,signals:[]};
   var d=T[sym];if(!d)return{taking:false,signals:[]};
-  var sigs=[],isTaking=false;
+  var sigs=[],isTaking=false;var now=Date.now();
+  /* Maintain a bounded confidence history (last 20 min) */
+  if(!ww.confHist)ww.confHist=[];
+  ww.confHist.push({t:now,c:ww.engine.confidence});
+  var cutoff=now-20*60000;
+  ww.confHist=ww.confHist.filter(function(x){return x.t>=cutoff});
+  /* Find earliest sample at least 10 min old = baseline */
+  var baseline=null;
+  for(var _i=0;_i<ww.confHist.length;_i++){
+    if(now-ww.confHist[_i].t>=10*60000){baseline=ww.confHist[_i];break}
+  }
   var cvd=analyzeCVD(sym);
   if(cvd.divergence==='BEARISH'&&cvd.cvdTrend==='FALLING'){sigs.push(lang==='ar'?'🐋🩸 CVD انقلب — حيتان تبيع':'🐋🩸 CVD flipped — Whales selling');isTaking=true}
-  if(ww.engine.confidence<25&&ww.prevConf&&ww.prevConf>=50){sigs.push(lang==='ar'?'📉 ثقة نزلت '+ww.prevConf+'% → '+ww.engine.confidence+'%':'Confidence '+ww.prevConf+'% → '+ww.engine.confidence+'%');isTaking=true}
+  if(baseline&&ww.engine.confidence<25&&baseline.c>=50){sigs.push(lang==='ar'?'📉 ثقة نزلت '+baseline.c+'% → '+ww.engine.confidence+'%':'Confidence '+baseline.c+'% → '+ww.engine.confidence+'%');isTaking=true}
   if(ww.engine.layers&&ww.engine.layers.trades&&ww.engine.layers.trades.whaleSells>=2&&d.c>5){sigs.push(lang==='ar'?'💰 '+ww.engine.layers.trades.whaleSells+' صفقات بيع بعد +'+d.c.toFixed(1)+'%':ww.engine.layers.trades.whaleSells+' sells after +'+d.c.toFixed(1)+'%');isTaking=true}
   if(ww.engine.techniques&&ww.engine.techniques.oiDelta){var oiC=parseFloat(ww.engine.techniques.oiDelta.oiChange)||0;if(oiC<-5&&d.c>3){sigs.push(lang==='ar'?'📊 OI ينخفض '+oiC.toFixed(1)+'%':'OI dropping '+oiC.toFixed(1)+'%');isTaking=true}}
   var fr=FR[sym];if(fr&&fr.rate>0.08&&d.c>5){sigs.push(lang==='ar'?'⚠️ FR عالي '+fr.rate.toFixed(3)+'% بعد صعود':'High FR '+fr.rate.toFixed(3)+'% after pump');isTaking=true}
-  ww.prevConf=ww.engine.confidence;
+  ww.prevConf=ww.engine.confidence; /* kept for backward compat */
   return{taking:isTaking,signals:sigs}}
 
 function monitorTrades(){
@@ -2251,14 +2325,47 @@ function getTimeMultiplier(){
 
 /* 🧠 TECHNIQUE 9: Self-Learning */
 function wlRecordSignal(sym,conf,layers,price){
-  whaleLearning.preds.push({sym:sym,conf:conf,layers:Object.fromEntries(Object.entries(layers).map(function(e){return[e[0],{sc:e[1].score,sig:e[1].signal}]})),price:price,time:Date.now(),chk:false,hit:false});
-  if(whaleLearning.preds.length>300)whaleLearning.preds=whaleLearning.preds.slice(-300);
-  try{localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds))}catch(e){}}
+  whaleLearning.preds.push({
+    sym:sym,conf:conf,
+    layers:Object.fromEntries(Object.entries(layers).map(function(e){return[e[0],{sc:e[1].score,sig:e[1].signal}]})),
+    price:price,time:Date.now(),chk:false,hit:false
+  });
+  /* Separate caps: 200 verified + 100 pending = 300 total.
+     Prevents new signals from evicting pending predictions before verification. */
+  var verified=whaleLearning.preds.filter(function(p){return p.chk});
+  var pending=whaleLearning.preds.filter(function(p){return !p.chk});
+  if(verified.length>200)verified=verified.slice(-200);
+  if(pending.length>100)pending=pending.slice(-100);
+  whaleLearning.preds=verified.concat(pending);
+  try{localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds))}catch(e){}
+}
 function wlVerify(){
-  var ch=false;whaleLearning.preds.forEach(function(p){
-    if(!p.chk&&Date.now()-p.time>8*3600000){var cur=T[p.sym];if(cur){p.chk=true;p.hit=((cur.p-p.price)/p.price*100)>=2;ch=true;
-      Object.entries(p.layers).forEach(function(e){var k=e[0],l=e[1];if(l.sc>0){if(!whaleLearning.layerAcc[k])whaleLearning.layerAcc[k]={ok:0,t:0};whaleLearning.layerAcc[k].t++;if(p.hit)whaleLearning.layerAcc[k].ok++}})}}});
-  if(ch){try{localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds));localStorage.setItem('nxwlacc',JSON.stringify(whaleLearning.layerAcc))}catch(e){}}}
+  /* Iterate only unchecked predictions old enough — saves ~95% of work */
+  var ch=false;var cutoff=Date.now()-8*3600000;
+  for(var _wvi=0;_wvi<whaleLearning.preds.length;_wvi++){
+    var p=whaleLearning.preds[_wvi];
+    if(p.chk||p.time>cutoff)continue;
+    var cur=T[p.sym];if(!cur)continue;
+    p.chk=true;
+    p.hit=((cur.p-p.price)/p.price*100)>=2;
+    ch=true;
+    var _lents=Object.entries(p.layers);
+    for(var _wvj=0;_wvj<_lents.length;_wvj++){
+      var k=_lents[_wvj][0],l=_lents[_wvj][1];
+      if(l.sc>0){
+        if(!whaleLearning.layerAcc[k])whaleLearning.layerAcc[k]={ok:0,t:0};
+        whaleLearning.layerAcc[k].t++;
+        if(p.hit)whaleLearning.layerAcc[k].ok++;
+      }
+    }
+  }
+  if(ch){
+    try{
+      localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds));
+      localStorage.setItem('nxwlacc',JSON.stringify(whaleLearning.layerAcc));
+    }catch(e){}
+  }
+}
 function wlGetStats(){var c=whaleLearning.preds.filter(function(p){return p.chk});var h=c.filter(function(p){return p.hit});return{total:c.length,hits:h.length,rate:c.length>0?Math.round(h.length/c.length*100):0}}
 
 /* LAYER 1: Order Book — walls, spoofing, imbalance (15%) */
@@ -2925,7 +3032,10 @@ function renderHeatmap(){
 /* ⭐ FAVORITES */
 function addFav(){
   var inp=document.getElementById('favInp');if(!inp)return;
-  var sym=inp.value.toUpperCase().trim();if(!sym||favorites.indexOf(sym)!==-1)return;
+  /* Whitelist: uppercase A-Z and 0-9 only, max 10 chars (largest real ticker is ~6) */
+  var raw=inp.value.toUpperCase().trim();
+  var sym=raw.replace(/[^A-Z0-9]/g,'').slice(0,10);
+  if(!sym||favorites.indexOf(sym)!==-1)return;
   favorites.push(sym);try{localStorage.setItem('nxfav10',JSON.stringify(favorites))}catch(e){}
   inp.value='';renderFavs();updateQACards();
 }
@@ -2947,8 +3057,8 @@ function renderAlerts(){
   el.innerHTML=hist.slice(0,30).map(function(n){
     var age=Date.now()-n.time;var agoTxt=age<60000?'now':age<3600000?Math.floor(age/60000)+'m':age<86400000?Math.floor(age/3600000)+'h':Math.floor(age/86400000)+'d';
     return'<div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--glass);border:1px solid var(--bdr);border-radius:10px;margin-bottom:4px'+(age<300000?';border-color:rgba(0,255,136,.1)':'')+'">'
-      +'<span style="font-size:16px;min-width:24px;text-align:center">'+(n.icon||n.ic||'🔔')+'</span>'
-      +'<div style="flex:1"><div style="font-size:10px;color:var(--t0);font-weight:700">'+n.sym+' — '+n.type+'</div><div style="font-size:8px;color:var(--t3)">'+(n.body||n.detail||'')+'</div></div>'
+      +'<span style="font-size:16px;min-width:24px;text-align:center">'+esc(n.icon||n.ic||'🔔')+'</span>'
+      +'<div style="flex:1"><div style="font-size:10px;color:var(--t0);font-weight:700">'+esc(n.sym)+' — '+esc(n.type)+'</div><div style="font-size:8px;color:var(--t3)">'+esc(n.body||n.detail||'')+'</div></div>'
       +'<span style="font-family:var(--fm);font-size:8px;color:var(--t3);min-width:28px;text-align:left">'+agoTxt+'</span></div>';
   }).join('');
 }
@@ -3962,10 +4072,28 @@ function mktSignature(){
     +'</div>';
 }
 
-function buildStory(coin,data){var tpls=lang==='ar'?MKT_TPL:MKT_TPL_EN;var cat=data.ts>=4?'bull_strong':data.ts>=2?'bull_mild':data.ts<=-4?'bear_strong':data.ts<=-2?'bear_mild':'neutral';
-  var pool=tpls[cat];var tmpl=pool[Math.floor(Date.now()/3600000)%pool.length];
+function buildStory(coin,data){
+  var tpls=lang==='ar'?MKT_TPL:MKT_TPL_EN;
+  var cat=data.ts>=4?'bull_strong':data.ts>=2?'bull_mild':data.ts<=-4?'bear_strong':data.ts<=-2?'bear_mild':'neutral';
+  var pool=tpls[cat]||tpls.neutral;
+  var tmpl=pool[Math.floor(Date.now()/3600000)%pool.length];
   var cn=lang==='ar'?(coin==='BTC'?'البيتكوين':coin==='ETH'?'الإيثيريوم':coin==='SOL'?'سولانا':coin):coin;
-  return tmpl.replace('{coin}',cn).replace('{reason1}',data.reasons[0]||'').replace('{reason2}',data.reasons[1]||'').replace('{ema}',rP(data.ema20)).replace('{support}',rP(data.supp)).replace('{resistance}',rP(data.resist)).replace('{target}',rP(data.f618U)).replace('{entry}',rP(data.price*0.99)).replace('{stop}',rP(data.supp)).replace('{volStatus}',data.volT>1.3?(lang==='ar'?'قوي':'strong'):(lang==='ar'?'ضعيف':'weak')).replace('{warning}',data.warning||'')}
+  /* Safe replace: use function form so values containing $ or $1 aren't mangled */
+  var vars={
+    '{coin}':cn,
+    '{reason1}':data.reasons[0]||'',
+    '{reason2}':data.reasons[1]||'',
+    '{ema}':rP(data.ema20),
+    '{support}':rP(data.supp),
+    '{resistance}':rP(data.resist),
+    '{target}':rP(data.f618U),
+    '{entry}':rP(data.price*0.99),
+    '{stop}':rP(data.supp),
+    '{volStatus}':data.volT>1.3?(lang==='ar'?'قوي':'strong'):(lang==='ar'?'ضعيف':'weak'),
+    '{warning}':data.warning||''
+  };
+  return tmpl.replace(/\{(\w+)\}/g,function(m){return vars[m]!=null?String(vars[m]):m});
+}
 
 function addHourlyLog(msg){hourlyLog.push({time:Date.now(),txt:msg});if(hourlyLog.length>20)hourlyLog=hourlyLog.slice(-20);try{localStorage.setItem('nxHrLog',JSON.stringify(hourlyLog))}catch(e){}}
 
@@ -3986,11 +4114,111 @@ async function analyzeCoinRpt(sym){
   var avgVol=v4.slice(-10,-2).reduce(function(a,b){return a+b},0)/Math.max(1,v4.slice(-10,-2).length);var recVol=(v4[v4.length-1]+(v4[v4.length-2]||0))/2;var volT=avgVol>0?recVol/avgVol:1;
   var resist=Math.max.apply(null,h1d.length>=14?h1d.slice(-14):h4.slice(-20));var supp=Math.min.apply(null,l1d.length>=14?l1d.slice(-14):l4.slice(-20));
   var fRng=resist-supp;if(fRng===0)fRng=price*0.03;var f618U=price+fRng*0.618;var f100U=price+fRng;var f618D=price-fRng*0.618;
+
+  /* ═══ NEW: Gather 12 additional data sources ═══ */
+  var topTraders=null;
+  try{if(topTradersLS[sym]&&topTradersLS[sym].accounts&&topTradersLS[sym].accounts.length){
+    var tt=topTradersLS[sym];var ttLast=tt.accounts[tt.accounts.length-1];var ttFirst=tt.accounts[0];
+    topTraders={long:ttLast.long,short:ttLast.short,trend:ttLast.long>ttFirst.long?'up':'down',delta:+((ttLast.long-ttFirst.long)*100).toFixed(1)};
+  }}catch(e){}
+
+  var gLS=null;
+  try{if(globalLS[sym]&&globalLS[sym].length){var glL=globalLS[sym][globalLS[sym].length-1];gLS={long:glL.long,short:glL.short};}}catch(e){}
+
+  var cbPrem=null;
+  try{
+    if(sym==='BTC'&&typeof cbPremium!=='undefined'&&cbPremium.time&&cbPremium.BTC_pct!==undefined)cbPrem={pct:cbPremium.BTC_pct||0};
+    else if(sym==='ETH'&&typeof cbPremium!=='undefined'&&cbPremium.ETH_pct!==undefined)cbPrem={pct:cbPremium.ETH_pct||0};
+    else if(typeof CBP!=='undefined'&&CBP[sym]&&d.p>0)cbPrem={pct:((CBP[sym]-d.p)/d.p)*100};
+  }catch(e){}
+
+  var bfxMargin=null;
+  try{if(bitfinexMargin[sym]){bfxMargin={longPct:bitfinexMargin[sym].longPct,shortPct:bitfinexMargin[sym].shortPct,ratio:bitfinexMargin[sym].ratio||1};}}catch(e){}
+
+  var hlFunding=null;
+  try{if(hyperliquidData[sym]){hlFunding={rate:hyperliquidData[sym].funding||0,oi:hyperliquidData[sym].openInterest||0};}}catch(e){}
+
+  var frHist=null;
+  try{if(frHistory[sym]&&frHistory[sym].length){
+    var fh=frHistory[sym];var last10=fh.slice(-10);
+    var negCount=last10.filter(function(x){return x.rate<0}).length;
+    var avg8=fh.slice(-8).reduce(function(a,x){return a+x.rate},0)/Math.min(8,fh.length);
+    frHist={data:fh,last:fh[fh.length-1].rate,negCount:negCount,totalCount:last10.length,avg8:avg8};
+  }}catch(e){}
+
+  var oiHist=null;
+  try{if(oiHistory[sym]&&oiHistory[sym].length>=4){
+    var oh=oiHistory[sym];var oiGrowth=oh[0].val>0?((oh[oh.length-1].val-oh[0].val)/oh[0].val*100):0;
+    oiHist={data:oh,growth:oiGrowth,current:oh[oh.length-1].val};
+  }}catch(e){}
+
+  var taker=null;
+  try{if(takerData[sym]){taker={ratio:takerData[sym].ratio||1,trend:takerData[sym].trend||'FLAT',avg:takerData[sym].avg||1};}}catch(e){}
+
+  var depth=null;
+  try{if(depthSnapshots[sym])depth=depthSnapshots[sym];}catch(e){}
+
+  var iceberg=null;
+  try{iceberg=detectIceberg(sym);}catch(e){iceberg=null;}
+
+  var vpinData=null;
+  try{vpinData=calcVPIN(sym);}catch(e){vpinData=null;}
+
+  var whalePnL=null;
+  try{whalePnL=calcWhalePnL(sym);}catch(e){whalePnL=null;}
+
+  var flowRate=0;
+  try{flowRate=calcFlowRate(sym)||0;}catch(e){flowRate=0;}
+
+  var predArrow=null;
+  try{predArrow=getPredArrow(sym);}catch(e){predArrow=null;}
+
+  var absorption=null;
+  try{absorption=detectAbsorption(sym);}catch(e){absorption=null;}
+
+  var stableFlow=null;
+  try{if(stablecoinData&&stablecoinData['USDT']){stableFlow={usdt:stablecoinData['USDT'].supply||0,usdc:stablecoinData['USDC']?stablecoinData['USDC'].supply:0};}}catch(e){}
+
+  var unlocks=[];
+  try{if(tokenUnlocks&&tokenUnlocks.length){
+    var _now=Date.now();var _in7=_now+7*86400000;
+    unlocks=tokenUnlocks.filter(function(u){var dt=new Date(u.date).getTime();return dt>=_now&&dt<=_in7}).slice(0,3);
+  }}catch(e){}
+
+  var newsScore=null;
+  try{if(newsSentiment&&(newsSentiment.time||newsSentiment.score!==undefined)){
+    if(newsSentiment.score!==undefined)newsScore={score:newsSentiment.score,total:newsSentiment.total||0};
+    else{var _tot=(newsSentiment.pos||0)+(newsSentiment.neg||0)+(newsSentiment.neu||0);
+      if(_tot>0)newsScore={score:Math.round((newsSentiment.pos||0)/_tot*100),total:_tot};}
+  }}catch(e){}
+
+  var onChain=null;
+  try{if(sym==='BTC'&&typeof btcOnChain!=='undefined'&&btcOnChain.time)onChain={hashRate:btcOnChain.hashRate||0,difficulty:btcOnChain.difficulty||0};}catch(e){}
+
+  var ethBtcRatio=null,btcChange=null,ethChange=null;
+  try{if(T.BTC&&T.ETH){ethBtcRatio=T.ETH.p/T.BTC.p;btcChange=T.BTC.c;ethChange=T.ETH.c;}}catch(e){}
+
+  /* ═══ Trend score (original 10 + 12 new) ═══ */
   var ts=0;if(price>ema20)ts+=2;else ts-=2;if(price>ema50)ts+=2;else ts-=2;if(ema20>ema50)ts++;else ts--;if(macd.h>0)ts+=2;else ts-=2;if(macd.cross==='bull')ts+=2;if(macd.cross==='bear')ts-=2;if(rsi>55)ts++;else if(rsi<45)ts--;if(volT>1.3)ts++;
   var fr=FR[sym];if(fr){if(fr.rate<0)ts++;if(fr.rate>0.05)ts--}
   var ls=LS[sym];if(ls){if(ls.ratio>1.5)ts--;if(ls.ratio<0.8)ts++}
   var ww=whaleWaves[sym];var wConf=ww&&ww.engine?ww.engine.confidence:0;if(wConf>=50)ts++;
   var cvd=analyzeCVD(sym);
+
+  /* 12 NEW trend score inputs */
+  try{if(topTraders){if(topTraders.long>0.58)ts+=2;else if(topTraders.long>0.53)ts++;else if(topTraders.long<0.42)ts-=2;}}catch(e){}
+  try{if(gLS&&topTraders){if(topTraders.long>0.55&&gLS.long<0.45)ts+=2;}}catch(e){}
+  try{if(cbPrem){if(cbPrem.pct>0.3)ts+=2;else if(cbPrem.pct>0.1)ts++;else if(cbPrem.pct<-0.3)ts--;}}catch(e){}
+  try{if(bfxMargin){if(bfxMargin.longPct>70)ts+=2;else if(bfxMargin.longPct>60)ts++;else if(bfxMargin.shortPct>60)ts--;}}catch(e){}
+  try{if(hlFunding&&fr){if(hlFunding.rate<0&&fr.rate<0)ts++;}}catch(e){}
+  try{if(frHist&&frHist.totalCount>0){if(frHist.negCount>=7)ts+=2;else if(frHist.negCount>=5)ts++;}}catch(e){}
+  try{if(oiHist&&oiHist.growth>15&&Math.abs(d.c)<3)ts+=2;}catch(e){}
+  try{if(taker){if(taker.ratio>1.5)ts++;else if(taker.ratio<0.6)ts--;}}catch(e){}
+  try{if(iceberg){if(iceberg.signal==='ICEBERG_BUY')ts+=2;else if(iceberg.signal==='ICEBERG_SELL')ts-=2;}}catch(e){}
+  try{if(vpinData&&vpinData.vpin>0.6)ts++;}catch(e){}
+  try{if(whalePnL){if(whalePnL.pct>1)ts++;else if(whalePnL.pct<-3)ts-=2;}}catch(e){}
+  try{if(newsScore){if(newsScore.score>70)ts++;else if(newsScore.score<30)ts--;}}catch(e){}
+
   var tf1h=c1h.length>=20?(c1h[c1h.length-1]>calcEMA(c1h.slice(-20),20)?'up':'down'):'neutral';
   var tf4h=price>ema20&&macd.h>0?'up':price<ema20&&macd.h<0?'down':'neutral';
   var tf1d=c1d.length>=20?(c1d[c1d.length-1]>calcEMA(c1d.slice(-20),20)&&macd1d.h>0?'up':'down'):'neutral';
@@ -4044,7 +4272,7 @@ async function analyzeCoinRpt(sym){
   var bullInv=lang==='ar'?'يُلغى لو كسر '+fP(supp):'Invalidated below '+fP(supp);
   var bearInv=lang==='ar'?'يُلغى لو اخترق '+fP(resist):'Invalidated above '+fP(resist);
   var riskPct=ts>=4?5:ts>=2?3:ts<=-2?0:1;
-  /* Score (9 factors — dynamic weights) */
+  /* Score (9 original + 3 new factors) */
   var W=monitorState?monitorState.weights:DEFAULT_WEIGHTS;
   var sc=0,scB=[];var addSc=function(n,v,k){var wt=W[k]||1;var adj=v*(wt/(DEFAULT_WEIGHTS[k]||1));scB.push({n:n,v:+adj.toFixed(2),k:k,raw:v,wt:+wt.toFixed(2)});sc+=adj};
   addSc(lang==='ar'?'الاتجاه':'Trend',ts>=4?2:ts>=2?1.5:ts>=0?1:0,'trend');
@@ -4056,22 +4284,45 @@ async function analyzeCoinRpt(sym){
   addSc('MACD',macd.h>0?0.5:0,'macd');
   addSc(lang==='ar'?'توافق':'TF',bullTFs>=3?1:bullTFs>=2?0.5:0,'confluence');
   addSc(lang==='ar'?'هيكل':'Struct',struct==='HH/HL'?1:struct==='LH/LL'?0:0.5,'structure');
+  /* 3 NEW factors */
+  var smartSc=0;
+  if(topTraders&&topTraders.long>0.55)smartSc+=0.6;
+  if(cbPrem&&cbPrem.pct>0.2)smartSc+=0.5;
+  if(bfxMargin&&bfxMargin.longPct>60)smartSc+=0.4;
+  addSc(lang==='ar'?'ذكاء':'Smart',Math.min(1.5,smartSc),'smart');
+  var flowSc=0;
+  if(iceberg&&iceberg.signal==='ICEBERG_BUY')flowSc+=0.6;
+  if(vpinData&&vpinData.vpin>0.6)flowSc+=0.5;
+  if(taker&&taker.ratio>1.3)flowSc+=0.4;
+  addSc(lang==='ar'?'تدفق':'Flow',Math.min(1.5,flowSc),'flow');
+  var moodSc=0;
+  if(typeof fgValue!=='undefined'&&fgValue>=40&&fgValue<=70)moodSc+=0.5;
+  if(newsScore&&newsScore.score>55)moodSc+=0.5;
+  addSc(lang==='ar'?'مزاج':'Mood',Math.min(1.0,moodSc),'mood');
+
   var rec,recIc;if(ts>=4){rec=lang==='ar'?'💰 شراء قوي — وقف '+fP(f618D):'💰 Strong Buy — Stop '+fP(f618D);recIc='💰'}else if(ts>=2){rec=lang==='ar'?'📈 شراء — دخول تدريجي':'📈 Buy — Scale in';recIc='📈'}else if(ts<=-4){rec=lang==='ar'?'⛔ تجنب — هبوط قوي':'⛔ Avoid';recIc='⛔'}else if(ts<=-2){rec=lang==='ar'?'⚠️ حذر — انتظر':'⚠️ Caution — Wait';recIc='⚠️'}else{rec=lang==='ar'?'⏳ انتظار — محايد':'⏳ Wait';recIc='⏳'}
   /* Liquidation zones */
   var liqZones=[];if(typeof liqEvents!=='undefined'&&liqEvents&&liqEvents.length){var sL=liqEvents.filter(function(e){return e.s===sym||e.s===sym+'USDT'});
     var longL=sL.filter(function(e){return e.S==='SELL'}).reduce(function(s,e){return s+(e.q||0)*(e.p||0)},0);
     var shortL=sL.filter(function(e){return e.S==='BUY'}).reduce(function(s,e){return s+(e.q||0)*(e.p||0)},0);
     if(longL>0)liqZones.push({side:'Long',amt:longL});if(shortL>0)liqZones.push({side:'Short',amt:shortL})}
-  return{sym:sym,price:price,d:d,ts:ts,dir:dir,dCol:dCol,dIc:dIc,rsi:rsi,rsi1d:rsi1d,macd:macd,macd1d:macd1d,ema20:ema20,ema50:ema50,volT:volT,resist:resist,supp:supp,f618U:f618U,f100U:f100U,f618D:f618D,fr:fr,ls:ls,oi:OI[sym],wConf:wConf,cvd:cvd,tf:{h1:tf1h,h4:tf4h,d:tf1d,w:tfW},bullTFs:bullTFs,ch:{h1:ch1h,h4:ch4h,h24:ch24,d7:ch7d},divRSI:divRSI,divRSI1d:divRSI1d,reasons:reasons,warning:warning,bullP:bullP,bearP:bearP,neutP:neutP,bullCond:bullCond,bearCond:bearCond,bullInv:bullInv,bearInv:bearInv,sc:+sc.toFixed(1),scB:scB,rec:rec,recIc:recIc,struct:struct,bos:bos,choch:choch,riskPct:riskPct,orderBlocks:orderBlocks,fvgs:fvgs,histMatch:histMatch,liqZones:liqZones,kl4h:kl4h,kl1d:kl1d,kl1h:kl1h}}
+  /* Aggregate liquidation data from coinalyze */
+  var aggLiq=null;try{if(typeof coinalyzeLiq!=='undefined'&&coinalyzeLiq[sym])aggLiq={longVol:coinalyzeLiq[sym].longVol||0,shortVol:coinalyzeLiq[sym].shortVol||0};}catch(e){}
 
-/* ═══ buildChartHTML — 12 Professional Analysis Sections ═══ */
+  return{sym:sym,price:price,d:d,ts:ts,dir:dir,dCol:dCol,dIc:dIc,rsi:rsi,rsi1d:rsi1d,macd:macd,macd1d:macd1d,ema20:ema20,ema50:ema50,volT:volT,resist:resist,supp:supp,f618U:f618U,f100U:f100U,f618D:f618D,fr:fr,ls:ls,oi:OI[sym],wConf:wConf,cvd:cvd,tf:{h1:tf1h,h4:tf4h,d:tf1d,w:tfW},bullTFs:bullTFs,ch:{h1:ch1h,h4:ch4h,h24:ch24,d7:ch7d},divRSI:divRSI,divRSI1d:divRSI1d,reasons:reasons,warning:warning,bullP:bullP,bearP:bearP,neutP:neutP,bullCond:bullCond,bearCond:bearCond,bullInv:bullInv,bearInv:bearInv,sc:+sc.toFixed(1),scB:scB,rec:rec,recIc:recIc,struct:struct,bos:bos,choch:choch,riskPct:riskPct,orderBlocks:orderBlocks,fvgs:fvgs,histMatch:histMatch,liqZones:liqZones,kl4h:kl4h,kl1d:kl1d,kl1h:kl1h,
+    /* NEW return fields */
+    topTraders:topTraders,gLS:gLS,cbPrem:cbPrem,bfxMargin:bfxMargin,hlFunding:hlFunding,frHist:frHist,oiHist:oiHist,taker:taker,depth:depth,iceberg:iceberg,vpinData:vpinData,whalePnL:whalePnL,flowRate:flowRate,predArrow:predArrow,absorption:absorption,stableFlow:stableFlow,unlocks:unlocks,newsScore:newsScore,onChain:onChain,ethBtcRatio:ethBtcRatio,btcChange:btcChange,ethChange:ethChange,aggLiq:aggLiq}}
+
+
+/* ═══ buildChartHTML — 15 Section Professional Market Direction Report ═══ */
 function buildChartHTML(data, coinColor, coinIcon, coinName){
-  if(!data) return '<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u0644\u0627 \u0628\u064a\u0627\u0646\u0627\u062a':'No data')+'</div></div>';
+  if(!data) return '<div class="empty"><div class="empty-ic">📊</div><div class="empty-tx">'+(lang==='ar'?'لا بيانات':'No data')+'</div></div>';
   var h='';
   var cn=lang==='ar'?coinName.ar:coinName.en;
   var sym=data.sym;
+  var isAr=lang==='ar';
 
-  /* ════ Section 1: Hero Header ════ */
+  /* ════════ SECTION 1: Hero Header + Smart Money Mini-Bar ════════ */
   var heroBg=data.ts>=2?'rgba(0,255,136,.04)':data.ts<=-2?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)';
   var heroBdr=data.ts>=2?'rgba(0,255,136,.08)':data.ts<=-2?'rgba(255,56,96,.08)':'rgba(255,184,0,.08)';
   h+='<div class="mkt-hero" style="background:'+heroBg+';border:1px solid '+heroBdr+'">';
@@ -4079,12 +4330,25 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<div style="font-size:14px;font-weight:800;color:var(--t0);margin:4px 0">'+cn+' <span style="color:var(--t2);font-size:12px">'+sym+'/USDT</span></div>';
   h+='<div class="mkt-hero-price" style="direction:ltr">'+rP(data.price)+'</div>';
   h+='<div class="mkt-hero-ch" style="color:'+(data.ch.h24>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.ch.h24>=0?'+':'')+data.ch.h24.toFixed(1)+'% (24h)</div>';
-  h+='<div class="mkt-hero-meta">'+(lang==='ar'?'\u0641\u0631\u064a\u0645: 4H \u2014 Binance':'Frame: 4H \u2014 Binance')+'</div>';
-  var nxt=new Date();nxt.setHours(nxt.getHours()+(4-(nxt.getUTCHours()%4)),0,0,0);
-  h+='<div class="mkt-hero-meta">'+(lang==='ar'?'\u0622\u062e\u0631 \u062a\u062d\u062f\u064a\u062b: ':'Updated: ')+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+' \u2014 '+(lang==='ar'?'\u0627\u0644\u0642\u0627\u062f\u0645: ':'Next: ')+nxt.toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
+  h+='<div class="mkt-hero-meta">'+(isAr?'الاتجاه: ':'Direction: ')+data.dIc+' '+data.dir+' · '+(isAr?'التقييم: ':'Score: ')+data.sc+'/10</div>';
+  h+='<div class="mkt-hero-meta">'+(isAr?'آخر تحديث: ':'Updated: ')+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
+  /* Smart Money mini-bar: count bullish smart signals */
+  var smartBull=0,smartTotal=0;
+  if(data.topTraders){smartTotal++;if(data.topTraders.long>0.55)smartBull++}
+  if(data.cbPrem){smartTotal++;if(data.cbPrem.pct>0.1)smartBull++}
+  if(data.bfxMargin){smartTotal++;if(data.bfxMargin.longPct>55)smartBull++}
+  if(data.hlFunding){smartTotal++;if(data.hlFunding.rate<0)smartBull++}
+  if(data.vpinData){smartTotal++;if(data.vpinData.vpin>0.5)smartBull++}
+  if(data.absorption){smartTotal++;if(data.absorption.signal==='BULLISH_ABSORPTION')smartBull++}
+  if(data.iceberg){smartTotal++;if(data.iceberg.signal==='ICEBERG_BUY')smartBull++}
+  if(smartTotal>0){
+    var smartPct=Math.round(smartBull/smartTotal*100);
+    var smartCol=smartBull>=smartTotal*0.7?'var(--up)':smartBull<=smartTotal*0.3?'var(--dn)':'var(--warn)';
+    h+='<div style="margin-top:6px;padding:4px 8px;background:rgba(91,156,255,.06);border-radius:6px;font-size:10px;color:var(--t1)">🧠 '+(isAr?'ذكاء المال: ':'Smart Money: ')+'<span style="font-weight:800;color:'+smartCol+'">'+smartBull+'/'+smartTotal+' '+(isAr?'صعودية':'bullish')+' ('+smartPct+'%)</span></div>';
+  }
   h+='</div>';
 
-  /* ════ NEW: Mini Price Chart (SVG Candles) ════ */
+  /* ════════ SECTION 2: Price Chart (SVG Candles + S/R) ════════ */
   if(data.kl4h&&data.kl4h.length>=12){
     var cKl=data.kl4h.slice(-24);
     var allH=cKl.map(function(k){return+k[2]});var allL=cKl.map(function(k){return+k[3]});
@@ -4093,20 +4357,16 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     var yScale=function(p){return pad+(1-(p-pMin)/pRng)*(cH-pad*2)};
     var svgW=cKl.length*(cW+1)+40;
     var svg='<svg width="100%" viewBox="0 0 '+svgW+' '+(cH+10)+'" style="display:block;margin:6px 0;border-radius:8px;background:var(--bg2)">';
-    /* S/R lines */
     svg+='<line x1="0" y1="'+yScale(data.resist)+'" x2="'+svgW+'" y2="'+yScale(data.resist)+'" stroke="var(--dn)" stroke-width="0.5" stroke-dasharray="3 3" opacity="0.5"/>';
     svg+='<text x="'+(svgW-4)+'" y="'+(yScale(data.resist)-3)+'" fill="var(--dn)" font-size="7" text-anchor="end" font-family="var(--fm)">R '+rP(data.resist)+'</text>';
     svg+='<line x1="0" y1="'+yScale(data.supp)+'" x2="'+svgW+'" y2="'+yScale(data.supp)+'" stroke="var(--up)" stroke-width="0.5" stroke-dasharray="3 3" opacity="0.5"/>';
     svg+='<text x="'+(svgW-4)+'" y="'+(yScale(data.supp)+9)+'" fill="var(--up)" font-size="7" text-anchor="end" font-family="var(--fm)">S '+rP(data.supp)+'</text>';
-    /* EMA20 line */
     if(data.ema20){svg+='<line x1="0" y1="'+yScale(data.ema20)+'" x2="'+svgW+'" y2="'+yScale(data.ema20)+'" stroke="var(--warn)" stroke-width="0.5" opacity="0.4"/>';}
-    /* FVG zones */
     if(data.fvgs&&data.fvgs.length){data.fvgs.forEach(function(f){
-      var fTop=yScale(parseFloat(f.top.replace(/,/g,'')));var fBot=yScale(parseFloat(f.bot.replace(/,/g,'')));
+      var fTop=yScale(parseFloat(String(f.top).replace(/,/g,'').replace('$','')));var fBot=yScale(parseFloat(String(f.bot).replace(/,/g,'').replace('$','')));
       var fH=Math.abs(fBot-fTop);if(fH<2)fH=2;
       svg+='<rect x="0" y="'+Math.min(fTop,fBot)+'" width="'+svgW+'" height="'+fH+'" fill="'+(f.type==='bullish'?'rgba(0,255,136,.08)':'rgba(255,56,96,.08)')+'" rx="2"/>';
     })}
-    /* Candles */
     cKl.forEach(function(k,i){
       var o=+k[1],hi=+k[2],lo=+k[3],cl=+k[4];
       var x=i*(cW+1)+20;var isGreen=cl>=o;
@@ -4116,157 +4376,118 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
       svg+='<line x1="'+(x+cW/2)+'" y1="'+wickTop+'" x2="'+(x+cW/2)+'" y2="'+wickBot+'" stroke="'+color+'" stroke-width="1"/>';
       svg+='<rect x="'+x+'" y="'+bodyTop+'" width="'+cW+'" height="'+bodyH+'" fill="'+color+'" rx="0.5"/>';
     });
-    /* Price label */
     svg+='<circle cx="'+(svgW-16)+'" cy="'+yScale(data.price)+'" r="3" fill="'+coinColor+'"/>';
     svg+='</svg>';
-    h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F4C8} '+(lang==='ar'?'\u0631\u0633\u0645 \u0628\u064a\u0627\u0646\u064a 4H \u2014 \u0622\u062e\u0631 24 \u0634\u0645\u0639\u0629':'4H Chart \u2014 Last 24 candles')+'</div>';
+    h+='<div class="mkt-section"><div class="mkt-section-t">📈 2. '+(isAr?'الرسم البياني 4H — آخر 24 شمعة':'Chart 4H — Last 24 candles')+'</div>';
     h+=svg;
-    h+='<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--t3);margin-top:2px;direction:ltr"><span style="color:var(--dn)">\u25AC R: '+rP(data.resist)+'</span><span style="color:var(--warn)">\u25AC EMA20</span><span style="color:var(--up)">\u25AC S: '+rP(data.supp)+'</span>';
-    if(data.fvgs&&data.fvgs.length)h+='<span style="color:var(--blue)">\u2591 FVG</span>';
+    h+='<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--t3);margin-top:2px;direction:ltr"><span style="color:var(--dn)">▬ R: '+rP(data.resist)+'</span><span style="color:var(--warn)">▬ EMA20</span><span style="color:var(--up)">▬ S: '+rP(data.supp)+'</span>';
+    if(data.fvgs&&data.fvgs.length)h+='<span style="color:var(--blue)">░ FVG</span>';
     h+='</div></div>';
   }
 
-
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F56F}\uFE0F '+(lang==='ar'?'\u0625\u063a\u0644\u0627\u0642\u0627\u062a \u0627\u0644\u0634\u0645\u0648\u0639':'Candle Closings')+'</div>';
+  /* ════════ SECTION 3: Timeframe Closings (Enhanced) ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">🕐 3. '+(isAr?'إغلاقات الشموع — تفصيل لكل فريم':'Candle Closings — Per-frame detail')+'</div>';
   var frames=[];
-  /* 4H candle */
-  if(data.kl4h&&data.kl4h.length>=2){
-    var k=data.kl4h[data.kl4h.length-1];
-    frames.push({tf:'4H',o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]});
-  }
-  /* Daily candle */
-  if(data.kl1d&&data.kl1d.length>=2){
-    var k2=data.kl1d[data.kl1d.length-1];
-    frames.push({tf:'D',o:+k2[1],h:+k2[2],l:+k2[3],c:+k2[4],v:+k2[5]});
-  }
-  /* Weekly: last 7 daily candles aggregated */
-  if(data.kl1d&&data.kl1d.length>=7){
-    var wSlice=data.kl1d.slice(-7);
-    var wO=+wSlice[0][1],wH=0,wL=999999999,wC=+wSlice[wSlice.length-1][4],wV=0;
-    for(var wi=0;wi<wSlice.length;wi++){if(+wSlice[wi][2]>wH)wH=+wSlice[wi][2];if(+wSlice[wi][3]<wL)wL=+wSlice[wi][3];wV+=+wSlice[wi][5]}
-    frames.push({tf:'W',o:wO,h:wH,l:wL,c:wC,v:wV});
-  }
-  /* Monthly: last 30 daily candles */
-  if(data.kl1d&&data.kl1d.length>=20){
-    var mSlice=data.kl1d.slice(-30);
-    var mO=+mSlice[0][1],mH=0,mL=999999999,mC=+mSlice[mSlice.length-1][4],mV=0;
-    for(var mi=0;mi<mSlice.length;mi++){if(+mSlice[mi][2]>mH)mH=+mSlice[mi][2];if(+mSlice[mi][3]<mL)mL=+mSlice[mi][3];mV+=+mSlice[mi][5]}
-    frames.push({tf:'M',o:mO,h:mH,l:mL,c:mC,v:mV});
-  }
-  /* Badge */
-  var posCount=0;
-  frames.forEach(function(f){if(f.c>=f.o)posCount++});
+  if(data.kl1h&&data.kl1h.length>=2){var k1=data.kl1h[data.kl1h.length-1];frames.push({tf:'1H',o:+k1[1],h:+k1[2],l:+k1[3],c:+k1[4],v:+k1[5],rsi:data.rsi,macd:data.macd,tfDir:data.tf.h1});}
+  if(data.kl4h&&data.kl4h.length>=2){var k2=data.kl4h[data.kl4h.length-1];frames.push({tf:'4H',o:+k2[1],h:+k2[2],l:+k2[3],c:+k2[4],v:+k2[5],rsi:data.rsi,macd:data.macd,tfDir:data.tf.h4});}
+  if(data.kl1d&&data.kl1d.length>=2){var k3=data.kl1d[data.kl1d.length-1];frames.push({tf:isAr?'يومي':'D',o:+k3[1],h:+k3[2],l:+k3[3],c:+k3[4],v:+k3[5],rsi:data.rsi1d,macd:data.macd1d,tfDir:data.tf.d});}
+  if(data.kl1d&&data.kl1d.length>=7){var wS=data.kl1d.slice(-7);var wO=+wS[0][1],wH=0,wL=9e12,wC=+wS[wS.length-1][4],wV=0;
+    for(var wi=0;wi<wS.length;wi++){if(+wS[wi][2]>wH)wH=+wS[wi][2];if(+wS[wi][3]<wL)wL=+wS[wi][3];wV+=+wS[wi][5]}
+    frames.push({tf:isAr?'أسبوعي':'W',o:wO,h:wH,l:wL,c:wC,v:wV,rsi:data.rsi1d,macd:data.macd1d,tfDir:data.tf.w});}
+  /* Summary badge */
+  var posCount=frames.filter(function(f){return f.c>=f.o}).length;
   var bdgCol=posCount>=3?'var(--up)':posCount<=1?'var(--dn)':'var(--warn)';
   var bdgBg=posCount>=3?'rgba(0,255,136,.08)':posCount<=1?'rgba(255,56,96,.08)':'rgba(255,184,0,.08)';
-  h+='<div class="mkt-badge" style="background:'+bdgBg+';color:'+bdgCol+'">'+posCount+'/'+frames.length+' '+(lang==='ar'?'\u0625\u064a\u062c\u0627\u0628\u064a':'Positive')+'</div>';
-  h+='<div class="mkt-candles">';
-  frames.forEach(function(f){
-    var up=f.c>=f.o;var cls=up?'up':'dn';
-    var pat=detectCandlePattern(f.o,f.h,f.l,f.c);
-    var patName=CANDLE_NAMES[lang==='ar'?'ar':'en'][pat]||pat;
-    h+='<div class="mkt-candle '+cls+'">';
-    h+='<div class="mkt-candle-tf">'+f.tf+'</div>';
-    h+='<div class="mkt-candle-ic">'+(up?'\u{1F7E2}':'\u{1F534}')+'</div>';
-    h+='<div class="mkt-candle-state" style="color:'+(up?'var(--up)':'var(--dn)')+'">'+(up?(lang==='ar'?'\u0625\u064a\u062c\u0627\u0628\u064a':'Bullish'):(lang==='ar'?'\u0633\u0644\u0628\u064a':'Bearish'))+'</div>';
-    h+='<div class="mkt-candle-close" style="direction:ltr">'+rP(f.c)+'</div>';
-    h+='<div class="mkt-candle-pat">'+patName+'</div>';
-    h+='</div>';
-  });
-  h+='</div></div>';
-
-  /* ════ Section 3: Detailed Candle Explanations ════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F4D6} '+(lang==='ar'?'\u0634\u0631\u062d \u0645\u0641\u0635\u0651\u0644 \u0644\u0644\u0625\u063a\u0644\u0627\u0642\u0627\u062a':'Detailed Closing Analysis')+'</div>';
+  h+='<div class="mkt-badge" style="background:'+bdgBg+';color:'+bdgCol+';margin-bottom:8px">'+posCount+'/'+frames.length+' '+(isAr?'فريمات صعودية':'bullish frames')+(posCount>=3?(isAr?' ✅ توافق قوي':' ✅ Strong confluence'):'')+'</div>';
   frames.forEach(function(f){
     var up=f.c>=f.o;var pat=detectCandlePattern(f.o,f.h,f.l,f.c);
-    var patName=CANDLE_NAMES[lang==='ar'?'ar':'en'][pat]||pat;
-    h+='<div class="mkt-box"><div class="mkt-box-t">'+(up?'\u{1F7E2}':'\u{1F534}')+' '+(lang==='ar'?'\u0625\u063a\u0644\u0627\u0642 '+f.tf:'Close '+f.tf)+'</div>';
-    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u0627\u0641\u062a\u062a\u0627\u062d':'Open')+'</span><span class="mkt-row-val" style="direction:ltr">'+rP(f.o)+'</span></div>';
-    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u0625\u063a\u0644\u0627\u0642':'Close')+'</span><span class="mkt-row-val" style="direction:ltr;color:'+(up?'var(--up)':'var(--dn)')+'">'+rP(f.c)+'</span></div>';
-    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u0623\u0639\u0644\u0649':'High')+'</span><span class="mkt-row-val" style="direction:ltr">'+rP(f.h)+'</span></div>';
-    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u0623\u062f\u0646\u0649':'Low')+'</span><span class="mkt-row-val" style="direction:ltr">'+rP(f.l)+'</span></div>';
-    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u062d\u062c\u0645':'Volume')+'</span><span class="mkt-row-val" style="direction:ltr">'+fmt(f.v)+'</span></div>';
-    /* Assessment */
-    var assess='';
-    if(pat==='bull_engulf'||pat==='hammer')assess=lang==='ar'?'\u2705 '+patName+' \u0645\u0639 \u062d\u062c\u0645 \u0639\u0627\u0644\u064a \u2014 \u064a\u062f\u0639\u0645 \u0627\u0644\u0635\u0639\u0648\u062f':'\u2705 '+patName+' with volume \u2014 supports upside';
-    else if(pat==='bear_engulf'||pat==='shooting')assess=lang==='ar'?'\u26a0\ufe0f '+patName+' \u2014 \u0625\u0634\u0627\u0631\u0629 \u0636\u063a\u0637 \u0628\u064a\u0639\u064a':'\u26a0\ufe0f '+patName+' \u2014 selling pressure signal';
-    else if(pat==='doji')assess=lang==='ar'?'\u{1F7E1} '+patName+' \u2014 \u062a\u0631\u062f\u062f \u0628\u0627\u0644\u0633\u0648\u0642':'\u{1F7E1} '+patName+' \u2014 market indecision';
-    else if(up)assess=lang==='ar'?'\u2705 \u0634\u0645\u0639\u0629 \u0625\u064a\u062c\u0627\u0628\u064a\u0629 \u2014 '+(f.v>0?'\u062d\u062c\u0645 \u0637\u0628\u064a\u0639\u064a':''):'\u2705 Positive candle \u2014 '+(f.v>0?'normal volume':'');
-    else assess=lang==='ar'?'\u{1F534} \u0634\u0645\u0639\u0629 \u0633\u0644\u0628\u064a\u0629 \u2014 \u0636\u063a\u0637 \u0628\u064a\u0639\u064a':'\u{1F534} Negative candle \u2014 sell pressure';
-    if(assess)h+='<div class="mkt-assess">'+assess+'</div>';
-    h+='</div>';
+    var patName=CANDLE_NAMES[isAr?'ar':'en'][pat]||pat;
+    var ic=up?'▲':'▼';
+    var dirCol=up?'var(--up)':'var(--dn)';
+    var box='<div class="mkt-box" style="border-left:3px solid '+dirCol+'">';
+    box+='<div class="mkt-box-t" style="color:'+dirCol+'">'+ic+' '+(isAr?'إغلاق ':'Close ')+f.tf+' — '+patName+'</div>';
+    /* What the pattern means */
+    var meaning='';
+    if(pat==='marubozu_up')meaning=isAr?'شمعة مارُبوزو صعودية — إغلاق قرب القمة دون ظل علوي. ضغط شراء قوي وسيطرة واضحة للمشترين.':'Bullish Marubozu — close near high with no upper shadow. Strong buying pressure.';
+    else if(pat==='marubozu_dn')meaning=isAr?'شمعة مارُبوزو هبوطية — إغلاق قرب القاع. ضغط بيع قوي.':'Bearish Marubozu — close near low. Strong selling pressure.';
+    else if(pat==='hammer')meaning=isAr?'مطرقة (Hammer) — ظل سفلي طويل. إشارة انعكاس صعودي محتملة.':'Hammer — long lower shadow. Potential bullish reversal signal.';
+    else if(pat==='shooting')meaning=isAr?'نجمة هابطة (Shooting Star) — ظل علوي طويل. إشارة انعكاس هبوطي محتملة.':'Shooting Star — long upper shadow. Potential bearish reversal.';
+    else if(pat==='doji')meaning=isAr?'دوجي (Doji) — تردد بالسوق. انتظر إغلاق الشمعة التالية.':'Doji — market indecision. Wait for next candle confirmation.';
+    else if(pat==='normal_up')meaning=isAr?'شمعة خضراء طبيعية — استمرار الزخم الصعودي.':'Normal green candle — bullish momentum continuation.';
+    else if(pat==='normal_dn')meaning=isAr?'شمعة حمراء طبيعية — استمرار الضغط البيعي.':'Normal red candle — bearish pressure continuation.';
+    else meaning=isAr?'نمط شمعة قياسي.':'Standard candle.';
+    box+='<div style="font-size:10px;color:var(--t1);line-height:1.7;margin:4px 0">'+meaning+'</div>';
+    /* Price data */
+    box+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'افتتاح':'Open')+' → '+(isAr?'إغلاق':'Close')+'</span><span class="mkt-row-val" style="direction:ltr;color:'+dirCol+'">'+rP(f.o)+' → '+rP(f.c)+'</span></div>';
+    box+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'أعلى':'High')+' / '+(isAr?'أدنى':'Low')+'</span><span class="mkt-row-val" style="direction:ltr">'+rP(f.h)+' / '+rP(f.l)+'</span></div>';
+    /* RSI + MACD for this timeframe */
+    if(f.rsi){
+      var rsiState=f.rsi>70?(isAr?'تشبع شرائي':'overbought'):f.rsi<30?(isAr?'تشبع بيعي':'oversold'):(isAr?'صحي':'healthy');
+      var rsiCol2=f.rsi>70?'var(--dn)':f.rsi<30?'var(--up)':'var(--t0)';
+      box+='<div class="mkt-row"><span class="mkt-row-label">RSI</span><span class="mkt-row-val" style="color:'+rsiCol2+'">'+Math.round(f.rsi)+' — '+rsiState+'</span></div>';
+    }
+    if(f.macd){
+      var macdTxt=f.macd.cross==='bull'?(isAr?'🟢 تقاطع صعودي':'🟢 Bull cross'):f.macd.cross==='bear'?(isAr?'🔴 تقاطع هبوطي':'🔴 Bear cross'):f.macd.h>0?(isAr?'إيجابي':'positive'):(isAr?'سلبي':'negative');
+      box+='<div class="mkt-row"><span class="mkt-row-label">MACD</span><span class="mkt-row-val" style="color:'+(f.macd.h>0?'var(--up)':'var(--dn)')+'">'+macdTxt+'</span></div>';
+    }
+    /* Confirmation / invalidation */
+    var confirm='';
+    if(up&&pat!=='doji')confirm=isAr?'✅ يؤكد الصعود لو الشمعة القادمة تغلق فوق '+rP(f.c)+'. يُلغى تحت '+rP(f.l)+'.':'✅ Bullish confirmation if next close above '+rP(f.c)+'. Invalidated below '+rP(f.l)+'.';
+    else if(!up&&pat!=='doji')confirm=isAr?'⚠️ يؤكد الهبوط لو إغلاق تحت '+rP(f.c)+'. يُلغى فوق '+rP(f.h)+'.':'⚠️ Bearish confirmation below '+rP(f.c)+'. Invalidated above '+rP(f.h)+'.';
+    else confirm=isAr?'⏳ بانتظار الإغلاق التالي للتأكيد.':'⏳ Awaiting next close for confirmation.';
+    box+='<div class="mkt-assess">'+confirm+'</div>';
+    box+='</div>';
+    h+=box;
   });
   h+='</div>';
 
-  /* ════ Section 4: Timeframe Confluence ════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F504} '+(lang==='ar'?'\u062a\u0648\u0627\u0641\u0642 \u0627\u0644\u0641\u0631\u064a\u0645\u0627\u062a':'Timeframe Confluence')+'</div>';
-  var tfData=[
-    {n:'1H',d:data.tf.h1},{n:'4H',d:data.tf.h4},{n:'D',d:data.tf.d},{n:'7D',d:data.tf.w}
-  ];
-  h+='<div class="mkt-candles">';
-  tfData.forEach(function(tf){
-    var ic=tf.d==='up'?'\u{1F4C8}':tf.d==='down'?'\u{1F4C9}':'\u2194\uFE0F';
-    var col=tf.d==='up'?'var(--up)':tf.d==='down'?'var(--dn)':'var(--warn)';
-    var cls=tf.d==='up'?'up':tf.d==='down'?'dn':'nt';
-    var reason='';
-    if(tf.n==='1H')reason=tf.d==='up'?(lang==='ar'?'\u0641\u0648\u0642 EMA20':'Above EMA20'):(lang==='ar'?'\u062a\u062d\u062a EMA20':'Below EMA20');
-    else if(tf.n==='4H')reason=tf.d==='up'?(lang==='ar'?'MACD+ \u0648\u0641\u0648\u0642 EMA':'MACD+ & above EMA'):(lang==='ar'?'MACD- \u0623\u0648 \u062a\u062d\u062a EMA':'MACD- or below EMA');
-    else if(tf.n==='D')reason=tf.d==='up'?(lang==='ar'?'\u0641\u0648\u0642 EMA \u0627\u0644\u064a\u0648\u0645\u064a':'Above daily EMA'):(lang==='ar'?'\u062a\u062d\u062a EMA \u0627\u0644\u064a\u0648\u0645\u064a':'Below daily EMA');
-    else reason=tf.d==='up'?(lang==='ar'?'\u0625\u063a\u0644\u0627\u0642 \u0641\u0648\u0642 7 \u0623\u064a\u0627\u0645':'Close above 7d ago'):(lang==='ar'?'\u0625\u063a\u0644\u0627\u0642 \u062a\u062d\u062a 7 \u0623\u064a\u0627\u0645':'Close below 7d ago');
-    h+='<div class="mkt-candle '+cls+'" style="padding:6px 3px">';
-    h+='<div class="mkt-candle-tf">'+tf.n+'</div>';
-    h+='<div style="font-size:16px;margin:2px 0">'+ic+'</div>';
-    h+='<div style="font-size:12px;color:'+col+';font-weight:700">'+(tf.d==='up'?(lang==='ar'?'\u0635\u0627\u0639\u062f':'Bull'):tf.d==='down'?(lang==='ar'?'\u0647\u0627\u0628\u0637':'Bear'):(lang==='ar'?'\u0645\u062d\u0627\u064a\u062f':'Flat'))+'</div>';
-    h+='<div style="font-size:11px;color:var(--t3);margin-top:1px">'+reason+'</div>';
-    h+='</div>';
-  });
-  h+='</div>';
-  var confCol=data.bullTFs>=3?'var(--up)':data.bullTFs<=1?'var(--dn)':'var(--warn)';
-  h+='<div style="text-align:center;padding:5px;border-radius:6px;margin-bottom:8px;font-size:12px;font-weight:700;background:'+(data.bullTFs>=3?'rgba(0,255,136,.04)':data.bullTFs<=1?'rgba(255,56,96,.04)':'rgba(255,184,0,.04)')+';color:'+confCol+'">'+(lang==='ar'?'\u062a\u0648\u0627\u0641\u0642: ':'Confluence: ')+data.bullTFs+'/4 '+(data.bullTFs>=3?(lang==='ar'?'\u0635\u0627\u0639\u062f\u0629 = \u062a\u0648\u0627\u0641\u0642 \u0642\u0648\u064a':'Bullish = Strong'):data.bullTFs<=1?(lang==='ar'?'\u0647\u0627\u0628\u0637\u0629':'Bearish'):(lang==='ar'?'\u0645\u062e\u062a\u0644\u0637\u0629':'Mixed'))+'</div>';
-  h+='</div>';
-
-  /* ════ Section 5: Market Structure (SMC) ════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F3D7}\uFE0F '+(lang==='ar'?'\u0647\u064a\u0643\u0644 \u0627\u0644\u0633\u0648\u0642 (SMC)':'Market Structure (SMC)')+'</div>';
+  /* ════════ SECTION 4: Market Structure (SMC) ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">🏗️ 4. '+(isAr?'هيكل السوق (SMC)':'Market Structure (SMC)')+'</div>';
   var stCol=data.struct==='HH/HL'?'var(--up)':data.struct==='LH/LL'?'var(--dn)':'var(--warn)';
+  var stLabel=data.struct==='HH/HL'?(isAr?'قمم أعلى + قيعان أعلى — هيكل صعودي كلاسيكي':'Higher Highs + Higher Lows — classic bullish structure'):data.struct==='LH/LL'?(isAr?'قمم أدنى + قيعان أدنى — هيكل هبوطي':'Lower Highs + Lower Lows — bearish structure'):data.struct==='Range'?(isAr?'نطاق جانبي — تجميع أو توزيع':'Range — accumulation or distribution'):(isAr?'غير واضح':'Unclear');
   h+='<div class="mkt-box">';
-  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u0627\u0644\u0646\u0645\u0637':'Pattern')+'</span><span class="mkt-row-val" style="font-weight:800;color:'+stCol+'">'+data.struct+'</span></div>';
-  if(data.bos)h+='<div class="mkt-row"><span class="mkt-row-label">BOS</span><span class="mkt-row-val" style="direction:ltr;color:var(--blue)">'+data.bos+'</span></div>';
-  if(data.choch)h+='<div class="mkt-row"><span class="mkt-row-label">ChoCH</span><span class="mkt-row-val" style="direction:ltr;color:var(--purple)">'+data.choch+'</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'النمط':'Pattern')+'</span><span class="mkt-row-val" style="font-weight:800;color:'+stCol+'">'+data.struct+'</span></div>';
+  h+='<div style="font-size:10px;color:var(--t1);margin:4px 0;line-height:1.6">'+stLabel+'</div>';
+  if(data.bos)h+='<div class="mkt-row"><span class="mkt-row-label">BOS ('+(isAr?'كسر هيكل':'Break of Structure')+')</span><span class="mkt-row-val" style="direction:ltr;color:var(--blue)">'+data.bos+'</span></div>';
+  if(data.choch)h+='<div class="mkt-row"><span class="mkt-row-label">ChoCH ('+(isAr?'تغير الشخصية':'Change of Character')+')</span><span class="mkt-row-val" style="direction:ltr;color:var(--purple)">'+data.choch+'</span></div>';
   h+='</div></div>';
 
-  /* ════ Section 6: Order Blocks + FVG ════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F4E6} '+(lang==='ar'?'Order Blocks + FVG':'Order Blocks + FVG')+'</div>';
+  /* ════════ SECTION 5: FVG + Order Blocks (merged) ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">📦 5. '+(isAr?'فجوات القيمة (FVG) + Order Blocks':'Fair Value Gaps + Order Blocks')+'</div>';
   if(data.orderBlocks&&data.orderBlocks.length){
-    h+='<div class="mkt-box"><div class="mkt-box-t">'+(lang==='ar'?'Order Blocks':'Order Blocks')+'</div>';
+    h+='<div class="mkt-box"><div class="mkt-box-t">'+(isAr?'Order Blocks — مناطق سيولة مؤسسية':'Order Blocks — institutional liquidity zones')+'</div>';
     data.orderBlocks.forEach(function(ob){
       var obUp=ob.type==='bullish';
-      h+='<div class="mkt-row"><span class="mkt-row-label">'+(obUp?'\u{1F7E2}':'\u{1F534}')+' '+(obUp?(lang==='ar'?'\u0635\u0639\u0648\u062f\u064a':'Bullish'):(lang==='ar'?'\u0647\u0628\u0648\u0637\u064a':'Bearish'))+'</span><span class="mkt-row-val" style="direction:ltr;color:'+(obUp?'var(--up)':'var(--dn)')+'">'+ob.price+'</span></div>';
+      h+='<div class="mkt-row"><span class="mkt-row-label">'+(obUp?'🟢':'🔴')+' '+(obUp?(isAr?'صعودي':'Bullish'):(isAr?'هبوطي':'Bearish'))+'</span><span class="mkt-row-val" style="direction:ltr;color:'+(obUp?'var(--up)':'var(--dn)')+'">'+ob.price+'</span></div>';
     });
     h+='</div>';
   }
   if(data.fvgs&&data.fvgs.length){
-    h+='<div class="mkt-box"><div class="mkt-box-t">FVG (Fair Value Gaps)</div>';
+    h+='<div class="mkt-box"><div class="mkt-box-t">FVG — '+(isAr?'فجوات سعرية غير ممتلئة':'unfilled price gaps')+'</div>';
+    h+='<div style="font-size:9px;color:var(--t2);margin-bottom:6px;line-height:1.6">'+(isAr?'السعر يعود غالباً لملء الفجوة قبل مواصلة الاتجاه.':'Price often returns to fill the gap before continuing.')+'</div>';
     data.fvgs.forEach(function(fg){
       var fgUp=fg.type==='bullish';
-      h+='<div class="mkt-row"><span class="mkt-row-label">'+(fgUp?'\u{1F7E2}':'\u{1F534}')+' '+(fgUp?(lang==='ar'?'\u0635\u0639\u0648\u062f\u064a':'Bullish'):(lang==='ar'?'\u0647\u0628\u0648\u0637\u064a':'Bearish'))+'</span><span class="mkt-row-val" style="direction:ltr">'+fg.bot+' \u2014 '+fg.top+'</span></div>';
+      h+='<div class="mkt-row" style="background:'+(fgUp?'rgba(0,255,136,.03)':'rgba(255,56,96,.03)')+';border-radius:6px;padding:5px 6px;margin-bottom:3px">';
+      h+='<span class="mkt-row-label">'+(fgUp?'🟢':'🔴')+' '+(fgUp?(isAr?'صعودي':'Bullish'):(isAr?'هبوطي':'Bearish'))+'</span>';
+      h+='<span class="mkt-row-val" style="direction:ltr;color:'+(fgUp?'var(--up)':'var(--dn)')+'">'+fg.bot+' — '+fg.top+'</span>';
+      h+='</div>';
     });
     h+='</div>';
   }
   if((!data.orderBlocks||!data.orderBlocks.length)&&(!data.fvgs||!data.fvgs.length)){
-    h+='<div class="mkt-box" style="text-align:center;color:var(--t3);font-size:12px">'+(lang==='ar'?'\u0644\u0627 OB / FVG \u062d\u0627\u0644\u064a\u0627\u064b':'No active OB / FVG')+'</div>';
+    h+='<div class="mkt-box" style="text-align:center;color:var(--t3);font-size:12px">'+(isAr?'لا FVG / OB واضحة حالياً':'No active FVG / OB')+'</div>';
   }
   h+='</div>';
 
-  /* ════ Section 7: Key Levels Map (descending) ════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F5FA}\uFE0F '+(lang==='ar'?'\u0627\u0644\u0645\u0633\u062a\u0648\u064a\u0627\u062a \u0627\u0644\u0631\u0626\u064a\u0633\u064a\u0629':'Key Levels')+'</div>';
+  /* ════════ SECTION 6: Key Levels Map ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">🗺️ 6. '+(isAr?'المستويات الرئيسية':'Key Levels')+'</div>';
   h+='<div class="mkt-box">';
-  /* Sorted descending: R2 > R1 > Price > S1 > S2 */
   var levels=[];
-  levels.push({tag:'R2',label:lang==='ar'?'\u0645\u0642\u0627\u0648\u0645\u0629 \u0631\u0626\u064a\u0633\u064a\u0629':'Major Resistance',price:data.f100U,col:'var(--dn)'});
-  levels.push({tag:'R1',label:lang==='ar'?'\u0645\u0642\u0627\u0648\u0645\u0629 / \u0645\u0646\u0637\u0642\u0629 \u0639\u0631\u0636':'Resistance / Supply',price:data.resist,col:'var(--dn)'});
-  levels.push({tag:'\u25B6',label:lang==='ar'?'\u0627\u0644\u0633\u0639\u0631 \u0627\u0644\u062d\u0627\u0644\u064a':'Current Price',price:data.price,col:'var(--blue)',highlight:true});
-  levels.push({tag:'S1',label:lang==='ar'?'\u062f\u0639\u0645 / \u0645\u0646\u0637\u0642\u0629 \u0637\u0644\u0628':'Support / Demand',price:data.supp,col:'var(--up)'});
+  levels.push({tag:'R2',label:isAr?'مقاومة رئيسية':'Major Resistance',price:data.f100U,col:'var(--dn)'});
+  levels.push({tag:'R1',label:isAr?'مقاومة / منطقة عرض':'Resistance / Supply',price:data.resist,col:'var(--dn)'});
+  levels.push({tag:'▶',label:isAr?'السعر الحالي':'Current Price',price:data.price,col:'var(--blue)',highlight:true});
+  levels.push({tag:'S1',label:isAr?'دعم / منطقة طلب':'Support / Demand',price:data.supp,col:'var(--up)'});
   if(data.ema50&&data.ema50<data.supp)levels.push({tag:'S2',label:'EMA50',price:data.ema50,col:'var(--warn)'});
-  /* Sort descending */
   levels.sort(function(a,b){return b.price-a.price});
   levels.forEach(function(lv){
     var bg=lv.highlight?'rgba(91,156,255,.06)':'transparent';
@@ -4277,338 +4498,377 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   });
   h+='</div></div>';
 
-  /* ════ Section 8: Technical Indicators ════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F4CA} '+(lang==='ar'?'\u0627\u0644\u0645\u0624\u0634\u0631\u0627\u062a \u0627\u0644\u0641\u0646\u064a\u0629':'Technical Indicators')+'</div>';
-  /* Card 1: 4H indicators */
-  h+='<div class="mkt-box"><div class="mkt-box-t">'+(lang==='ar'?'\u0641\u0631\u064a\u0645 4H':'4H Frame')+'</div>';
+  /* ════════ SECTION 7: Technical Indicators ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">📊 7. '+(isAr?'المؤشرات الفنية':'Technical Indicators')+'</div>';
+  h+='<div class="mkt-box"><div class="mkt-box-t">'+(isAr?'فريم 4H':'4H Frame')+'</div>';
   var rsiCol=data.rsi<30?'var(--up)':data.rsi>70?'var(--dn)':'var(--t0)';
-  var rsiLabel=data.rsi<30?(lang==='ar'?'\u0645\u0646\u0637\u0642\u0629 \u0634\u0631\u0627\u0621':'Oversold'):data.rsi>70?(lang==='ar'?'\u0645\u0646\u0637\u0642\u0629 \u0628\u064a\u0639':'Overbought'):data.rsi>=40&&data.rsi<=60?(lang==='ar'?'\u0635\u062d\u064a':'Healthy'):(lang==='ar'?'\u0645\u0642\u0628\u0648\u0644':'Normal');
-  h+='<div class="mkt-row"><span class="mkt-row-label">RSI</span><span class="mkt-row-val" style="color:'+rsiCol+'">'+Math.round(data.rsi)+' \u2014 '+rsiLabel+'</span></div>';
-  h+='<div class="mkt-row"><span class="mkt-row-label">MACD</span><span class="mkt-row-val" style="color:'+(data.macd.h>0?'var(--up)':'var(--dn)')+'">'+(data.macd.h>0?'\u{1F7E2} ':'🔴 ')+(data.macd.cross==='bull'?(lang==='ar'?'\u062a\u0642\u0627\u0637\u0639 \u0635\u0639\u0648\u062f\u064a':'Bull Cross'):data.macd.cross==='bear'?(lang==='ar'?'\u062a\u0642\u0627\u0637\u0639 \u0647\u0628\u0648\u0637\u064a':'Bear Cross'):(data.macd.h>0?(lang==='ar'?'\u0625\u064a\u062c\u0627\u0628\u064a':'Positive'):(lang==='ar'?'\u0633\u0644\u0628\u064a':'Negative')))+'</span></div>';
-  h+='<div class="mkt-row"><span class="mkt-row-label">EMA20</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.price>data.ema20?'var(--up)':'var(--dn)')+'">'+rP(data.ema20)+' '+(data.price>data.ema20?'\u2705':'\u274C')+'</span></div>';
-  h+='<div class="mkt-row"><span class="mkt-row-label">EMA50</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.price>data.ema50?'var(--up)':'var(--dn)')+'">'+rP(data.ema50)+' '+(data.price>data.ema50?'\u2705':'\u274C')+'</span></div>';
+  var rsiLabel=data.rsi<30?(isAr?'منطقة شراء':'Oversold'):data.rsi>70?(isAr?'منطقة بيع':'Overbought'):data.rsi>=40&&data.rsi<=60?(isAr?'صحي':'Healthy'):(isAr?'مقبول':'Normal');
+  h+='<div class="mkt-row"><span class="mkt-row-label">RSI</span><span class="mkt-row-val" style="color:'+rsiCol+'">'+Math.round(data.rsi)+' — '+rsiLabel+'</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">MACD</span><span class="mkt-row-val" style="color:'+(data.macd.h>0?'var(--up)':'var(--dn)')+'">'+(data.macd.h>0?'🟢 ':'🔴 ')+(data.macd.cross==='bull'?(isAr?'تقاطع صعودي':'Bull Cross'):data.macd.cross==='bear'?(isAr?'تقاطع هبوطي':'Bear Cross'):(data.macd.h>0?(isAr?'إيجابي':'Positive'):(isAr?'سلبي':'Negative')))+'</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">EMA20</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.price>data.ema20?'var(--up)':'var(--dn)')+'">'+rP(data.ema20)+' '+(data.price>data.ema20?'✅':'❌')+'</span></div>';
+  h+='<div class="mkt-row"><span class="mkt-row-label">EMA50</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.price>data.ema50?'var(--up)':'var(--dn)')+'">'+rP(data.ema50)+' '+(data.price>data.ema50?'✅':'❌')+'</span></div>';
   if(data.divRSI!=='none'||data.divRSI1d!=='none'){
-    var divTxt=data.divRSI!=='none'?(lang==='ar'?'RSI Divergence \u0639\u0644\u0649 4H':'RSI Div on 4H'):(lang==='ar'?'RSI Divergence \u0639\u0644\u0649 \u0627\u0644\u064a\u0648\u0645\u064a':'RSI Div on Daily');
-    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u062f\u0627\u064a\u0641\u0631\u062c\u0646\u0633':'Divergence')+'</span><span class="mkt-row-val" style="color:var(--warn)">\u26a0\ufe0f '+divTxt+'</span></div>';
+    var divTxt=data.divRSI!=='none'?(isAr?'دايفرجنس على 4H':'RSI Div on 4H'):(isAr?'دايفرجنس على اليومي':'RSI Div on Daily');
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'دايفرجنس':'Divergence')+'</span><span class="mkt-row-val" style="color:var(--warn)">⚠️ '+divTxt+'</span></div>';
   }
   h+='</div>';
-  /* Card 2: Futures */
-  h+='<div class="mkt-box"><div class="mkt-box-t">'+(lang==='ar'?'\u0628\u064a\u0627\u0646\u0627\u062a \u0627\u0644\u0639\u0642\u0648\u062f':'Futures Data')+'</div>';
+  /* Futures data */
+  h+='<div class="mkt-box"><div class="mkt-box-t">'+(isAr?'بيانات العقود':'Futures Data')+'</div>';
   if(data.fr){
     var frCol=data.fr.rate<0?'var(--up)':data.fr.rate>0.05?'var(--dn)':'var(--t0)';
-    var frLabel=data.fr.rate<0?(lang==='ar'?'\u0633\u0644\u0628\u064a = \u0641\u0631\u0635\u0629':'Negative = Opportunity'):data.fr.rate>0.05?(lang==='ar'?'\u0639\u0627\u0644\u064a = \u062e\u0637\u0631':'High = Risk'):(lang==='ar'?'\u0637\u0628\u064a\u0639\u064a':'Normal');
-    h+='<div class="mkt-row"><span class="mkt-row-label">Funding Rate</span><span class="mkt-row-val" style="direction:ltr;color:'+frCol+'">'+(data.fr.rate>=0?'+':'')+data.fr.rate.toFixed(4)+'% \u2014 '+frLabel+'</span></div>';
+    var frLabel=data.fr.rate<0?(isAr?'سلبي = فرصة':'Negative = Opportunity'):data.fr.rate>0.05?(isAr?'عالي = خطر':'High = Risk'):(isAr?'طبيعي':'Normal');
+    h+='<div class="mkt-row"><span class="mkt-row-label">Funding Rate</span><span class="mkt-row-val" style="direction:ltr;color:'+frCol+'">'+(data.fr.rate>=0?'+':'')+data.fr.rate.toFixed(4)+'% — '+frLabel+'</span></div>';
   }
-  if(data.oi){h+='<div class="mkt-row"><span class="mkt-row-label">Open Interest</span><span class="mkt-row-val" style="direction:ltr">'+fmt(data.oi)+'</span></div>'}
-  if(data.ls){h+='<div class="mkt-row"><span class="mkt-row-label">Long/Short</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.ls.ratio>1.5?'var(--dn)':data.ls.ratio<0.8?'var(--up)':'var(--t0)')+'">'+data.ls.ratio.toFixed(2)+' (L:'+data.ls.long.toFixed(0)+'% S:'+data.ls.short.toFixed(0)+'%)</span></div>'}
-  if(data.liqZones&&data.liqZones.length){
-    data.liqZones.forEach(function(lz){
-      h+='<div class="mkt-row"><span class="mkt-row-label">'+(lz.side==='Short'?'\u{1F4A5}':'\u{1F4A5}')+' '+(lang==='ar'?'\u062a\u0635\u0641\u064a\u0627\u062a '+lz.side:'Liq '+lz.side)+'</span><span class="mkt-row-val" style="direction:ltr">'+fmt(lz.amt)+'</span></div>';
-    });
+  if(data.oi)h+='<div class="mkt-row"><span class="mkt-row-label">Open Interest</span><span class="mkt-row-val" style="direction:ltr">'+fmt(data.oi)+'</span></div>';
+  if(data.oiHist)h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'تغير OI 24س':'OI 24h change')+'</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.oiHist.growth>0?'var(--up)':'var(--dn)')+'">'+(data.oiHist.growth>=0?'+':'')+data.oiHist.growth.toFixed(1)+'%</span></div>';
+  if(data.ls)h+='<div class="mkt-row"><span class="mkt-row-label">Long/Short</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.ls.ratio>1.5?'var(--dn)':data.ls.ratio<0.8?'var(--up)':'var(--t0)')+'">'+data.ls.ratio.toFixed(2)+' (L:'+data.ls.long.toFixed(0)+'% S:'+data.ls.short.toFixed(0)+'%)</span></div>';
+  if(typeof bookTickers!=='undefined'&&bookTickers[sym]){var spd=bookTickers[sym];
+    h+='<div class="mkt-row"><span class="mkt-row-label">Bid/Ask Spread</span><span class="mkt-row-val" style="direction:ltr;color:'+(spd.spread>0.05?'var(--dn)':'var(--up)')+'">'+spd.spread.toFixed(3)+'% '+(spd.spread>0.05?(isAr?'(سيولة ضعيفة)':'(low liq)'):(isAr?'(سيولة جيدة)':'(good liq)'))+'</span></div>';
   }
   h+='</div></div>';
 
-  /* ════ Section 9: Whale Intelligence ════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F433} '+(lang==='ar'?'\u0627\u0633\u062a\u062e\u0628\u0627\u0631\u0627\u062a \u0627\u0644\u062d\u064a\u062a\u0627\u0646':'Whale Intelligence')+'</div>';
+  /* ════════ SECTION 8: Whale Intelligence (Enhanced) ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">🐋 8. '+(isAr?'استخبارات الحيتان':'Whale Intelligence')+'</div>';
   h+='<div class="mkt-box">';
-  var ww=typeof whaleWaves!=='undefined'?whaleWaves[sym]:null;
-  if(ww&&ww.waves&&ww.waves.length){
-    h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u062d\u062c\u0645 \u0627\u0644\u062a\u062c\u0645\u064a\u0639':'Accumulation Volume')+'</span><span class="mkt-row-val" style="direction:ltr">'+ww.waves.length+' '+(lang==='ar'?'\u0645\u0648\u062c\u0629':'waves')+'</span></div>';
-    if(ww.waves.length>=2){
-      var wPrices=ww.waves.map(function(w){return w.p||w.price||0}).filter(function(p){return p>0});
-      if(wPrices.length>=2){
-        h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u0645\u0646\u0637\u0642\u0629 \u0627\u0644\u062a\u062c\u0645\u064a\u0639':'Accumulation Zone')+'</span><span class="mkt-row-val" style="direction:ltr">'+rP(Math.min.apply(null,wPrices))+' \u2014 '+rP(Math.max.apply(null,wPrices))+'</span></div>';
-      }
-    }
+  h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'ثقة الحيتان':'Whale Confidence')+'</span><span class="mkt-row-val" style="color:'+(data.wConf>=50?'var(--up)':data.wConf>=30?'var(--warn)':'var(--t3)')+'">'+data.wConf+'%</span></div>';
+  var wwL=typeof whaleWaves!=='undefined'?whaleWaves[sym]:null;
+  if(wwL&&wwL.waves&&wwL.waves.length){
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'موجات التجميع':'Accumulation waves')+'</span><span class="mkt-row-val">'+wwL.waves.length+'</span></div>';
   }
-  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u062b\u0642\u0629 \u0627\u0644\u062d\u064a\u062a\u0627\u0646':'Whale Confidence')+'</span><span class="mkt-row-val" style="color:'+(data.wConf>=50?'var(--up)':data.wConf>=30?'var(--warn)':'var(--t3)')+'">'+data.wConf+'%</span></div>';
+  /* Whale P&L */
+  if(data.whalePnL){
+    var pnlCol=data.whalePnL.pct>1?'var(--up)':data.whalePnL.pct<-3?'var(--dn)':'var(--warn)';
+    var pnlText=data.whalePnL.pct>1?(isAr?'الحيتان رابحون — احتمال جني أرباح':'Whales profitable — may take profits'):data.whalePnL.pct<-3?(isAr?'الحيتان خاسرون — ضغط بيع':'Whales losing — sell pressure'):(isAr?'شبه متعادل':'Near breakeven');
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'ربح/خسارة الحيتان':'Whale P&L')+'</span><span class="mkt-row-val" style="color:'+pnlCol+';direction:ltr">'+(data.whalePnL.pct>=0?'+':'')+data.whalePnL.pct.toFixed(1)+'% — '+pnlText+'</span></div>';
+  }
+  /* Flow rate */
+  if(data.flowRate>1000){
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'سرعة التدفق':'Flow Rate')+'</span><span class="mkt-row-val" style="color:var(--neon);direction:ltr">$'+fmt(data.flowRate)+(isAr?'/دقيقة':'/min')+'</span></div>';
+  }
+  /* Iceberg */
+  if(data.iceberg&&data.iceberg.signal&&data.iceberg.signal!=='NONE'){
+    var iceUp=data.iceberg.signal==='ICEBERG_BUY';
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'أوامر مخفية':'Iceberg Orders')+'</span><span class="mkt-row-val" style="color:'+(iceUp?'var(--up)':'var(--dn)')+'">'+(iceUp?'🧊 '+(isAr?'شراء مخفي — تجميع':'Hidden buying'):'🧊 '+(isAr?'بيع مخفي — توزيع':'Hidden selling'))+(data.iceberg.count?' ('+data.iceberg.count+')':'')+'</span></div>';
+  }
+  /* Absorption */
+  if(data.absorption&&data.absorption.signal==='BULLISH_ABSORPTION'){
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'الامتصاص':'Absorption')+'</span><span class="mkt-row-val" style="color:var(--up)">💧 '+(isAr?'نشط — الحوت يمتص البيع':'Active — whale absorbing sells')+'</span></div>';
+  }
+  /* CVD */
   if(data.cvd){
-    h+='<div class="mkt-row"><span class="mkt-row-label">CVD</span><span class="mkt-row-val" style="color:'+(data.cvd.divergence==='BULLISH'?'var(--up)':data.cvd.divergence==='BEARISH'?'var(--dn)':'var(--t0)')+'">'+data.cvd.signal+(data.cvd.divergence!=='NONE'?' \u2014 '+data.cvd.divergence:'')+'</span></div>';
-  }
-  if(typeof CBP!=='undefined'&&CBP[sym]){
-    var cbPrem=((CBP[sym]-data.price)/data.price*100);
-    h+='<div class="mkt-row"><span class="mkt-row-label">Coinbase Premium</span><span class="mkt-row-val" style="direction:ltr;color:'+(cbPrem>0?'var(--up)':'var(--dn)')+'">'+(cbPrem>=0?'+':'')+cbPrem.toFixed(2)+'%</span></div>';
+    var cvdCol=data.cvd.divergence==='BULLISH'?'var(--up)':data.cvd.divergence==='BEARISH'?'var(--dn)':'var(--t0)';
+    h+='<div class="mkt-row"><span class="mkt-row-label">CVD</span><span class="mkt-row-val" style="color:'+cvdCol+'">'+(data.cvd.signal||'NEUTRAL')+(data.cvd.divergence!=='NONE'?' — '+data.cvd.divergence:'')+'</span></div>';
   }
   /* Summary */
-  var wSummary='';
-  if(data.wConf>=50)wSummary=lang==='ar'?'\u{1F433} \u062a\u062c\u0645\u064a\u0639 \u0642\u0648\u064a \u0645\u0646 \u0627\u0644\u062d\u064a\u062a\u0627\u0646 \u2014 \u0625\u0634\u0627\u0631\u0629 \u0625\u064a\u062c\u0627\u0628\u064a\u0629':'\u{1F433} Strong whale accumulation \u2014 positive';
-  else if(data.wConf>=30)wSummary=lang==='ar'?'\u{1F433} \u0646\u0634\u0627\u0637 \u062d\u064a\u062a\u0627\u0646 \u0645\u062a\u0648\u0633\u0637':'\u{1F433} Moderate whale activity';
-  else wSummary=lang==='ar'?'\u{1F433} \u0644\u0627 \u0646\u0634\u0627\u0637 \u062d\u064a\u062a\u0627\u0646 \u0648\u0627\u0636\u062d':'\u{1F433} No clear whale activity';
+  var wSummary;
+  if(data.wConf>=50)wSummary=isAr?'🐋 تجميع قوي — إشارة إيجابية':'🐋 Strong accumulation — positive';
+  else if(data.wConf>=30)wSummary=isAr?'🐋 نشاط متوسط':'🐋 Moderate activity';
+  else wSummary=isAr?'🐋 لا نشاط واضح':'🐋 No clear activity';
   h+='<div class="mkt-assess">'+wSummary+'</div>';
   h+='</div></div>';
 
-  /* ════ Section 10: Trading Signal ════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F3AF} '+(lang==='ar'?'\u0625\u0634\u0627\u0631\u0629 \u0627\u0644\u062a\u062f\u0627\u0648\u0644':'Trading Signal')+'</div>';
-  var sigCls=data.ts>=2?'buy':data.ts<=-2?'sell':'wait';
-  var entryPrice=data.price*0.99;
-  var slPrice=data.ts>=2?data.f618D:data.supp;
-  var rr=Math.abs(slPrice-entryPrice)>0?((data.f618U-entryPrice)/Math.abs(entryPrice-slPrice)):0;
-  h+='<div class="mkt-signal '+sigCls+'">';
-  h+='<div class="mkt-signal-hdr"><div class="mkt-signal-dir" style="color:'+data.dCol+'">'+data.dIc+' '+data.dir+'</div>';
-  h+='<div class="mkt-signal-score">'+(lang==='ar'?'\u062a\u0642\u064a\u064a\u0645: ':'Score: ')+data.sc+'/10</div></div>';
-  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u{1F3AF} \u0646\u0642\u0637\u0629 \u0627\u0644\u062f\u062e\u0648\u0644':'\u{1F3AF} Entry')+'</span><span class="mkt-row-val" style="direction:ltr;color:var(--blue)">'+rP(entryPrice)+'</span></div>';
-  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u{1F3AF} \u0647\u062f\u0641 1 (TP1)':'\u{1F3AF} TP1')+'</span><span class="mkt-row-val" style="direction:ltr;color:var(--up)">'+rP(data.f618U)+'</span></div>';
-  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u{1F3AF} \u0647\u062f\u0641 2 (TP2)':'\u{1F3AF} TP2')+'</span><span class="mkt-row-val" style="direction:ltr;color:var(--up)">'+rP(data.f100U)+'</span></div>';
-  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u{1F6D1} \u0648\u0642\u0641 \u062e\u0633\u0627\u0631\u0629 (SL)':'\u{1F6D1} Stop Loss')+'</span><span class="mkt-row-val" style="direction:ltr;color:var(--dn)">'+rP(slPrice)+'</span></div>';
-  h+='<div class="mkt-row"><span class="mkt-row-label">\u2696\uFE0F R:R</span><span class="mkt-row-val">1:'+rr.toFixed(1)+'</span></div>';
-  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u{1F4B0} \u062d\u062c\u0645 \u0627\u0644\u0645\u0631\u0643\u0632':'\u{1F4B0} Position Size')+'</span><span class="mkt-row-val">'+data.riskPct+'%</span></div>';
-  h+='<div class="mkt-row"><span class="mkt-row-label">'+(lang==='ar'?'\u23F0 \u0627\u0644\u0645\u062f\u0629':'\u23F0 Duration')+'</span><span class="mkt-row-val">'+(lang==='ar'?'3-5 \u0623\u064a\u0627\u0645':'3-5 days')+'</span></div>';
-  h+='<div style="margin-top:6px;font-size:11px;color:var(--dn)">\u274C '+(lang==='ar'?'\u0634\u0631\u0637 \u0627\u0644\u0625\u0644\u063a\u0627\u0621: '+(data.ts>=0?data.bullInv:data.bearInv):'Cancel if: '+(data.ts>=0?data.bullInv:data.bearInv))+'</div>';
+  /* ════════ SECTION 9: Smart Money Dashboard (NEW) ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">🧠 9. '+(isAr?'لوحة ذكاء المال':'Smart Money Dashboard')+'</div>';
+  h+='<div class="mkt-box">';
+  var smartItems=[],smartBullCount=0,smartTotalCount=0;
+  if(data.topTraders){smartTotalCount++;var ttBull=data.topTraders.long>0.55;if(ttBull)smartBullCount++;
+    var ttTrend=data.topTraders.trend==='up'?'↑':'↓';
+    smartItems.push({ic:'🏆',label:isAr?'كبار المتداولين (Top 20%)':'Top Traders (Top 20%)',val:Math.round(data.topTraders.long*100)+'% Long '+ttTrend,bull:ttBull,col:ttBull?'var(--up)':'var(--dn)'});
+  }
+  if(data.cbPrem){smartTotalCount++;var cbBull=data.cbPrem.pct>0.1;if(cbBull)smartBullCount++;
+    smartItems.push({ic:'🏦',label:isAr?'بريميوم Coinbase':'Coinbase Premium',val:(data.cbPrem.pct>=0?'+':'')+data.cbPrem.pct.toFixed(3)+'% '+(data.cbPrem.pct>0.15?(isAr?'(مؤسسات تشتري)':'(institutions buying)'):data.cbPrem.pct<-0.15?(isAr?'(مؤسسات تبيع)':'(institutions selling)'):''),bull:cbBull,col:cbBull?'var(--up)':data.cbPrem.pct<-0.1?'var(--dn)':'var(--warn)'});
+  }
+  if(data.bfxMargin){smartTotalCount++;var bfxBull=data.bfxMargin.longPct>55;if(bfxBull)smartBullCount++;
+    smartItems.push({ic:'📊',label:isAr?'هامش Bitfinex':'Bitfinex Margin',val:data.bfxMargin.longPct.toFixed(0)+'% Long / '+data.bfxMargin.shortPct.toFixed(0)+'% Short',bull:bfxBull,col:bfxBull?'var(--up)':data.bfxMargin.shortPct>55?'var(--dn)':'var(--warn)'});
+  }
+  if(data.hlFunding){smartTotalCount++;var hlBull=data.hlFunding.rate<0;if(hlBull)smartBullCount++;
+    smartItems.push({ic:'🔬',label:'Hyperliquid DEX',val:'FR '+(data.hlFunding.rate>=0?'+':'')+data.hlFunding.rate.toFixed(4)+'%',bull:hlBull,col:hlBull?'var(--up)':'var(--dn)'});
+  }
+  if(data.vpinData){smartTotalCount++;var vpBull=data.vpinData.vpin>0.5;if(vpBull)smartBullCount++;
+    smartItems.push({ic:'📡',label:'VPIN',val:data.vpinData.vpin.toFixed(2)+' '+(data.vpinData.vpin>0.6?(isAr?'(تداول مُطّلع عالي)':'(high informed trading)'):(isAr?'(طبيعي)':'(normal)')),bull:vpBull,col:vpBull?'var(--neon)':'var(--t2)'});
+  }
+  if(data.absorption&&data.absorption.signal){smartTotalCount++;var absBull=data.absorption.signal==='BULLISH_ABSORPTION';if(absBull)smartBullCount++;
+    smartItems.push({ic:'💧',label:isAr?'امتصاص':'Absorption',val:absBull?(isAr?'نشط صعودي':'Active bullish'):(isAr?'لا شيء':'None'),bull:absBull,col:absBull?'var(--up)':'var(--t3)'});
+  }
+  if(data.iceberg&&data.iceberg.signal&&data.iceberg.signal!=='NONE'){smartTotalCount++;var iceBull=data.iceberg.signal==='ICEBERG_BUY';if(iceBull)smartBullCount++;
+    smartItems.push({ic:'🧊',label:isAr?'أوامر Iceberg':'Iceberg Orders',val:iceBull?(isAr?'شراء مخفي':'Hidden buying'):(isAr?'بيع مخفي':'Hidden selling'),bull:iceBull,col:iceBull?'var(--up)':'var(--dn)'});
+  }
+  if(smartItems.length){
+    smartItems.forEach(function(si){
+      h+='<div class="mkt-row"><span class="mkt-row-label">'+si.ic+' '+si.label+'</span><span class="mkt-row-val" style="color:'+si.col+';direction:ltr">'+si.val+'</span></div>';
+    });
+    var verdictCol=smartBullCount>=smartTotalCount*0.65?'var(--up)':smartBullCount<=smartTotalCount*0.35?'var(--dn)':'var(--warn)';
+    var verdictTxt=smartBullCount>=smartTotalCount*0.65?(isAr?'✅ ذكاء المال صعودي — اتفاق':'✅ Smart money bullish — aligned'):smartBullCount<=smartTotalCount*0.35?(isAr?'⚠️ ذكاء المال هبوطي':'⚠️ Smart money bearish'):(isAr?'⚖️ منقسم':'⚖️ Split');
+    h+='<div class="mkt-assess" style="color:'+verdictCol+';font-weight:700">'+smartBullCount+' '+(isAr?'من':'of')+' '+smartTotalCount+' — '+verdictTxt+'</div>';
+  }else{
+    h+='<div style="text-align:center;color:var(--t3);font-size:11px;padding:8px">'+(isAr?'لا بيانات ذكاء مال متوفرة':'No smart money data')+'</div>';
+  }
   h+='</div></div>';
 
-  /* ════ Section 11: 3 Scenarios ════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F52E} '+(lang==='ar'?'\u0627\u0644\u0633\u064a\u0646\u0627\u0631\u064a\u0648\u0647\u0627\u062a':'Scenarios')+'</div>';
-  /* Bull scenario */
-  var step1U=data.price;var step2U=data.f618U;var step3U=data.f100U;
-  h+='<div class="mkt-scenario up">';
-  h+='<div class="mkt-scenario-t" style="color:var(--up)"><span>\u{1F4C8} '+(lang==='ar'?'\u0635\u0639\u0648\u062f\u064a':'Bullish')+'</span><span class="mkt-badge" style="background:rgba(0,255,136,.08);color:var(--up);margin:0">'+data.bullP+'%</span></div>';
-  h+='<div class="mkt-scenario-s">'+(lang==='ar'?'\u0634\u0631\u0637: ':'Trigger: ')+data.bullCond+'</div>';
-  h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0627\u0644\u0645\u0631\u062d\u0644\u0629 1: ':'Stage 1: ')+rP(step1U)+' \u2192 '+rP(step2U)+'</div>';
-  h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0627\u0644\u0645\u0631\u062d\u0644\u0629 2: ':'Stage 2: ')+rP(step2U)+' \u2192 '+rP(step3U)+'</div>';
-  h+='<div class="mkt-scenario-inv">\u274C '+data.bullInv+'</div>';
-  h+='<div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+data.bullP+'%;background:var(--up)"></div></div><span style="font-size:11px;color:var(--up)">'+data.bullP+'%</span></div>';
-  h+='</div>';
-  /* Neutral scenario */
-  h+='<div class="mkt-scenario neutral">';
-  h+='<div class="mkt-scenario-t" style="color:var(--warn)"><span>\u27A1\uFE0F '+(lang==='ar'?'\u062c\u0627\u0646\u0628\u064a':'Sideways')+'</span><span class="mkt-badge" style="background:rgba(255,184,0,.08);color:var(--warn);margin:0">'+data.neutP+'%</span></div>';
-  h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0646\u0637\u0627\u0642: ':'Range: ')+rP(data.supp)+' \u2194 '+rP(data.resist)+'</div>';
-  h+='<div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+data.neutP+'%;background:var(--warn)"></div></div><span style="font-size:11px;color:var(--warn)">'+data.neutP+'%</span></div>';
-  h+='</div>';
-  /* Bear scenario */
-  var step1D=data.price;var step2D=data.f618D;var step3D=data.supp;
-  h+='<div class="mkt-scenario down">';
-  h+='<div class="mkt-scenario-t" style="color:var(--dn)"><span>\u{1F4C9} '+(lang==='ar'?'\u0647\u0628\u0648\u0637\u064a':'Bearish')+'</span><span class="mkt-badge" style="background:rgba(255,56,96,.08);color:var(--dn);margin:0">'+data.bearP+'%</span></div>';
-  h+='<div class="mkt-scenario-s">'+(lang==='ar'?'\u0634\u0631\u0637: ':'Trigger: ')+data.bearCond+'</div>';
-  h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0627\u0644\u0645\u0631\u062d\u0644\u0629 1: ':'Stage 1: ')+rP(step1D)+' \u2192 '+rP(step2D)+'</div>';
-  h+='<div class="mkt-scenario-stage">'+(lang==='ar'?'\u0627\u0644\u0645\u0631\u062d\u0644\u0629 2: ':'Stage 2: ')+rP(step2D)+' \u2192 '+rP(step3D)+'</div>';
-  h+='<div class="mkt-scenario-inv">\u274C '+data.bearInv+'</div>';
-  h+='<div class="mkt-scenario-prob"><div class="mkt-scenario-prob-bar"><div class="mkt-scenario-prob-fill" style="width:'+data.bearP+'%;background:var(--dn)"></div></div><span style="font-size:8px;color:var(--dn)">'+data.bearP+'%</span></div>';
+  /* ════════ SECTION 10: FR Multi-Exchange (NEW) ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">🔮 10. '+(isAr?'معدلات التمويل — مقارنة متعددة المنصات':'FR — Multi-Exchange Comparison')+'</div>';
+  h+='<div class="mkt-box">';
+  var frSources=[];
+  if(data.fr)frSources.push({n:'Binance',r:data.fr.rate});
+  if(data.hlFunding)frSources.push({n:'Hyperliquid',r:data.hlFunding.rate});
+  if(typeof coinalyzeFR!=='undefined'&&coinalyzeFR[sym])frSources.push({n:'Coinalyze ('+(isAr?'مجمّع':'Agg')+')',r:coinalyzeFR[sym].rate});
+  if(typeof coinalyzePredFR!=='undefined'&&coinalyzePredFR[sym])frSources.push({n:isAr?'المتوقع':'Predicted',r:coinalyzePredFR[sym].rate,pred:true});
+  if(frSources.length){
+    frSources.forEach(function(fs){
+      var frC=fs.r<0?'var(--up)':fs.r>0.05?'var(--dn)':'var(--warn)';
+      var ic=fs.pred?'🔮':fs.r<0?'🟢':fs.r>0.05?'🔴':'🟡';
+      h+='<div class="mkt-row"><span class="mkt-row-label">'+ic+' '+fs.n+'</span><span class="mkt-row-val" style="color:'+frC+';direction:ltr;font-family:var(--fm)">'+(fs.r>=0?'+':'')+fs.r.toFixed(4)+'%</span></div>';
+    });
+  }
+  /* FR History mini-bars */
+  if(data.frHist&&data.frHist.data.length>=4){
+    var fhData=data.frHist.data.slice(-50);
+    var maxAbs=Math.max.apply(null,fhData.map(function(x){return Math.abs(x.rate)}));if(maxAbs===0)maxAbs=0.01;
+    var bars='<div style="display:flex;align-items:flex-end;gap:1px;height:32px;padding:4px 0">';
+    fhData.forEach(function(x){
+      var bH=Math.max(1,Math.abs(x.rate)/maxAbs*28);
+      var bC=x.rate<0?'var(--up)':'var(--dn)';
+      bars+='<div style="flex:1;height:'+bH+'px;background:'+bC+';border-radius:1px;opacity:'+(0.4+Math.abs(x.rate)/maxAbs*0.6)+'"></div>';
+    });
+    bars+='</div>';
+    h+='<div style="margin-top:8px"><div class="mkt-box-t">'+(isAr?'تاريخ FR — آخر '+fhData.length+' فترة':'FR History — last '+fhData.length+' periods')+'</div>'+bars;
+    var negInterpret=data.frHist.negCount>=7?(isAr?'سلبي باستمرار — الشورتات تدفع للونقات = صعودي':'Consistently negative — shorts paying longs = bullish'):data.frHist.negCount>=5?(isAr?'سلبي في الغالب':'Mostly negative'):data.frHist.negCount<=3?(isAr?'إيجابي في الغالب — جشع':'Mostly positive — greed'):(isAr?'متذبذب':'Mixed');
+    h+='<div style="font-size:10px;color:var(--t1);margin-top:4px">'+data.frHist.negCount+'/'+data.frHist.totalCount+' '+(isAr?'قراءات سلبية — ':'negative readings — ')+negInterpret+'</div></div>';
+  }
   h+='</div></div>';
 
-  /* ════ Section 12: Advanced Intelligence (NEW — Binance Free Data) ════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F9E0} '+(lang==='ar'?'\u0627\u0644\u0630\u0643\u0627\u0621 \u0627\u0644\u0645\u062a\u0642\u062f\u0645':'Advanced Intelligence')+'</div>';
-  /* Top Traders L/S */
-  var ttd=topTradersLS[sym];
-  if(ttd&&ttd.accounts&&ttd.accounts.length){var ttLast=ttd.accounts[ttd.accounts.length-1];var ttPrev=ttd.accounts.length>=2?ttd.accounts[ttd.accounts.length-2]:ttLast;
-    var ttLong=(ttLast.long*100).toFixed(0);var ttShort=(ttLast.short*100).toFixed(0);var ttTrend=ttLast.long>ttPrev.long?'up':'down';
-    h+='<div class="mkt-box"><div class="mkt-box-t">\u{1F3C6} '+(lang==='ar'?'\u0643\u0628\u0627\u0631 \u0627\u0644\u0645\u062a\u062f\u0627\u0648\u0644\u064a\u0646 (Binance Top 20%)':'Top Traders (Binance Top 20%)')+'</div>';
-    h+='<div style="display:flex;align-items:center;gap:8px;margin:6px 0"><div style="flex:1;height:10px;border-radius:5px;overflow:hidden;display:flex"><div style="width:'+ttLong+'%;background:var(--up)"></div><div style="width:'+ttShort+'%;background:var(--dn)"></div></div></div>';
-    h+='<div style="display:flex;justify-content:space-between;font-size:10px"><span style="color:var(--up);font-weight:700">Long '+ttLong+'%</span><span style="font-size:9px;color:var(--t2)">'+(ttTrend==='up'?'\u{1F4C8}':'\u{1F4C9}')+' '+(ttTrend==='up'?(lang==='ar'?'\u0627\u0644\u0643\u0628\u0627\u0631 \u064a\u0632\u064a\u062f\u0648\u0646 Long':'Pros increasing Long'):(lang==='ar'?'\u0627\u0644\u0643\u0628\u0627\u0631 \u064a\u0632\u064a\u062f\u0648\u0646 Short':'Pros increasing Short'))+'</span><span style="color:var(--dn);font-weight:700">Short '+ttShort+'%</span></div></div>'}
-  /* Real CVD */
-  var cvdR=aggCVD[sym];
-  if(cvdR){var cvdCol=cvdR.trend==='BUYING'?'var(--up)':cvdR.trend==='SELLING'?'var(--dn)':'var(--warn)';
-    var buyPct=Math.round(cvdR.buyVol/(cvdR.buyVol+cvdR.sellVol)*100);
-    h+='<div class="mkt-box"><div class="mkt-box-t">\u{1F52C} '+(lang==='ar'?'CVD \u0627\u0644\u062d\u0642\u064a\u0642\u064a (\u0622\u062e\u0631 500 \u0635\u0641\u0642\u0629 Futures)':'Real CVD (Last 500 Futures trades)')+'</div>';
-    h+='<div style="display:flex;align-items:center;gap:8px;margin:6px 0"><div style="flex:1;height:10px;border-radius:5px;overflow:hidden;display:flex"><div style="width:'+buyPct+'%;background:var(--up)"></div><div style="width:'+(100-buyPct)+'%;background:var(--dn)"></div></div></div>';
-    h+='<div style="display:flex;justify-content:space-between;font-size:10px"><span style="color:var(--up)">'+(lang==='ar'?'\u0634\u0631\u0627\u0621':'Buy')+': $'+fmt(cvdR.buyVol)+'</span><span style="font-weight:800;color:'+cvdCol+'">'+(cvdR.trend==='BUYING'?(lang==='ar'?'\u0634\u0631\u0627\u0621 \u0645\u062e\u0641\u064a':'Hidden buying'):cvdR.trend==='SELLING'?(lang==='ar'?'\u0628\u064a\u0639 \u0645\u062e\u0641\u064a':'Hidden selling'):(lang==='ar'?'\u0645\u062a\u0648\u0627\u0632\u0646':'Balanced'))+'</span><span style="color:var(--dn)">'+(lang==='ar'?'\u0628\u064a\u0639':'Sell')+': $'+fmt(cvdR.sellVol)+'</span></div></div>'}
-  /* FR History mini chart */
-  if(frHistory[sym]&&frHistory[sym].length>=4){
-    var frH=frHistory[sym];var frLast=frH[frH.length-1];var frAvg=frH.slice(-8).reduce(function(a,x){return a+x.rate},0)/Math.min(8,frH.length);
-    var frTrend=frH.length>=2?(frLast.rate>frH[frH.length-2].rate?'up':'down'):'flat';
-    h+='<div class="mkt-box"><div class="mkt-box-t">\u{1F4C9} '+(lang==='ar'?'\u062a\u0627\u0631\u064a\u062e FR (\u0622\u062e\u0631 '+frH.length+' \u0641\u062a\u0631\u0629)':'FR History (last '+frH.length+' periods)')+'</div>';
-    h+='<div style="display:flex;align-items:center;gap:8px;margin:4px 0">'+frHistBars(sym)+'<span style="font-size:10px;font-family:var(--fm);color:'+(frLast.rate>0.03?'var(--dn)':frLast.rate<-0.01?'var(--up)':'var(--t1)');
-    h+=';direction:ltr">'+(frLast.rate>=0?'+':'')+frLast.rate.toFixed(4)+'%</span><span style="font-size:8px;color:var(--t2)">'+(lang==='ar'?'\u0645\u062a\u0648\u0633\u0637: ':'Avg: ')+(frAvg>=0?'+':'')+frAvg.toFixed(4)+'% '+(frTrend==='up'?'\u{1F4C8}':'\u{1F4C9}')+'</span></div></div>'}
-  /* OI History change */
-  if(oiHistory[sym]&&oiHistory[sym].length>=4){
-    var oiH=oiHistory[sym];var oiLast=oiH[oiH.length-1];var oiFirst=oiH[0];
-    var oiChg=oiFirst.val>0?((oiLast.val-oiFirst.val)/oiFirst.val*100):0;
-    var priceChg=data.ch.h24;
-    var oiInterp='';
-    if(oiChg>3&&priceChg>0)oiInterp=lang==='ar'?'\u{1F7E2} \u0623\u0645\u0648\u0627\u0644 Long \u062c\u062f\u064a\u062f\u0629 \u062a\u062f\u062e\u0644':'New Long money entering';
-    else if(oiChg>3&&priceChg<0)oiInterp=lang==='ar'?'\u{1F534} \u0623\u0645\u0648\u0627\u0644 Short \u062c\u062f\u064a\u062f\u0629':'New Short money entering';
-    else if(oiChg<-3&&priceChg>0)oiInterp=lang==='ar'?'\u{1F7E1} Short Squeeze':'Short Squeeze';
-    else if(oiChg<-3&&priceChg<0)oiInterp=lang==='ar'?'\u{1F7E1} Long Squeeze':'Long Squeeze';
-    else oiInterp=lang==='ar'?'\u2014 \u0645\u0633\u062a\u0642\u0631':'Stable';
-    h+='<div class="mkt-box"><div class="mkt-box-t">\u{1F4CA} '+(lang==='ar'?'\u062a\u063a\u064a\u0631 OI 24 \u0633\u0627\u0639\u0629':'OI Change 24h')+'</div>';
-    h+='<div style="display:flex;align-items:center;gap:8px;margin:4px 0">'+oiHistBars(sym)+'<span style="font-size:12px;font-weight:800;font-family:var(--fm);color:'+(oiChg>3?'var(--up)':oiChg<-3?'var(--dn)':'var(--warn)');
-    h+=';direction:ltr">'+(oiChg>=0?'+':'')+oiChg.toFixed(1)+'%</span><span style="font-size:9px;color:var(--t1)">'+oiInterp+'</span></div></div>'}
-  /* Spread */
-  var spd=bookTickers[sym];
-  if(spd){h+='<div style="display:flex;gap:8px;margin-bottom:6px"><div class="mkt-box" style="flex:1"><div class="mkt-box-t">\u{1F4D0} Spread</div><div style="font-size:14px;font-weight:800;font-family:var(--fm);color:'+(spd.spread>0.05?'var(--dn)':'var(--up)');
-    h+=';direction:ltr">'+spd.spread.toFixed(3)+'%</div><div style="font-size:8px;color:var(--t2)">'+(spd.spread>0.05?(lang==='ar'?'\u0633\u064a\u0648\u0644\u0629 \u0636\u0639\u064a\u0641\u0629':'Low liquidity'):(lang==='ar'?'\u0633\u064a\u0648\u0644\u0629 \u062c\u064a\u062f\u0629':'Good liquidity'))+'</div></div>';
-    var bidPressure=spd.bidQty>spd.askQty*1.2;var askPressure=spd.askQty>spd.bidQty*1.2;
-    h+='<div class="mkt-box" style="flex:1"><div class="mkt-box-t">\u{2696}\uFE0F '+(lang==='ar'?'\u0636\u063a\u0637':'Pressure')+'</div><div style="font-size:14px;font-weight:800;color:'+(bidPressure?'var(--up)':askPressure?'var(--dn)':'var(--warn)')+'">'+(bidPressure?(lang==='ar'?'\u0634\u0631\u0627\u0621':'Buy'):askPressure?(lang==='ar'?'\u0628\u064a\u0639':'Sell'):(lang==='ar'?'\u0645\u062a\u0648\u0627\u0632\u0646':'Balanced'))+'</div><div style="font-size:8px;color:var(--t2);direction:ltr">Bid:$'+fmt(spd.bid*spd.bidQty)+' / Ask:$'+fmt(spd.ask*spd.askQty)+'</div></div></div>'}
-  h+='</div>';
+  /* ════════ SECTION 11: Liquidation Zones (NEW) ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">💥 11. '+(isAr?'مناطق التصفية — مغناطيس السعر':'Liquidation Zones — Price Magnets')+'</div>';
+  h+='<div class="mkt-box">';
+  var longLiq=0,shortLiq=0;
+  if(data.liqZones&&data.liqZones.length){
+    data.liqZones.forEach(function(lz){if(lz.side==='Long')longLiq+=lz.amt;else shortLiq+=lz.amt});
+  }
+  if(data.aggLiq){longLiq+=data.aggLiq.longVol;shortLiq+=data.aggLiq.shortVol;}
+  var totalLiq=longLiq+shortLiq;
+  if(totalLiq>0){
+    h+='<div style="font-size:10px;color:var(--t2);margin-bottom:8px;line-height:1.6">'+(isAr?'السعر يميل لجذب نحو مناطق التصفية الأكبر (short squeeze / long squeeze).':'Price tends to pull toward the larger liquidation cluster (short/long squeeze).')+'</div>';
+    var shortPct=Math.round(shortLiq/totalLiq*100);
+    /* Visual bar: above (shorts liquidating = bullish magnet) vs below (longs = bearish magnet) */
+    h+='<div style="padding:8px;background:rgba(255,56,96,.04);border-radius:6px;margin-bottom:4px">';
+    h+='<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span>🔴 '+(isAr?'فوق السعر — تصفيات Short':'Above — Short liquidations')+'</span><span style="font-family:var(--fm);font-weight:800;color:var(--dn)">$'+fmt(shortLiq)+'</span></div>';
+    h+='<div style="height:6px;background:var(--bg2);border-radius:3px;overflow:hidden"><div style="width:'+shortPct+'%;height:100%;background:var(--dn)"></div></div>';
+    h+='</div>';
+    h+='<div style="text-align:center;padding:4px;font-family:var(--fm);font-size:11px;color:var(--blue)">▬▬▬ '+(isAr?'السعر الحالي':'Current')+' '+rP(data.price)+' ▬▬▬</div>';
+    var longPct=100-shortPct;
+    h+='<div style="padding:8px;background:rgba(0,255,136,.04);border-radius:6px;margin-top:4px">';
+    h+='<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:3px"><span>🟢 '+(isAr?'تحت السعر — تصفيات Long':'Below — Long liquidations')+'</span><span style="font-family:var(--fm);font-weight:800;color:var(--up)">$'+fmt(longLiq)+'</span></div>';
+    h+='<div style="height:6px;background:var(--bg2);border-radius:3px;overflow:hidden"><div style="width:'+longPct+'%;height:100%;background:var(--up)"></div></div>';
+    h+='</div>';
+    /* Verdict */
+    var liqVerdict='';
+    if(shortLiq>longLiq*1.5)liqVerdict=isAr?'🧲 المغناطيس للأعلى — سيولة Short أكبر = احتمال short squeeze صعودي':'🧲 Magnet up — more short liquidity = potential short squeeze';
+    else if(longLiq>shortLiq*1.5)liqVerdict=isAr?'🧲 المغناطيس للأسفل — سيولة Long أكبر = احتمال long squeeze هبوطي':'🧲 Magnet down — more long liquidity = potential long squeeze';
+    else liqVerdict=isAr?'⚖️ متوازن — لا تحيز واضح':'⚖️ Balanced — no clear bias';
+    h+='<div class="mkt-assess">'+liqVerdict+'</div>';
+  }else{
+    h+='<div style="text-align:center;color:var(--t3);font-size:11px;padding:8px">'+(isAr?'لا تصفيات مهمة في آخر ساعة':'No significant liquidations in last hour')+'</div>';
+  }
+  h+='</div></div>';
 
-  /* ════ Section 13: FVG Detail (Fair Value Gaps) ════ */
-  if(data.fvgs&&data.fvgs.length){
-    h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F573}\uFE0F '+(lang==='ar'?'\u0627\u0644\u0641\u062c\u0648\u0627\u062a \u0627\u0644\u0633\u0639\u0631\u064a\u0629 (FVG)':'Fair Value Gaps (FVG)')+'</div>';
-    h+='<div style="font-size:10px;color:var(--t2);margin-bottom:6px;line-height:1.6">'+(lang==='ar'?'\u0627\u0644\u0641\u062c\u0648\u0629 \u0627\u0644\u0633\u0639\u0631\u064a\u0629 = \u0645\u0646\u0637\u0642\u0629 \u0644\u0645 \u064a\u062a\u0645 \u062a\u062f\u0627\u0648\u0644\u0647\u0627 \u0628\u0634\u0643\u0644 \u0643\u0627\u0641\u064a. \u0627\u0644\u0633\u0639\u0631 \u063a\u0627\u0644\u0628\u0627\u064b \u064a\u0639\u0648\u062f \u0644\u0645\u0644\u0626\u0647\u0627 \u0642\u0628\u0644 \u0645\u0648\u0627\u0635\u0644\u0629 \u0627\u0644\u0627\u062a\u062c\u0627\u0647.':'A Fair Value Gap is a price zone that was not traded adequately. Price often returns to fill it before continuing.')+'</div>';
-    data.fvgs.forEach(function(f){
-      var isBull=f.type==='bullish';var icon=isBull?'\u{1F7E2}':'\u{1F534}';
-      h+='<div class="mkt-row" style="background:'+(isBull?'rgba(0,255,136,.03)':'rgba(255,56,96,.03)')+';border:1px solid '+(isBull?'rgba(0,255,136,.06)':'rgba(255,56,96,.06)')+';border-radius:8px;padding:6px 8px;margin-bottom:4px">';
-      h+='<div style="display:flex;justify-content:space-between;align-items:center"><span style="font-size:10px;font-weight:700">'+icon+' FVG '+(isBull?(lang==='ar'?'\u0635\u0639\u0648\u062f\u064a':'Bullish'):(lang==='ar'?'\u0647\u0628\u0648\u0637\u064a':'Bearish'))+'</span>';
-      h+='<span style="font-size:10px;font-family:var(--fm);font-weight:700;direction:ltr;color:'+(isBull?'var(--up)':'var(--dn)')+'">'+f.bot+' \u2014 '+f.top+'</span></div>';
-      h+='<div style="font-size:9px;color:var(--t2);margin-top:2px">'+(isBull?(lang==='ar'?'\u0627\u0644\u0633\u0639\u0631 \u0645\u0645\u0643\u0646 \u064a\u0646\u0632\u0644 \u0644\u0647\u0630\u0647 \u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u062b\u0645 \u064a\u0631\u062a\u062f \u0635\u0639\u0648\u062f\u0627\u064b':'Price may dip to this zone then bounce up'):(lang==='ar'?'\u0627\u0644\u0633\u0639\u0631 \u0645\u0645\u0643\u0646 \u064a\u0637\u0644\u0639 \u0644\u0647\u0630\u0647 \u0627\u0644\u0645\u0646\u0637\u0642\u0629 \u062b\u0645 \u064a\u0647\u0628\u0637':'Price may rise to this zone then drop'))+'</div></div>';
+  /* ════════ SECTION 12: BTC↔ETH Correlation (NEW) ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">🔗 12. '+(isAr?'العلاقة BTC ↔ ETH':'BTC ↔ ETH Correlation')+'</div>';
+  h+='<div class="mkt-box">';
+  if(data.btcChange!==null&&data.ethChange!==null){
+    h+='<div class="mkt-row"><span class="mkt-row-label">BTC 24h</span><span class="mkt-row-val" style="color:'+(data.btcChange>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.btcChange>=0?'+':'')+data.btcChange.toFixed(2)+'%</span></div>';
+    h+='<div class="mkt-row"><span class="mkt-row-label">ETH 24h</span><span class="mkt-row-val" style="color:'+(data.ethChange>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.ethChange>=0?'+':'')+data.ethChange.toFixed(2)+'%</span></div>';
+    /* Simple correlation signal from signs */
+    var bothUp=data.btcChange>0&&data.ethChange>0;
+    var bothDown=data.btcChange<0&&data.ethChange<0;
+    var corrLabel=bothUp||bothDown?(isAr?'قوي (متزامنان)':'Strong (aligned)'):(isAr?'ضعيف (منفصلان)':'Weak (divergent)');
+    var corrVal=bothUp||bothDown?'≈ 0.85':'≈ 0.35';
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'الارتباط':'Correlation')+'</span><span class="mkt-row-val" style="font-family:var(--fm)">'+corrVal+' — '+corrLabel+'</span></div>';
+  }
+  if(typeof btcDom!=='undefined'){
+    var domTrend=btcDom>55?'↑':btcDom<50?'↓':'→';
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'هيمنة BTC':'BTC Dominance')+'</span><span class="mkt-row-val" style="font-family:var(--fm)">'+btcDom.toFixed(1)+'% '+domTrend+'</span></div>';
+  }
+  if(data.ethBtcRatio){
+    h+='<div class="mkt-row"><span class="mkt-row-label">ETH/BTC</span><span class="mkt-row-val" style="font-family:var(--fm);direction:ltr">'+data.ethBtcRatio.toFixed(5)+'</span></div>';
+  }
+  /* Altseason signal */
+  if(data.ethChange!==null&&data.btcChange!==null){
+    var altSig='';
+    if(data.ethChange>data.btcChange+1)altSig=isAr?'🚀 ETH يتفوق — بداية محتملة لموسم البدائل':'🚀 ETH outperforming — potential altseason start';
+    else if(data.btcChange>data.ethChange+1)altSig=isAr?'🛡️ BTC يقود — المال يتجه للأمان':'🛡️ BTC leading — money seeking safety';
+    else altSig=isAr?'⚖️ تحرك متوازي':'⚖️ Parallel movement';
+    h+='<div class="mkt-assess">'+altSig+'</div>';
+  }
+  h+='</div></div>';
+
+  /* ════════ SECTION 13: Market Context Bar (NEW) ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">🌍 13. '+(isAr?'سياق السوق':'Market Context')+'</div>';
+  h+='<div class="mkt-box" style="padding:10px">';
+  var ctxChips='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">';
+  /* Fear & Greed */
+  if(typeof fgValue!=='undefined'){
+    var fgC=fgValue<30?'var(--dn)':fgValue>60?'var(--up)':'var(--warn)';
+    var fgL=fgValue<25?(isAr?'خوف شديد':'Extreme fear'):fgValue<45?(isAr?'خوف':'Fear'):fgValue<55?(isAr?'محايد':'Neutral'):fgValue<75?(isAr?'طمع':'Greed'):(isAr?'طمع شديد':'Extreme greed');
+    ctxChips+='<span style="padding:3px 8px;background:'+fgC+'15;color:'+fgC+';border-radius:8px;font-size:10px;font-weight:700">'+(isAr?'خوف/طمع: ':'F&G: ')+fgValue+' — '+fgL+'</span>';
+  }
+  /* BTC Dom */
+  if(typeof btcDom!=='undefined'){
+    ctxChips+='<span style="padding:3px 8px;background:rgba(247,147,26,.1);color:#f7931a;border-radius:8px;font-size:10px;font-weight:700">BTC Dom: '+btcDom.toFixed(1)+'%</span>';
+  }
+  /* News */
+  if(data.newsScore){
+    var nsC=data.newsScore.score>60?'var(--up)':data.newsScore.score<40?'var(--dn)':'var(--warn)';
+    ctxChips+='<span style="padding:3px 8px;background:'+nsC+'15;color:'+nsC+';border-radius:8px;font-size:10px;font-weight:700">'+(isAr?'أخبار: ':'News: ')+data.newsScore.score+'%+</span>';
+  }
+  /* Stablecoin flow */
+  if(data.stableFlow&&data.stableFlow.usdt>0){
+    ctxChips+='<span style="padding:3px 8px;background:rgba(91,156,255,.1);color:var(--blue);border-radius:8px;font-size:10px;font-weight:700">USDT: '+fmtB(data.stableFlow.usdt)+'</span>';
+  }
+  ctxChips+='</div>';
+  h+=ctxChips;
+  /* Upcoming unlocks */
+  if(data.unlocks&&data.unlocks.length){
+    h+='<div style="margin-top:4px">';
+    data.unlocks.forEach(function(u){
+      var dt=new Date(u.date);var days=Math.ceil((dt-Date.now())/86400000);
+      h+='<div style="font-size:10px;color:var(--warn);margin:3px 0">🔓 '+(isAr?'فك ':'Unlock ')+u.sym+' $'+fmt(u.amount)+' '+(isAr?'بعد ':'in ')+days+(isAr?' يوم':'d')+'</div>';
     });
     h+='</div>';
   }
-
-  /* ════ Section 14: Detailed Conclusion — Full Reasoning ════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">\u{1F4DD} '+(lang==='ar'?'\u0627\u0644\u062e\u0644\u0627\u0635\u0629 \u0627\u0644\u0645\u0641\u0635\u0651\u0644\u0629 \u2014 \u0644\u0645\u0627\u0630\u0627 \u0647\u0630\u0627 \u0627\u0644\u0627\u062a\u062c\u0627\u0647\u061f':'Detailed Conclusion \u2014 Why this direction?')+'</div>';
-  var isBull=data.ts>=2;var isBear=data.ts<=-2;var isNeutral=!isBull&&!isBear;
-  var rsns=[];var wrns=[];
-  /* 1. Candle */
-  if(data.kl4h&&data.kl4h.length>=2){var lK=data.kl4h[data.kl4h.length-1];var lkG=+lK[4]>=+lK[1];
-    if(lkG&&isBull)rsns.push(lang==='ar'?'\u{1F56F} <b>\u0625\u063a\u0644\u0627\u0642 \u0627\u0644\u0634\u0645\u0648\u0639:</b> \u0627\u0644\u0634\u0645\u0639\u0629 \u0627\u0644\u0623\u062e\u064a\u0631\u0629 4H \u0623\u063a\u0644\u0642\u062a \u0635\u0639\u0648\u062f\u064a\u0629 (\u062e\u0636\u0631\u0627\u0621) \u0645\u0645\u0627 \u064a\u062f\u0644 \u0639\u0644\u0649 \u0633\u064a\u0637\u0631\u0629 \u0627\u0644\u0645\u0634\u062a\u0631\u064a\u0646 \u0648\u0627\u0633\u062a\u0645\u0631\u0627\u0631 \u0627\u0644\u0632\u062e\u0645 \u0627\u0644\u0635\u0639\u0648\u062f\u064a':'\u{1F56F} <b>Candle:</b> Last 4H closed bullish \u2014 buyers in control');
-    if(!lkG&&isBear)rsns.push(lang==='ar'?'\u{1F56F} <b>\u0625\u063a\u0644\u0627\u0642 \u0627\u0644\u0634\u0645\u0648\u0639:</b> \u0627\u0644\u0634\u0645\u0639\u0629 \u0627\u0644\u0623\u062e\u064a\u0631\u0629 \u0623\u063a\u0644\u0642\u062a \u0647\u0628\u0648\u0637\u064a\u0629 (\u062d\u0645\u0631\u0627\u0621) \u0645\u0645\u0627 \u064a\u062f\u0644 \u0639\u0644\u0649 \u0633\u064a\u0637\u0631\u0629 \u0627\u0644\u0628\u0627\u0626\u0639\u064a\u0646 \u0648\u0636\u063a\u0637 \u0628\u064a\u0639\u064a \u0645\u0633\u062a\u0645\u0631':'\u{1F56F} <b>Candle:</b> Last 4H closed bearish \u2014 sellers dominating')}
-  /* 2. EMA */
-  if(isBull&&data.price>data.ema20)rsns.push(lang==='ar'?'\u{1F4CA} <b>\u0627\u0644\u0645\u062a\u0648\u0633\u0637\u0627\u062a:</b> \u0627\u0644\u0633\u0639\u0631 \u0641\u0648\u0642 EMA20 ('+rP(data.ema20)+') \u0648EMA50 ('+rP(data.ema50)+') \u0645\u0645\u0627 \u064a\u0639\u0646\u064a \u0627\u0644\u0627\u062a\u062c\u0627\u0647 \u0627\u0644\u0639\u0627\u0645 \u0635\u0639\u0648\u062f\u064a \u0648\u0627\u0644\u0633\u0639\u0631 \u0645\u062f\u0639\u0648\u0645 \u0628\u0627\u0644\u0645\u062a\u0648\u0633\u0637\u0627\u062a \u0627\u0644\u0645\u062a\u062d\u0631\u0643\u0629':'\u{1F4CA} <b>MAs:</b> Price above EMA20 ('+rP(data.ema20)+') & EMA50 ('+rP(data.ema50)+') \u2014 bullish trend confirmed by moving averages');
-  if(isBear&&data.price<data.ema20)rsns.push(lang==='ar'?'\u{1F4CA} <b>\u0627\u0644\u0645\u062a\u0648\u0633\u0637\u0627\u062a:</b> \u0627\u0644\u0633\u0639\u0631 \u062a\u062d\u062a EMA20 ('+rP(data.ema20)+') \u0648EMA50 ('+rP(data.ema50)+') \u2014 \u0627\u0644\u0627\u062a\u062c\u0627\u0647 \u0647\u0628\u0648\u0637\u064a \u0648\u0627\u0644\u0645\u062a\u0648\u0633\u0637\u0627\u062a \u062a\u0639\u0645\u0644 \u0643\u0645\u0642\u0627\u0648\u0645\u0629':'\u{1F4CA} <b>MAs:</b> Price below EMA20 & EMA50 \u2014 bearish, MAs acting as resistance');
-  /* 3. S/R */
-  rsns.push(lang==='ar'?'\u{1F5FA} <b>\u0627\u0644\u062f\u0639\u0645/\u0645\u0642\u0627\u0648\u0645\u0629:</b> \u062f\u0639\u0645 '+rP(data.supp)+' \u0648\u0645\u0642\u0627\u0648\u0645\u0629 '+rP(data.resist)+'. '+(isBull?'\u0627\u0644\u0633\u0639\u0631 \u064a\u0636\u063a\u0637 \u0639\u0644\u0649 \u0627\u0644\u0645\u0642\u0627\u0648\u0645\u0629 \u2014 \u0627\u0644\u0645\u0634\u062a\u0631\u0648\u0646 \u0623\u0642\u0648\u064a\u0627\u0621':isBear?'\u0627\u0644\u0633\u0639\u0631 \u064a\u0642\u062a\u0631\u0628 \u0645\u0646 \u0627\u0644\u062f\u0639\u0645 \u2014 \u0643\u0633\u0631\u0647 \u064a\u0639\u0646\u064a \u0647\u0628\u0648\u0637 \u0623\u0639\u0645\u0642':'\u0641\u064a \u0645\u0646\u062a\u0635\u0641 \u0627\u0644\u0646\u0637\u0627\u0642'):'\u{1F5FA} <b>S/R:</b> Support '+rP(data.supp)+', resistance '+rP(data.resist)+'. '+(isBull?'Price pressing resistance \u2014 buyers strong':isBear?'Price nearing support \u2014 break means deeper drop':'Mid-range'));
-  /* 4. Whales */
-  if(data.wConf>=40)rsns.push(lang==='ar'?'\u{1F433} <b>\u0627\u0644\u062d\u064a\u062a\u0627\u0646:</b> \u062a\u062c\u0645\u064a\u0639 \u0628\u062b\u0642\u0629 '+data.wConf+'% \u2014 \u0627\u0644\u0645\u062d\u0627\u0641\u0638 \u0627\u0644\u0643\u0628\u064a\u0631\u0629 \u062a\u0634\u062a\u0631\u064a \u0628\u0643\u0645\u064a\u0627\u062a \u0636\u062e\u0645\u0629 \u0639\u0628\u0631 \u0623\u0648\u0627\u0645\u0631 \u0645\u062c\u0632\u0623\u0629\u060c \u0645\u0624\u0634\u0631 \u0625\u064a\u062c\u0627\u0628\u064a \u0642\u0648\u064a \u0644\u0623\u0646 \u0627\u0644\u062d\u064a\u062a\u0627\u0646 \u062a\u0645\u0644\u0643 \u0645\u0639\u0644\u0648\u0645\u0627\u062a \u0623\u0643\u062b\u0631':'\u{1F433} <b>Whales:</b> Accumulation at '+data.wConf+'% confidence \u2014 large wallets buying in hidden chunks, strong bullish signal');
-  else if(data.wConf<20&&isBear)rsns.push(lang==='ar'?'\u{1F433} <b>\u0627\u0644\u062d\u064a\u062a\u0627\u0646:</b> \u0644\u0627 \u062a\u062c\u0645\u064a\u0639 ('+data.wConf+'% \u0641\u0642\u0637) \u2014 \u0644\u0627 \u062f\u0639\u0645 \u0645\u0624\u0633\u0633\u064a':'\u{1F433} <b>Whales:</b> No accumulation ('+data.wConf+'%) \u2014 no institutional support');
-  /* 5. CVD */
-  var cvdR2=aggCVD[sym];
-  if(cvdR2&&cvdR2.trend==='BUYING')rsns.push(lang==='ar'?'\u{1F52C} <b>CVD:</b> \u0634\u0631\u0627\u0621 $'+fmt(cvdR2.buyVol)+' > \u0628\u064a\u0639 $'+fmt(cvdR2.sellVol)+' ('+cvdR2.ratio.toFixed(1)+'x) \u2014 \u0634\u0631\u0627\u0621 \u0645\u062e\u0641\u064a \u0642\u0648\u064a \u0644\u0645 \u064a\u0646\u0639\u0643\u0633 \u0639\u0644\u0649 \u0627\u0644\u0633\u0639\u0631 \u0628\u0639\u062f':'\u{1F52C} <b>CVD:</b> Buy $'+fmt(cvdR2.buyVol)+' > Sell $'+fmt(cvdR2.sellVol)+' ('+cvdR2.ratio.toFixed(1)+'x) \u2014 hidden buying not yet in price');
-  if(cvdR2&&cvdR2.trend==='SELLING')rsns.push(lang==='ar'?'\u{1F52C} <b>CVD:</b> \u0628\u064a\u0639 $'+fmt(cvdR2.sellVol)+' > \u0634\u0631\u0627\u0621 $'+fmt(cvdR2.buyVol)+' \u2014 \u0628\u064a\u0639 \u0645\u062e\u0641\u064a\u060c \u0627\u0644\u0633\u0639\u0631 \u0642\u062f \u064a\u062a\u0628\u0639\u0647 \u0642\u0631\u064a\u0628\u0627\u064b':'\u{1F52C} <b>CVD:</b> Sell $'+fmt(cvdR2.sellVol)+' > Buy $'+fmt(cvdR2.buyVol)+' \u2014 hidden selling, price may follow');
-  /* 6. Top Traders */
-  var tt2=topTradersLS[sym];
-  if(tt2&&tt2.accounts&&tt2.accounts.length){var tL2=tt2.accounts[tt2.accounts.length-1];
-    if(tL2.long>0.55)rsns.push(lang==='ar'?'\u{1F3C6} <b>\u0643\u0628\u0627\u0631 \u0627\u0644\u0645\u062a\u062f\u0627\u0648\u0644\u064a\u0646:</b> '+Math.round(tL2.long*100)+'% \u0645\u0646 \u0623\u0643\u0628\u0631 20% \u0639\u0644\u0649 Binance \u064a\u062d\u062a\u0641\u0638\u0648\u0646 Long \u2014 \u0627\u0644\u0645\u062d\u062a\u0631\u0641\u0648\u0646 \u064a\u0631\u0627\u0647\u0646\u0648\u0646 \u0639\u0644\u0649 \u0627\u0644\u0635\u0639\u0648\u062f':'\u{1F3C6} <b>Top Traders:</b> '+Math.round(tL2.long*100)+'% of Binance top 20% are Long \u2014 pros betting bullish');
-    if(tL2.long<0.45)rsns.push(lang==='ar'?'\u{1F3C6} <b>\u0643\u0628\u0627\u0631 \u0627\u0644\u0645\u062a\u062f\u0627\u0648\u0644\u064a\u0646:</b> '+Math.round(tL2.short*100)+'% Short \u2014 \u0627\u0644\u0645\u062d\u062a\u0631\u0641\u0648\u0646 \u064a\u062a\u0648\u0642\u0639\u0648\u0646 \u0647\u0628\u0648\u0637':'\u{1F3C6} <b>Top Traders:</b> '+Math.round(tL2.short*100)+'% Short \u2014 pros expect decline')}
-  /* 7. OI */
-  if(oiHistory[sym]&&oiHistory[sym].length>=4){var oH2=oiHistory[sym];var oC2=oH2[0].val>0?((oH2[oH2.length-1].val-oH2[0].val)/oH2[0].val*100):0;
-    if(oC2>3&&data.ch.h24>0)rsns.push(lang==='ar'?'\u{1F4CA} <b>OI:</b> \u0632\u0627\u062f +'+(oC2).toFixed(1)+'% \u0645\u0639 \u0627\u0631\u062a\u0641\u0627\u0639 \u0627\u0644\u0633\u0639\u0631 \u2014 \u0623\u0645\u0648\u0627\u0644 Long \u062c\u062f\u064a\u062f\u0629 \u062a\u062f\u062e\u0644\u060c \u0627\u0644\u0635\u0639\u0648\u062f \u0645\u062f\u0639\u0648\u0645 \u0628\u0633\u064a\u0648\u0644\u0629 \u062d\u0642\u064a\u0642\u064a\u0629':'\u{1F4CA} <b>OI:</b> Up +'+(oC2).toFixed(1)+'% with price rising \u2014 new Long money, rally backed by real liquidity');
-    if(oC2>3&&data.ch.h24<0)rsns.push(lang==='ar'?'\u{1F4CA} <b>OI:</b> \u0632\u0627\u062f +'+(oC2).toFixed(1)+'% \u0645\u0639 \u0627\u0646\u062e\u0641\u0627\u0636 \u0627\u0644\u0633\u0639\u0631 \u2014 \u0623\u0645\u0648\u0627\u0644 Short \u062c\u062f\u064a\u062f\u0629\u060c \u0636\u063a\u0637 \u0628\u064a\u0639\u064a \u064a\u062a\u0632\u0627\u064a\u062f':'\u{1F4CA} <b>OI:</b> Up +'+(oC2).toFixed(1)+'% with price dropping \u2014 new Short money, selling pressure growing')}
-  /* 8. FR */
-  if(data.fr&&data.fr.rate>0.05)wrns.push(lang==='ar'?'\u{1F4B0} <b>FR \u0645\u0631\u062a\u0641\u0639:</b> '+(data.fr.rate*100).toFixed(3)+'% \u2014 \u062c\u0634\u0639 \u0645\u0641\u0631\u0637\u060c \u0627\u062d\u062a\u0645\u0627\u0644 \u062a\u0635\u062d\u064a\u062d \u0642\u0631\u064a\u0628':'\u{1F4B0} <b>High FR:</b> '+(data.fr.rate*100).toFixed(3)+'% \u2014 extreme greed, correction likely');
-  if(data.fr&&data.fr.rate<-0.02)rsns.push(lang==='ar'?'\u{1F4B0} <b>FR \u0633\u0644\u0628\u064a:</b> '+(data.fr.rate*100).toFixed(3)+'% \u2014 \u0627\u0644\u0628\u0627\u0626\u0639\u0648\u0646 \u064a\u062f\u0641\u0639\u0648\u0646 \u0631\u0633\u0648\u0645\u060c \u0641\u0631\u0635\u0629 \u0634\u0631\u0627\u0621':'\u{1F4B0} <b>Negative FR:</b> '+(data.fr.rate*100).toFixed(3)+'% \u2014 shorts paying fees, buy opportunity');
-  /* 9. MACD */
-  if(data.macd.cross==='bull')rsns.push(lang==='ar'?'\u{1F4C8} <b>MACD:</b> \u062a\u0642\u0627\u0637\u0639 \u0635\u0639\u0648\u062f\u064a \u062c\u062f\u064a\u062f \u2014 \u0645\u0646 \u0623\u0642\u0648\u0649 \u0625\u0634\u0627\u0631\u0627\u062a \u0627\u0644\u0634\u0631\u0627\u0621':'\u{1F4C8} <b>MACD:</b> Fresh bull cross \u2014 one of the strongest buy signals');
-  if(data.macd.cross==='bear')rsns.push(lang==='ar'?'\u{1F4C9} <b>MACD:</b> \u062a\u0642\u0627\u0637\u0639 \u0647\u0628\u0648\u0637\u064a \u2014 \u0625\u0634\u0627\u0631\u0629 \u0628\u064a\u0639 \u0642\u0648\u064a\u0629':'\u{1F4C9} <b>MACD:</b> Bear cross \u2014 strong sell signal');
-  /* 10. Volume */
-  if(data.volT>1.5)rsns.push(lang==='ar'?'\u{1F4CA} <b>\u0627\u0644\u062d\u062c\u0645:</b> '+data.volT.toFixed(1)+'x \u0641\u0648\u0642 \u0627\u0644\u0645\u0639\u062f\u0644 \u2014 \u0633\u064a\u0648\u0644\u0629 \u0642\u0648\u064a\u0629 \u062a\u062f\u0639\u0645 \u0627\u0644\u062d\u0631\u0643\u0629':'\u{1F4CA} <b>Volume:</b> '+data.volT.toFixed(1)+'x above avg \u2014 strong liquidity backs the move');
-  if(data.volT<0.5)wrns.push(lang==='ar'?'\u{1F4CA} <b>\u062d\u062c\u0645 \u0636\u0639\u064a\u0641:</b> '+data.volT.toFixed(1)+'x \u2014 \u0627\u0644\u062d\u0631\u0643\u0629 \u063a\u064a\u0631 \u0645\u062f\u0639\u0648\u0645\u0629\u060c \u0642\u062f \u062a\u0643\u0648\u0646 \u0641\u062e':'\u{1F4CA} <b>Weak volume:</b> '+data.volT.toFixed(1)+'x \u2014 move not backed, could be a trap');
-  /* 11. Divergence */
-  if(data.divRSI==='bearish')wrns.push(lang==='ar'?'\u26a0\ufe0f <b>RSI Div 4H:</b> \u0627\u0644\u0633\u0639\u0631 \u064a\u0633\u062c\u0644 \u0642\u0645\u0645 \u0623\u0639\u0644\u0649 \u0644\u0643\u0646 RSI \u0642\u0645\u0645 \u0623\u062f\u0646\u0649 \u2014 \u0636\u0639\u0641 \u0627\u0644\u0632\u062e\u0645 \u0648\u0627\u062d\u062a\u0645\u0627\u0644 \u0627\u0646\u0639\u0643\u0627\u0633':'\u26a0\ufe0f <b>RSI Div 4H:</b> Price higher highs but RSI lower highs \u2014 momentum fading, reversal possible');
-  if(data.divRSI1d==='bearish')wrns.push(lang==='ar'?'\u26a0\ufe0f <b>RSI Div \u064a\u0648\u0645\u064a:</b> \u062a\u0628\u0627\u064a\u0646 \u0639\u0644\u0649 \u0627\u0644\u0641\u0631\u064a\u0645 \u0627\u0644\u064a\u0648\u0645\u064a \u2014 \u0623\u062e\u0637\u0631 \u0644\u0623\u0646\u0647 \u064a\u0645\u062b\u0644 \u0636\u0639\u0641 \u0645\u062a\u0648\u0633\u0637 \u0627\u0644\u0645\u062f\u0649':'\u26a0\ufe0f <b>RSI Div Daily:</b> More dangerous \u2014 medium-term weakness');
-  /* 12. Structure */
-  if(data.struct==='HH/HL')rsns.push(lang==='ar'?'\u{1F3D7} <b>\u0627\u0644\u0647\u064a\u0643\u0644:</b> \u0642\u0645\u0645 \u0623\u0639\u0644\u0649 \u0648\u0642\u064a\u0639\u0627\u0646 \u0623\u0639\u0644\u0649 (HH/HL) \u2014 \u0647\u064a\u0643\u0644 \u0635\u0639\u0648\u062f\u064a \u0643\u0644\u0627\u0633\u064a\u0643\u064a\u060c \u0643\u0644 \u0647\u0628\u0648\u0637 \u064a\u062a\u0648\u0642\u0641 \u0639\u0646\u062f \u0645\u0633\u062a\u0648\u0649 \u0623\u0639\u0644\u0649':'\u{1F3D7} <b>Structure:</b> HH/HL \u2014 classic bullish, each dip stops higher');
-  if(data.struct==='LH/LL')rsns.push(lang==='ar'?'\u{1F3D7} <b>\u0627\u0644\u0647\u064a\u0643\u0644:</b> \u0642\u0645\u0645 \u0623\u062f\u0646\u0649 \u0648\u0642\u064a\u0639\u0627\u0646 \u0623\u062f\u0646\u0649 (LH/LL) \u2014 \u0647\u064a\u0643\u0644 \u0647\u0628\u0648\u0637\u064a\u060c \u0643\u0644 \u0635\u0639\u0648\u062f \u064a\u0641\u0634\u0644 \u0639\u0646\u062f \u0645\u0633\u062a\u0648\u0649 \u0623\u062f\u0646\u0649':'\u{1F3D7} <b>Structure:</b> LH/LL \u2014 classic bearish, each rally fails lower');
-  /* 13. Confluence */
-  rsns.push(lang==='ar'?'\u{1F504} <b>\u0627\u0644\u062a\u0648\u0627\u0641\u0642:</b> '+data.bullTFs+'/4 \u0641\u0631\u064a\u0645\u0627\u062a (1H/4H/D/W) '+(data.bullTFs>=3?'\u0635\u0639\u0648\u062f\u064a\u0629 \u2014 \u062a\u0648\u0627\u0641\u0642 \u0642\u0648\u064a':data.bullTFs<=1?'\u0647\u0628\u0648\u0637\u064a\u0629 \u2014 \u0623\u063a\u0644\u0628 \u0627\u0644\u0641\u0631\u064a\u0645\u0627\u062a \u0647\u0627\u0628\u0637\u0629':'\u0645\u062e\u062a\u0644\u0637\u0629 \u2014 \u0644\u0627 \u062a\u0648\u0627\u0641\u0642'):'\u{1F504} <b>Confluence:</b> '+data.bullTFs+'/4 frames '+(data.bullTFs>=3?'bullish \u2014 strong alignment':data.bullTFs<=1?'bearish \u2014 most frames down':'mixed \u2014 no alignment'));
-  /* ═══ NEW: 7 Multi-Exchange Conclusion Reasons ═══ */
-  /* 14. Multi-Exchange OI */
-  if(coinalyzeOI[sym]){var caOI=coinalyzeOI[sym].value;rsns.push(lang==='ar'?'\u{1F30D} <b>OI \u0645\u062c\u0645\u0651\u0639:</b> '+fmtB(caOI)+' \u0645\u0646 5+ \u0645\u0646\u0635\u0627\u062a \u2014 \u0627\u0644\u0635\u0648\u0631\u0629 \u0627\u0644\u0643\u0627\u0645\u0644\u0629 \u0644\u0644\u0633\u064a\u0648\u0644\u0629':'\u{1F30D} <b>Agg OI:</b> '+fmtB(caOI)+' from 5+ exchanges \u2014 full liquidity picture')}
-  /* 15. Predicted FR */
-  if(coinalyzePredFR[sym]){var pFR=coinalyzePredFR[sym].rate,cFR=coinalyzeFR[sym]?coinalyzeFR[sym].rate:0;if(Math.abs(pFR-cFR)>0.005)rsns.push(lang==='ar'?'\u{1F52E} <b>FR \u0627\u0644\u0645\u062a\u0648\u0642\u0639:</b> '+(pFR>=0?'+':'')+pFR.toFixed(4)+'% '+(pFR<cFR?'\u2014 \u064a\u0646\u062e\u0641\u0636 = \u0628\u064a\u0626\u0629 \u0623\u0641\u0636\u0644':'\u2014 \u064a\u0631\u062a\u0641\u0639 = \u062d\u0630\u0631'):'\u{1F52E} <b>Predicted FR:</b> '+(pFR>=0?'+':'')+pFR.toFixed(4)+'% '+(pFR<cFR?'\u2014 decreasing = better environment':'\u2014 increasing = caution'))}
-  /* 16. DEX Signal */
-  if(hyperliquidData[sym]&&FR[sym]){var dexFR=hyperliquidData[sym].funding,cexFR=FR[sym].rate;if(Math.abs(dexFR-cexFR)>0.015)rsns.push(lang==='ar'?'\u{1F52C} <b>DEX vs CEX:</b> CEX '+(cexFR>=0?'+':'')+cexFR.toFixed(4)+'% | DEX '+(dexFR>=0?'+':'')+dexFR.toFixed(4)+'% \u2014 \u062a\u0646\u0627\u0642\u0636 = \u0641\u0631\u0635\u0629 Arbitrage':'\u{1F52C} <b>DEX vs CEX:</b> CEX '+(cexFR>=0?'+':'')+cexFR.toFixed(4)+'% | DEX '+(dexFR>=0?'+':'')+dexFR.toFixed(4)+'% \u2014 divergence = Arbitrage opportunity')}
-  /* 17. Coinbase Premium */
-  if(cbPremium.time&&sym==='BTC'){var cbP=cbPremium.BTC_pct||0;if(Math.abs(cbP)>0.15)rsns.push(lang==='ar'?'\u{1F3E6} <b>Coinbase Premium:</b> '+(cbP>=0?'+':'')+cbP.toFixed(3)+'% \u2014 '+(cbP>0?'\u0627\u0644\u0645\u0624\u0633\u0633\u0627\u062a \u0627\u0644\u0623\u0645\u0631\u064a\u0643\u064a\u0629 \u062a\u0634\u062a\u0631\u064a':'\u0627\u0644\u0645\u0624\u0633\u0633\u0627\u062a \u062a\u0628\u064a\u0639'):'\u{1F3E6} <b>CB Premium:</b> '+(cbP>=0?'+':'')+cbP.toFixed(3)+'% \u2014 '+(cbP>0?'US institutions buying':'US institutions selling'))}
-  /* 18. Hash Rate */
-  if(btcOnChain.time&&sym==='BTC'&&btcOnChain.hashRate>0){var hrEH=btcOnChain.hashRate/1e9;rsns.push(lang==='ar'?'\u26CF <b>Hash Rate:</b> '+hrEH.toFixed(0)+' EH/s \u2014 '+(hrEH>500?'\u0627\u0644\u0634\u0628\u0643\u0629 \u0642\u0648\u064a\u0629 \u062c\u062f\u0627\u064b \u2014 \u0627\u0644\u0645\u0639\u062f\u0651\u0646\u0648\u0646 \u0648\u0627\u062b\u0642\u0648\u0646':'\u0627\u0644\u0634\u0628\u0643\u0629 \u0636\u0639\u064a\u0641\u0629'):'\u26CF <b>Hash Rate:</b> '+hrEH.toFixed(0)+' EH/s \u2014 '+(hrEH>500?'Very strong network \u2014 miners confident':'Network weakening'))}
-  /* 19. Bitfinex Margin */
-  if(bitfinexMargin[sym]){var bfm=bitfinexMargin[sym];if(bfm.longPct>65)rsns.push(lang==='ar'?'\u{1F4CA} <b>Bitfinex Margin:</b> Long '+bfm.longPct.toFixed(0)+'% \u2014 Smart Money \u064a\u062a\u0645\u0631\u0643\u0632 Long\u060c \u0645\u0624\u0634\u0631 \u0645\u0628\u0643\u0651\u0631 \u062a\u0627\u0631\u064a\u062e\u064a\u0627\u064b':'\u{1F4CA} <b>Bitfinex Margin:</b> Long '+bfm.longPct.toFixed(0)+'% \u2014 Smart Money positioning Long, historically early signal');if(bfm.shortPct>55)rsns.push(lang==='ar'?'\u{1F4CA} <b>Bitfinex:</b> Short '+bfm.shortPct.toFixed(0)+'% \u2014 \u0636\u063a\u0637 \u0628\u064a\u0639\u064a \u0639\u0644\u0649 Bitfinex':'\u{1F4CA} <b>Bitfinex:</b> Short '+bfm.shortPct.toFixed(0)+'% \u2014 sell pressure on Bitfinex')}
-  /* 20. News Sentiment */
-  if(newsSentiment.time&&newsSentiment.total>3){var nsc=newsSentiment.score;if(nsc>65)rsns.push(lang==='ar'?'\u{1F4F0} <b>\u0627\u0644\u0623\u062e\u0628\u0627\u0631:</b> '+nsc+'% \u0625\u064a\u062c\u0627\u0628\u064a\u0629 \u2014 \u0627\u0644\u0628\u064a\u0626\u0629 \u0627\u0644\u0625\u062e\u0628\u0627\u0631\u064a\u0629 \u062a\u062f\u0639\u0645 \u0627\u0644\u0635\u0639\u0648\u062f':'\u{1F4F0} <b>News:</b> '+nsc+'% positive \u2014 news environment supports upside');if(nsc<35)wrns.push(lang==='ar'?'\u{1F4F0} <b>\u0627\u0644\u0623\u062e\u0628\u0627\u0631:</b> '+nsc+'% \u0625\u064a\u062c\u0627\u0628\u064a\u0629 \u0641\u0642\u0637 \u2014 \u0628\u064a\u0626\u0629 \u0625\u062e\u0628\u0627\u0631\u064a\u0629 \u0633\u0644\u0628\u064a\u0629':'\u{1F4F0} <b>News:</b> Only '+nsc+'% positive \u2014 negative news environment')}
-  /* Render */
-  if(rsns.length){h+='<div style="padding:10px;background:'+(isBull?'rgba(0,255,136,.03)':isBear?'rgba(255,56,96,.03)':'rgba(255,184,0,.03)')+';border:1px solid '+(isBull?'rgba(0,255,136,.06)':isBear?'rgba(255,56,96,.06)':'rgba(255,184,0,.06)')+';border-radius:10px;margin-bottom:8px">';
-    h+='<div style="font-size:12px;font-weight:800;color:'+(isBull?'var(--up)':isBear?'var(--dn)':'var(--warn)')+';margin-bottom:8px">'+data.dIc+' '+(lang==='ar'?(isBull?'\u0644\u0645\u0627\u0630\u0627 '+cn+' \u0641\u064a \u0627\u062a\u062c\u0627\u0647 \u0635\u0639\u0648\u062f\u064a\u061f':isBear?'\u0644\u0645\u0627\u0630\u0627 '+cn+' \u0641\u064a \u0627\u062a\u062c\u0627\u0647 \u0647\u0628\u0648\u0637\u064a\u061f':'\u0644\u0645\u0627\u0630\u0627 '+cn+' \u0645\u062d\u0627\u064a\u062f\u061f'):(isBull?'Why is '+cn+' bullish?':isBear?'Why is '+cn+' bearish?':'Why is '+cn+' neutral?'))+'</div>';
-    rsns.forEach(function(r,i){h+='<div style="font-size:10px;color:var(--t1);line-height:1.9;padding:6px 0;'+(i<rsns.length-1?'border-bottom:1px solid rgba(255,255,255,.04)':'')+'">'+(i+1)+'. '+r+'</div>'});
-    h+='</div>'}
-  if(wrns.length){h+='<div style="padding:10px;background:rgba(255,184,0,.03);border:1px solid rgba(255,184,0,.06);border-radius:10px;margin-bottom:8px">';
-    h+='<div style="font-size:12px;font-weight:800;color:var(--warn);margin-bottom:6px">'+(lang==='ar'?'\u26a0\ufe0f \u062a\u062d\u0630\u064a\u0631\u0627\u062a \u064a\u062c\u0628 \u0645\u0631\u0627\u0642\u0628\u062a\u0647\u0627:':'\u26a0\ufe0f Warnings to watch:')+'</div>';
-    wrns.forEach(function(w){h+='<div style="font-size:10px;color:var(--t1);line-height:1.9;padding:5px 0">'+w+'</div>'});
-    h+='</div>'}
-  h+='<div style="padding:10px;background:var(--bg2);border-radius:10px;margin-bottom:8px;text-align:center"><div style="font-size:10px;color:var(--t2);margin-bottom:3px">'+(lang==='ar'?'\u0627\u0644\u062a\u0642\u064a\u064a\u0645 \u0627\u0644\u0646\u0647\u0627\u0626\u064a':'Final Score')+'</div><div style="font-size:24px;font-weight:800;color:'+(data.sc>=7?'var(--up)':data.sc>=5?'var(--warn)':'var(--dn)')+'">'+data.sc+'/10</div><div style="font-size:9px;color:var(--t2);margin-top:3px;direction:ltr">'+(lang==='ar'?'\u0627\u0644\u0646\u0637\u0627\u0642: ':'Range: ')+rP(data.supp)+' \u2014 '+rP(data.resist)+'</div></div>';
-
-  /* ════ Section 14b: Short-Term Analysis (next 24h) ════ */
-  h+='<div style="padding:10px;background:rgba(91,156,255,.03);border:1px solid rgba(91,156,255,.06);border-radius:10px;margin-bottom:8px">';
-  h+='<div style="font-size:12px;font-weight:800;color:var(--blue);margin-bottom:6px">\u{1F554} '+(lang==='ar'?'\u062a\u062d\u0644\u064a\u0644 \u0627\u0644\u0645\u062f\u0649 \u0627\u0644\u0642\u0631\u064a\u0628 (\u0627\u0644\u0640 24 \u0633\u0627\u0639\u0629 \u0627\u0644\u0642\u0627\u062f\u0645\u0629)':'Short-Term Analysis (next 24h)')+'</div>';
-  /* Short-term direction */
-  var stDir=data.tf.h1==='bull'&&data.tf.h4==='bull'?'bull':data.tf.h1==='bear'&&data.tf.h4==='bear'?'bear':'neutral';
-  var stIc=stDir==='bull'?'\u{1F7E2}':stDir==='bear'?'\u{1F534}':'\u{1F7E1}';
-  h+='<div style="font-size:10px;color:var(--t1);line-height:1.9;margin-bottom:6px">';
-  if(lang==='ar'){
-    h+=stIc+' <b>\u0627\u0644\u0627\u062a\u062c\u0627\u0647:</b> '+(stDir==='bull'?'\u0635\u0639\u0648\u062f\u064a \u0639\u0644\u0649 1H \u0648 4H':stDir==='bear'?'\u0647\u0628\u0648\u0637\u064a \u0639\u0644\u0649 1H \u0648 4H':'\u0645\u062e\u062a\u0644\u0637 \u0628\u064a\u0646 \u0627\u0644\u0641\u0631\u064a\u0645\u0627\u062a')+'<br>';
-    h+='\u{1F3AF} <b>\u0647\u062f\u0641 \u0642\u0631\u064a\u0628:</b> <span style="font-family:var(--fm);color:'+(stDir==='bull'?'var(--up)':'var(--dn)');
-    h+='">'+rP(stDir==='bull'?data.resist:data.supp)+'</span> '+(stDir==='bull'?'(\u0645\u0642\u0627\u0648\u0645\u0629 \u0642\u0631\u064a\u0628\u0629)':'(\u062f\u0639\u0645 \u0642\u0631\u064a\u0628)')+'<br>';
-    h+='\u{1F6D1} <b>\u0648\u0642\u0641 \u0627\u0644\u062e\u0633\u0627\u0631\u0629:</b> <span style="font-family:var(--fm);color:var(--dn)">'+rP(stDir==='bull'?data.supp:data.resist)+'</span><br>';
-    h+='\u{1F4CA} RSI 4H: <span style="font-family:var(--fm)">'+data.rsi.toFixed(0)+'</span> '+(data.rsi>70?'(\u062a\u0634\u0628\u0639 \u0634\u0631\u0627\u0626\u064a \u2014 \u062d\u0630\u0631!)':data.rsi<30?'(\u062a\u0634\u0628\u0639 \u0628\u064a\u0639\u064a \u2014 \u0641\u0631\u0635\u0629!)':'(\u0645\u0646\u0637\u0642\u0629 \u0637\u0628\u064a\u0639\u064a\u0629)')+'<br>';
-  }else{
-    h+=stIc+' <b>Direction:</b> '+(stDir==='bull'?'Bullish on 1H & 4H':stDir==='bear'?'Bearish on 1H & 4H':'Mixed between frames')+'<br>';
-    h+='\u{1F3AF} <b>Near target:</b> <span style="font-family:var(--fm);color:'+(stDir==='bull'?'var(--up)':'var(--dn)')+'">'+rP(stDir==='bull'?data.resist:data.supp)+'</span><br>';
-    h+='\u{1F6D1} <b>Stop loss:</b> <span style="font-family:var(--fm);color:var(--dn)">'+rP(stDir==='bull'?data.supp:data.resist)+'</span><br>';
-    h+='\u{1F4CA} RSI 4H: <span style="font-family:var(--fm)">'+data.rsi.toFixed(0)+'</span> '+(data.rsi>70?'(overbought \u2014 caution!)':data.rsi<30?'(oversold \u2014 opportunity!)':'(normal zone)')+'<br>';
+  /* On-chain (BTC only) */
+  if(data.onChain&&data.onChain.hashRate){
+    var hrEH=data.onChain.hashRate/1e9;
+    h+='<div style="font-size:10px;color:var(--t1);margin-top:4px">⛏ Hash Rate: <span style="font-family:var(--fm);color:var(--up)">'+hrEH.toFixed(0)+' EH/s</span> '+(hrEH>500?(isAr?'— شبكة قوية':'— strong network'):(isAr?'— شبكة متوسطة':'— moderate'))+'</div>';
   }
-  /* FVG targets */
-  if(data.fvgs&&data.fvgs.length){var nearFvg=data.fvgs[0];
-    h+=(lang==='ar'?'\u{1F573} <b>\u0641\u062c\u0648\u0629 \u0633\u0639\u0631\u064a\u0629 \u0642\u0631\u064a\u0628\u0629:</b> ':'\u{1F573} <b>Nearest FVG:</b> ')+'<span style="font-family:var(--fm);color:'+(nearFvg.type==='bullish'?'var(--up)':'var(--dn)')+'">'+nearFvg.bot+' \u2014 '+nearFvg.top+'</span> '+(nearFvg.type==='bullish'?(lang==='ar'?'(\u0627\u0644\u0633\u0639\u0631 \u0642\u062f \u064a\u0631\u062a\u062f \u0645\u0646\u0647\u0627)':'(price may bounce here)'):(lang==='ar'?'(\u0627\u0644\u0633\u0639\u0631 \u0642\u062f \u064a\u0647\u0628\u0637 \u0645\u0646\u0647\u0627)':'(price may drop here)'))+'<br>';}
-  /* Spread */
-  var spd2=bookTickers[sym];
-  if(spd2){h+=(lang==='ar'?'\u{1F4D0} <b>\u0627\u0644\u0633\u064a\u0648\u0644\u0629:</b> ':'\u{1F4D0} <b>Liquidity:</b> ')+'Spread <span style="font-family:var(--fm)">'+spd2.spread.toFixed(3)+'%</span> '+(spd2.spread>0.05?(lang==='ar'?'(\u0636\u0639\u064a\u0641\u0629 \u2014 \u0627\u062d\u0630\u0631 \u0627\u0644\u0627\u0646\u0632\u0644\u0627\u0642)':'(weak \u2014 watch slippage)'):(lang==='ar'?'(\u062c\u064a\u062f\u0629)':'(good)'));}
-  h+='</div>';
-  /* Short-term targets visual */
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px;background:rgba(255,255,255,.02);border-radius:6px;font-size:9px;direction:ltr">';
-  h+='<div style="text-align:center"><div style="color:var(--dn);font-weight:700">\u{1F6D1}</div><div style="font-family:var(--fm);font-size:10px">'+rP(stDir==='bull'?data.supp:data.resist)+'</div><div style="color:var(--t3)">'+(lang==='ar'?'\u0648\u0642\u0641':'Stop')+'</div></div>';
-  h+='<div style="color:var(--t3)">\u2190</div>';
-  h+='<div style="text-align:center"><div style="color:var(--blue);font-weight:700">\u25B6</div><div style="font-family:var(--fm);font-size:10px;font-weight:800">'+rP(data.price)+'</div><div style="color:var(--t3)">'+(lang==='ar'?'\u0627\u0644\u0633\u0639\u0631':'Price')+'</div></div>';
-  h+='<div style="color:var(--t3)">\u2192</div>';
-  h+='<div style="text-align:center"><div style="color:var(--up);font-weight:700">\u{1F3AF}</div><div style="font-family:var(--fm);font-size:10px">'+rP(stDir==='bull'?data.resist:data.supp)+'</div><div style="color:var(--t3)">'+(lang==='ar'?'\u0647\u062f\u0641 1':'T1')+'</div></div>';
-  h+='<div style="color:var(--t3)">\u2192</div>';
-  h+='<div style="text-align:center"><div style="color:var(--up);font-weight:700">\u{1F3AF}\u{1F3AF}</div><div style="font-family:var(--fm);font-size:10px">'+rP(stDir==='bull'?data.f618U:data.f618D)+'</div><div style="color:var(--t3)">'+(lang==='ar'?'\u0647\u062f\u0641 2':'T2')+'</div></div>';
   h+='</div></div>';
 
-  /* ════ Section 14c: Long-Term Analysis (next 7 days) ════ */
-  h+='<div style="padding:10px;background:rgba(176,124,255,.03);border:1px solid rgba(176,124,255,.06);border-radius:10px;margin-bottom:8px">';
-  h+='<div style="font-size:12px;font-weight:800;color:var(--purple);margin-bottom:6px">\u{1F4C5} '+(lang==='ar'?'\u062a\u062d\u0644\u064a\u0644 \u0627\u0644\u0645\u062f\u0649 \u0627\u0644\u0628\u0639\u064a\u062f (7 \u0623\u064a\u0627\u0645 \u0627\u0644\u0642\u0627\u062f\u0645\u0629)':'Long-Term Analysis (next 7 days)')+'</div>';
-  var ltDir=data.tf.d==='bull'&&data.tf.w==='bull'?'bull':data.tf.d==='bear'&&data.tf.w==='bear'?'bear':'neutral';
-  var ltIc=ltDir==='bull'?'\u{1F7E2}':ltDir==='bear'?'\u{1F534}':'\u{1F7E1}';
-  h+='<div style="font-size:10px;color:var(--t1);line-height:1.9;margin-bottom:6px">';
-  if(lang==='ar'){
-    h+=ltIc+' <b>\u0627\u0644\u0627\u062a\u062c\u0627\u0647 \u0627\u0644\u0623\u0633\u0628\u0648\u0639\u064a:</b> '+(ltDir==='bull'?'\u0635\u0639\u0648\u062f\u064a \u0639\u0644\u0649 \u0627\u0644\u064a\u0648\u0645\u064a + \u0627\u0644\u0623\u0633\u0628\u0648\u0639\u064a':ltDir==='bear'?'\u0647\u0628\u0648\u0637\u064a \u0639\u0644\u0649 \u0627\u0644\u064a\u0648\u0645\u064a + \u0627\u0644\u0623\u0633\u0628\u0648\u0639\u064a':'\u0645\u062e\u062a\u0644\u0637 \u2014 \u0627\u0644\u064a\u0648\u0645\u064a \u0648\u0627\u0644\u0623\u0633\u0628\u0648\u0639\u064a \u063a\u064a\u0631 \u0645\u062a\u0648\u0627\u0641\u0642\u064a\u0646')+'<br>';
-    h+='\u{1F4CA} RSI \u0627\u0644\u064a\u0648\u0645\u064a: <span style="font-family:var(--fm)">'+data.rsi1d.toFixed(0)+'</span> '+(data.rsi1d>70?'(\u062a\u0634\u0628\u0639 \u0634\u0631\u0627\u0626\u064a \u2014 \u062a\u0635\u062d\u064a\u062d \u0645\u0645\u0643\u0646)':data.rsi1d<30?'(\u062a\u0634\u0628\u0639 \u0628\u064a\u0639\u064a \u2014 \u0627\u0631\u062a\u062f\u0627\u062f \u0645\u062a\u0648\u0642\u0639)':'(\u0645\u0646\u0637\u0642\u0629 \u0635\u062d\u064a\u0629)')+'<br>';
-    h+='\u{1F3D7} <b>\u0627\u0644\u0647\u064a\u0643\u0644:</b> '+(data.struct==='HH/HL'?'\u0642\u0645\u0645 \u0623\u0639\u0644\u0649 \u0648\u0642\u064a\u0639\u0627\u0646 \u0623\u0639\u0644\u0649 (HH/HL) \u2014 \u0627\u0644\u0627\u062a\u062c\u0627\u0647 \u0627\u0644\u0639\u0627\u0645 \u0635\u0639\u0648\u062f\u064a':data.struct==='LH/LL'?'\u0642\u0645\u0645 \u0623\u062f\u0646\u0649 \u0648\u0642\u064a\u0639\u0627\u0646 \u0623\u062f\u0646\u0649 (LH/LL) \u2014 \u0627\u0644\u0627\u062a\u062c\u0627\u0647 \u0627\u0644\u0639\u0627\u0645 \u0647\u0628\u0648\u0637\u064a':'\u063a\u064a\u0631 \u0648\u0627\u0636\u062d \u2014 \u062a\u062c\u0645\u064a\u0639 \u0623\u0648 \u062a\u0648\u0632\u064a\u0639')+'<br>';
-    h+='\u{1F3AF} <b>\u0647\u062f\u0641 \u0623\u0633\u0628\u0648\u0639\u064a:</b> <span style="font-family:var(--fm);color:'+(ltDir==='bull'?'var(--up)':'var(--dn)')+'">'+rP(ltDir==='bull'?data.f100U:data.f618D)+'</span><br>';
-    h+='\u{1F7E2} <b>\u062f\u0639\u0645 \u0631\u0626\u064a\u0633\u064a:</b> <span style="font-family:var(--fm);color:var(--up)">'+rP(data.ema50<data.supp?data.ema50:data.supp)+'</span> (EMA50/'+(lang==='ar'?'\u062f\u0639\u0645':'Support')+')<br>';
-    h+='\u{1F534} <b>\u0645\u0642\u0627\u0648\u0645\u0629 \u0631\u0626\u064a\u0633\u064a\u0629:</b> <span style="font-family:var(--fm);color:var(--dn)">'+rP(data.f100U)+'</span>';
-    if(data.ch.d7!==undefined)h+='<br>\u{1F4C8} <b>\u0623\u062f\u0627\u0621 7 \u0623\u064a\u0627\u0645:</b> <span style="font-family:var(--fm);color:'+(data.ch.d7>=0?'var(--up)':'var(--dn)');
-    if(data.ch.d7!==undefined)h+='">'+(data.ch.d7>=0?'+':'')+data.ch.d7.toFixed(1)+'%</span>';
+  /* ════════ SECTION 14: Multi-Level Entry Zones (Enhanced) ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t">🎯 14. '+(isAr?'مناطق الدخول متعددة المستويات':'Multi-Level Entry Zones')+'</div>';
+  var zones=[];
+  /* Zone 1 — aggressive (current price) */
+  var z1Entry=data.price;var z1Stop=data.f618D;var z1Target=data.f618U;
+  var z1RR=Math.abs(z1Entry-z1Stop)>0?((z1Target-z1Entry)/Math.abs(z1Entry-z1Stop)):0;
+  zones.push({n:1,type:isAr?'عدوانية':'Aggressive',col:'var(--up)',bg:'rgba(0,255,136,.06)',range:rP(z1Entry),stop:z1Stop,target:z1Target,rr:z1RR,reason:isAr?'فوق EMA20 + '+(data.macd.h>0?'MACD صعودي':'MACD محايد'):'Above EMA20 + '+(data.macd.h>0?'MACD bull':'MACD flat')});
+  /* Zone 2 — safe (at FVG or EMA50) */
+  var z2Mid=data.ema50?Math.min(data.ema50,data.supp*1.01):data.supp*1.01;
+  var z2Lo=z2Mid*0.995;var z2Hi=z2Mid*1.005;
+  var z2Stop=data.supp*0.98;var z2Target=data.f618U;
+  var z2RR=Math.abs(z2Mid-z2Stop)>0?((z2Target-z2Mid)/Math.abs(z2Mid-z2Stop)):0;
+  var z2Reasons=[];
+  if(data.ema50)z2Reasons.push('EMA50');
+  if(data.fvgs&&data.fvgs.some(function(f){return f.type==='bullish'}))z2Reasons.push(isAr?'فجوة صعودية':'Bullish FVG');
+  z2Reasons.push(isAr?'ارتد مراراً':'Prior bounces');
+  zones.push({n:2,type:isAr?'آمنة':'Safe',col:'var(--blue)',bg:'rgba(91,156,255,.06)',range:rP(z2Lo)+' - '+rP(z2Hi),stop:z2Stop,target:z2Target,rr:z2RR,reason:z2Reasons.join(' + ')});
+  /* Zone 3 — deep (OB + weekly support) */
+  var z3Hi=data.supp;var z3Lo=data.supp*0.97;
+  var z3Stop=data.supp*0.95;var z3Target=data.f100U;
+  var z3Mid=(z3Hi+z3Lo)/2;
+  var z3RR=Math.abs(z3Mid-z3Stop)>0?((z3Target-z3Mid)/Math.abs(z3Mid-z3Stop)):0;
+  var z3Reasons=[];
+  if(data.orderBlocks&&data.orderBlocks.some(function(ob){return ob.type==='bullish'}))z3Reasons.push('Order Block');
+  z3Reasons.push(isAr?'Fib 0.618':'Fib 0.618');
+  z3Reasons.push(isAr?'دعم أسبوعي':'Weekly support');
+  zones.push({n:3,type:isAr?'عميقة':'Deep',col:'var(--purple)',bg:'rgba(176,124,255,.06)',range:rP(z3Lo)+' - '+rP(z3Hi),stop:z3Stop,target:z3Target,rr:z3RR,reason:z3Reasons.join(' + ')});
+  /* Render zones */
+  zones.forEach(function(z){
+    h+='<div style="padding:10px;background:'+z.bg+';border:1px solid '+z.col+'20;border-left:3px solid '+z.col+';border-radius:8px;margin-bottom:6px">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-weight:800;color:'+z.col+';font-size:12px">'+(isAr?'المنطقة ':'Zone ')+z.n+' — '+z.type+'</span><span style="font-family:var(--fm);font-weight:700;color:'+z.col+';direction:ltr">'+z.range+'</span></div>';
+    h+='<div style="font-size:10px;color:var(--t1);margin-bottom:4px">'+z.reason+'</div>';
+    h+='<div style="display:flex;gap:8px;font-size:10px;direction:ltr">';
+    h+='<span style="color:var(--up)">TP: '+rP(z.target)+'</span>';
+    h+='<span style="color:var(--dn)">SL: '+rP(z.stop)+'</span>';
+    h+='<span style="color:'+z.col+';font-weight:800">R:R 1:'+z.rr.toFixed(1)+'x</span>';
+    h+='</div></div>';
+  });
+  /* Overall targets */
+  h+='<div style="padding:8px;background:var(--bg2);border-radius:8px;margin-top:4px;text-align:center;font-size:10px;direction:ltr;color:var(--t1)">'+(isAr?'الأهداف: ':'Targets: ')+'<span style="color:var(--up);font-weight:700;font-family:var(--fm)">'+rP(data.f618U)+' → '+rP(data.f100U)+'</span> | '+(isAr?'الوقف الأساسي: ':'Main SL: ')+'<span style="color:var(--dn);font-weight:700;font-family:var(--fm)">'+rP(data.f618D)+'</span></div>';
+  h+='</div>';
+
+  /* ════════ SECTION 15: ختام التحليل (CONCLUSION — AT BOTTOM) ════════ */
+  h+='<div class="mkt-section"><div class="mkt-section-t" style="font-size:14px;color:'+data.dCol+'">📝 15. '+(isAr?'ختام التحليل':'Analysis Conclusion')+'</div>';
+  var isBull=data.ts>=2;var isBear=data.ts<=-2;
+  /* 1. Verdict */
+  h+='<div style="padding:12px;background:'+(isBull?'rgba(0,255,136,.06)':isBear?'rgba(255,56,96,.06)':'rgba(255,184,0,.06)')+';border:1px solid '+(isBull?'rgba(0,255,136,.15)':isBear?'rgba(255,56,96,.15)':'rgba(255,184,0,.15)')+';border-radius:10px;text-align:center;margin-bottom:8px">';
+  h+='<div style="font-size:18px;font-weight:800;color:'+data.dCol+';margin-bottom:4px">'+data.dIc+' '+data.dir+'</div>';
+  h+='<div style="font-size:11px;color:var(--t1)">'+data.rec+'</div>';
+  h+='</div>';
+  /* 2. Why bullish/bearish? (5 numbered reasons from all data) */
+  var whyReasons=[];
+  /* Collect up to 5 strongest reasons */
+  if(isBull){
+    if(data.price>data.ema20&&data.price>data.ema50)whyReasons.push(isAr?'<b>المتوسطات:</b> السعر فوق EMA20 و EMA50 ('+rP(data.ema20)+' / '+rP(data.ema50)+') — هيكل صعودي مؤكد':'<b>MAs:</b> Price above EMA20 & EMA50 — bullish structure');
+    if(data.macd.cross==='bull'||data.macd.h>0)whyReasons.push(isAr?'<b>MACD:</b> '+(data.macd.cross==='bull'?'تقاطع صعودي جديد — من أقوى إشارات الشراء':'زخم إيجابي'):'<b>MACD:</b> '+(data.macd.cross==='bull'?'Fresh bull cross — strongest buy signal':'Positive momentum'));
+    if(data.wConf>=40)whyReasons.push(isAr?'<b>الحيتان:</b> تجميع '+data.wConf+'% — المحافظ الكبيرة تشتري':'<b>Whales:</b> '+data.wConf+'% accumulation — large wallets buying');
+    if(data.topTraders&&data.topTraders.long>0.55)whyReasons.push(isAr?'<b>كبار المتداولين:</b> '+Math.round(data.topTraders.long*100)+'% Long على Binance — المحترفون صاعدون':'<b>Top Traders:</b> '+Math.round(data.topTraders.long*100)+'% Long on Binance — pros bullish');
+    if(data.cbPrem&&data.cbPrem.pct>0.15)whyReasons.push(isAr?'<b>بريميوم Coinbase:</b> +'+data.cbPrem.pct.toFixed(3)+'% — المؤسسات الأمريكية تشتري':'<b>Coinbase Premium:</b> +'+data.cbPrem.pct.toFixed(3)+'% — US institutions buying');
+    if(data.bfxMargin&&data.bfxMargin.longPct>60)whyReasons.push(isAr?'<b>Bitfinex Margin:</b> '+data.bfxMargin.longPct.toFixed(0)+'% Long — Smart Money يتمركز صعودياً':'<b>Bitfinex Margin:</b> '+data.bfxMargin.longPct.toFixed(0)+'% Long — smart money positioning');
+    if(data.frHist&&data.frHist.negCount>=7)whyReasons.push(isAr?'<b>تاريخ FR:</b> '+data.frHist.negCount+'/'+data.frHist.totalCount+' قراءات سلبية — الشورتات تدفع باستمرار':'<b>FR History:</b> '+data.frHist.negCount+'/'+data.frHist.totalCount+' negative — shorts paying continuously');
+    if(data.iceberg&&data.iceberg.signal==='ICEBERG_BUY')whyReasons.push(isAr?'<b>أوامر مخفية:</b> شراء مؤسسي مقسّم على أوامر صغيرة — إشارة تجميع':'<b>Iceberg:</b> Hidden institutional buying — accumulation signal');
+    if(data.struct==='HH/HL')whyReasons.push(isAr?'<b>الهيكل:</b> قمم أعلى وقيعان أعلى — هيكل صعودي كلاسيكي':'<b>Structure:</b> HH/HL — classic bullish');
+  }else if(isBear){
+    if(data.price<data.ema20)whyReasons.push(isAr?'<b>المتوسطات:</b> السعر تحت EMA20 ('+rP(data.ema20)+') — المتوسطات مقاومة':'<b>MAs:</b> Price below EMA20 — MAs acting as resistance');
+    if(data.macd.cross==='bear'||data.macd.h<0)whyReasons.push(isAr?'<b>MACD:</b> '+(data.macd.cross==='bear'?'تقاطع هبوطي — إشارة بيع قوية':'زخم سلبي'):'<b>MACD:</b> '+(data.macd.cross==='bear'?'Bear cross — strong sell signal':'Negative momentum'));
+    if(data.fr&&data.fr.rate>0.05)whyReasons.push(isAr?'<b>FR عالي:</b> '+(data.fr.rate*100).toFixed(3)+'% — جشع مفرط، تصحيح محتمل':'<b>High FR:</b> '+(data.fr.rate*100).toFixed(3)+'% — extreme greed, correction likely');
+    if(data.topTraders&&data.topTraders.long<0.45)whyReasons.push(isAr?'<b>كبار المتداولين:</b> '+Math.round(data.topTraders.short*100)+'% Short — المحترفون يتوقعون هبوط':'<b>Top Traders:</b> '+Math.round(data.topTraders.short*100)+'% Short — pros expect decline');
+    if(data.cbPrem&&data.cbPrem.pct<-0.15)whyReasons.push(isAr?'<b>بريميوم Coinbase:</b> '+data.cbPrem.pct.toFixed(3)+'% — المؤسسات تبيع':'<b>Coinbase Premium:</b> '+data.cbPrem.pct.toFixed(3)+'% — institutions selling');
+    if(data.divRSI==='bearish'||data.divRSI1d==='bearish')whyReasons.push(isAr?'<b>دايفرجنس:</b> RSI divergence — ضعف زخم وانعكاس محتمل':'<b>Divergence:</b> RSI divergence — momentum fading');
+    if(data.whalePnL&&data.whalePnL.pct<-3)whyReasons.push(isAr?'<b>الحيتان خاسرون:</b> '+data.whalePnL.pct.toFixed(1)+'% — ضغط بيع من المحافظ الكبيرة':'<b>Whales losing:</b> '+data.whalePnL.pct.toFixed(1)+'% — sell pressure from big wallets');
+    if(data.struct==='LH/LL')whyReasons.push(isAr?'<b>الهيكل:</b> قمم أدنى وقيعان أدنى — هيكل هبوطي':'<b>Structure:</b> LH/LL — classic bearish');
   }else{
-    h+=ltIc+' <b>Weekly trend:</b> '+(ltDir==='bull'?'Bullish on Daily + Weekly':ltDir==='bear'?'Bearish on Daily + Weekly':'Mixed \u2014 Daily and Weekly not aligned')+'<br>';
-    h+='\u{1F4CA} Daily RSI: <span style="font-family:var(--fm)">'+data.rsi1d.toFixed(0)+'</span> '+(data.rsi1d>70?'(overbought \u2014 correction possible)':data.rsi1d<30?'(oversold \u2014 bounce expected)':'(healthy zone)')+'<br>';
-    h+='\u{1F3D7} <b>Structure:</b> '+(data.struct==='HH/HL'?'HH/HL \u2014 overall bullish':data.struct==='LH/LL'?'LH/LL \u2014 overall bearish':'Unclear \u2014 accumulation or distribution')+'<br>';
-    h+='\u{1F3AF} <b>Weekly target:</b> <span style="font-family:var(--fm);color:'+(ltDir==='bull'?'var(--up)':'var(--dn)')+'">'+rP(ltDir==='bull'?data.f100U:data.f618D)+'</span><br>';
-    h+='\u{1F7E2} <b>Major support:</b> <span style="font-family:var(--fm);color:var(--up)">'+rP(data.ema50<data.supp?data.ema50:data.supp)+'</span><br>';
-    h+='\u{1F534} <b>Major resistance:</b> <span style="font-family:var(--fm);color:var(--dn)">'+rP(data.f100U)+'</span>';
-    if(data.ch.d7!==undefined)h+='<br>\u{1F4C8} <b>7-day performance:</b> <span style="font-family:var(--fm);color:'+(data.ch.d7>=0?'var(--up)':'var(--dn)');
-    if(data.ch.d7!==undefined)h+='">'+(data.ch.d7>=0?'+':'')+data.ch.d7.toFixed(1)+'%</span>';
+    whyReasons.push(isAr?'<b>السوق محايد:</b> لا توافق واضح بين المؤشرات — انتظر الاختراق':'<b>Market neutral:</b> No clear alignment — wait for breakout');
+    whyReasons.push(isAr?'<b>التوافق:</b> '+data.bullTFs+'/4 فريمات صعودية':'<b>Confluence:</b> '+data.bullTFs+'/4 frames bullish');
   }
+  whyReasons=whyReasons.slice(0,5);
+  if(whyReasons.length){
+    var whyTitle=isBull?(isAr?'لماذا '+cn+' صعودي؟':'Why is '+cn+' bullish?'):isBear?(isAr?'لماذا '+cn+' هبوطي؟':'Why is '+cn+' bearish?'):(isAr?'لماذا محايد؟':'Why neutral?');
+    h+='<div style="padding:10px;background:'+(isBull?'rgba(0,255,136,.03)':isBear?'rgba(255,56,96,.03)':'rgba(255,184,0,.03)')+';border-radius:10px;margin-bottom:8px">';
+    h+='<div style="font-size:12px;font-weight:800;color:'+data.dCol+';margin-bottom:6px">'+data.dIc+' '+whyTitle+'</div>';
+    whyReasons.forEach(function(r,i){h+='<div style="font-size:10px;color:var(--t1);line-height:1.8;padding:4px 0;'+(i<whyReasons.length-1?'border-bottom:1px solid rgba(255,255,255,.04)':'')+'">'+(i+1)+'. '+r+'</div>';});
+    h+='</div>';
+  }
+  /* 3. What invalidates? */
+  var invalidations=[];
+  if(isBull){
+    invalidations.push(isAr?'كسر دعم '+rP(data.supp)+' بإغلاق 4H واضح':'4H close below support '+rP(data.supp));
+    invalidations.push(isAr?'تقاطع MACD هبوطي على الفريم اليومي':'Daily MACD bear cross');
+    invalidations.push(isAr?'ارتفاع FR فوق 0.1% (جشع مفرط)':'FR rising above 0.1% (extreme greed)');
+    invalidations.push(isAr?'خروج الحيتان (ثقة تنزل تحت 20%)':'Whale exit (confidence drops below 20%)');
+  }else if(isBear){
+    invalidations.push(isAr?'اختراق مقاومة '+rP(data.resist)+' بإغلاق 4H + حجم':'4H close above '+rP(data.resist)+' with volume');
+    invalidations.push(isAr?'تقاطع MACD صعودي':'MACD bull cross');
+    invalidations.push(isAr?'FR يتحول لسلبي (Shorts تدفع)':'FR turns negative (shorts paying)');
+    invalidations.push(isAr?'دخول حيتان جديدة (ثقة >50%)':'New whale entries (confidence >50%)');
+  }else{
+    invalidations.push(isAr?'اختراق النطاق إما '+rP(data.resist)+' أو '+rP(data.supp):'Break of either '+rP(data.resist)+' or '+rP(data.supp));
+    invalidations.push(isAr?'ظهور تقاطع MACD واضح':'Clear MACD crossover');
+  }
+  h+='<div style="padding:10px;background:rgba(255,56,96,.04);border:1px solid rgba(255,56,96,.1);border-radius:10px;margin-bottom:8px">';
+  h+='<div style="font-size:12px;font-weight:800;color:var(--dn);margin-bottom:6px">❌ '+(isAr?'ما يُبطل التحليل:':'What invalidates:')+'</div>';
+  invalidations.forEach(function(inv,i){h+='<div style="font-size:10px;color:var(--t1);line-height:1.8;padding:3px 0">• '+inv+'</div>';});
   h+='</div>';
-  /* Long-term target visual */
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;padding:6px;background:rgba(255,255,255,.02);border-radius:6px;font-size:9px;direction:ltr">';
-  h+='<div style="text-align:center"><div style="color:var(--up);font-size:7px">'+(lang==='ar'?'\u062f\u0639\u0645 \u0631\u0626\u064a\u0633\u064a':'Major S')+'</div><div style="font-family:var(--fm);font-size:10px;color:var(--up)">'+rP(data.ema50<data.supp?data.ema50:data.supp)+'</div></div>';
-  h+='<div style="color:var(--t3)">\u2190</div>';
-  h+='<div style="text-align:center"><div style="color:var(--up);font-size:7px">S1</div><div style="font-family:var(--fm);font-size:10px">'+rP(data.supp)+'</div></div>';
-  h+='<div style="color:var(--t3)">\u2190</div>';
-  h+='<div style="text-align:center;background:rgba(91,156,255,.08);padding:4px 6px;border-radius:4px"><div style="color:var(--blue);font-size:7px;font-weight:700">'+(lang==='ar'?'\u0627\u0644\u0622\u0646':'NOW')+'</div><div style="font-family:var(--fm);font-size:10px;font-weight:800">'+rP(data.price)+'</div></div>';
-  h+='<div style="color:var(--t3)">\u2192</div>';
-  h+='<div style="text-align:center"><div style="color:var(--dn);font-size:7px">R1</div><div style="font-family:var(--fm);font-size:10px">'+rP(data.resist)+'</div></div>';
-  h+='<div style="color:var(--t3)">\u2192</div>';
-  h+='<div style="text-align:center"><div style="color:var(--dn);font-size:7px">'+(lang==='ar'?'\u0645\u0642\u0627\u0648\u0645\u0629 \u0631\u0626\u064a\u0633\u064a\u0629':'Major R')+'</div><div style="font-family:var(--fm);font-size:10px;color:var(--dn)">'+rP(data.f100U)+'</div></div>';
+  /* 4. Entry recommendation */
+  h+='<div style="padding:10px;background:rgba(91,156,255,.04);border:1px solid rgba(91,156,255,.1);border-radius:10px;margin-bottom:8px">';
+  h+='<div style="font-size:12px;font-weight:800;color:var(--blue);margin-bottom:6px">🎯 '+(isAr?'توصية الدخول:':'Entry recommendation:')+'</div>';
+  var bestEntry=isBull?data.price:isBear?data.resist*0.995:(data.price+data.supp)/2;
+  var bestStop=isBull?data.f618D:isBear?data.resist*1.02:data.supp;
+  var bestT1=isBull?data.f618U:isBear?data.f618D:data.resist;
+  var bestT2=isBull?data.f100U:isBear?data.supp:data.f100U;
+  h+='<div style="font-size:11px;color:var(--t1);line-height:1.9;direction:ltr">';
+  h+=(isAr?'الدخول: ':'Entry: ')+'<span style="color:var(--blue);font-family:var(--fm);font-weight:700">'+rP(bestEntry)+'</span><br>';
+  h+=(isAr?'الهدف 1: ':'TP1: ')+'<span style="color:var(--up);font-family:var(--fm);font-weight:700">'+rP(bestT1)+'</span><br>';
+  h+=(isAr?'الهدف 2: ':'TP2: ')+'<span style="color:var(--up);font-family:var(--fm);font-weight:700">'+rP(bestT2)+'</span><br>';
+  h+=(isAr?'الوقف: ':'Stop Loss: ')+'<span style="color:var(--dn);font-family:var(--fm);font-weight:700">'+rP(bestStop)+'</span><br>';
+  var finalRR=Math.abs(bestEntry-bestStop)>0?((bestT1-bestEntry)/Math.abs(bestEntry-bestStop)):0;
+  h+=(isAr?'R:R: ':'R:R: ')+'<span style="font-weight:700">1:'+Math.abs(finalRR).toFixed(1)+'x</span><br>';
+  h+=(isAr?'حجم المركز المقترح: ':'Position size: ')+'<span style="font-weight:700">'+data.riskPct+'%</span>';
   h+='</div></div>';
-
-
-  var evs=getUpcomingEvents();
-  if(evs.length){h+='<div class="mkt-events">';evs.forEach(function(e){h+='<div class="mkt-event-i"><span>'+e.ic+'</span><span>'+e.txt+'</span></div>'+(e.warn?'<div style="font-size:8px;color:var(--warn);padding:0 0 2px 22px">'+e.warn+'</div>':'')});h+='</div>'}
-  /* Correlations */
-  h+='<div class="mkt-cor"><div class="mkt-cor-i"><div class="mkt-cor-v">'+btcDom.toFixed(1)+'%</div><div class="mkt-cor-l">BTC Dom</div></div><div class="mkt-cor-i"><div class="mkt-cor-v">'+(T.ETH&&T.BTC?(T.ETH.p/T.BTC.p).toFixed(4):'--')+'</div><div class="mkt-cor-l">ETH/BTC</div></div><div class="mkt-cor-i"><div class="mkt-cor-v" style="color:'+(fgValue<30?'var(--dn)':fgValue>60?'var(--up)':'var(--warn)')+'">'+fgValue+'</div><div class="mkt-cor-l">Fear&Greed</div></div></div>';
-  /* Risk cards */
-  h+='<div class="mkt-risk-grid">';
-  var riskLbl=data.riskPct>=4?(lang==='ar'?'\u0645\u062e\u0627\u0637\u0631\u0629 \u0639\u0627\u0644\u064a\u0629':'High Risk'):data.riskPct>=2?(lang==='ar'?'\u0645\u062e\u0627\u0637\u0631\u0629 \u0645\u062a\u0648\u0633\u0637\u0629':'Medium'):data.riskPct>=1?(lang==='ar'?'\u0645\u062e\u0627\u0637\u0631\u0629 \u0645\u0646\u062e\u0641\u0636\u0629':'Low Risk'):(lang==='ar'?'\u0644\u0627 \u062f\u062e\u0648\u0644':'No Entry');
-  h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v" style="color:'+(data.riskPct>=4?'var(--dn)':data.riskPct>=2?'var(--warn)':'var(--up)')+'">'+riskLbl+'</div><div class="mkt-risk-card-l">'+(lang==='ar'?'\u0627\u0644\u0645\u062e\u0627\u0637\u0631\u0629':'Risk')+'</div></div>';
-  h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v">1:'+rr.toFixed(1)+'</div><div class="mkt-risk-card-l">R:R</div></div>';
-  h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v">4H</div><div class="mkt-risk-card-l">'+(lang==='ar'?'\u0627\u0644\u0641\u0631\u064a\u0645':'Frame')+'</div></div>';
-  h+='<div class="mkt-risk-card"><div class="mkt-risk-card-v">'+data.sc+'/10</div><div class="mkt-risk-card-l">Score</div></div>';
+  /* 5. Warning */
+  h+='<div style="padding:8px;background:rgba(255,184,0,.08);border:1px solid rgba(255,184,0,.2);border-radius:8px;text-align:center;font-size:11px;font-weight:700;color:var(--warn)">⚠️ '+(isAr?'لا تتداول بدون وقف خسارة! إدارة المخاطر أهم من الإشارة.':'Never trade without a stop loss! Risk management matters more than the signal.')+'</div>';
   h+='</div>';
-  /* Disclaimer + Signature */
-  h+='<div style="text-align:center;font-size:8px;color:var(--t3);margin:6px 0">\u26a0\ufe0f '+(lang==='ar'?'\u062a\u062d\u0644\u064a\u0644 \u0641\u0646\u064a \u2014 \u0644\u064a\u0633 \u0646\u0635\u064a\u062d\u0629 \u0645\u0627\u0644\u064a\u0629':'Technical analysis \u2014 not financial advice')+'</div>';
+
+  /* Footer */
+  h+='<div style="text-align:center;font-size:8px;color:var(--t3);margin:8px 0">⚠️ '+(isAr?'تحليل فني — ليس نصيحة مالية':'Technical analysis — not financial advice')+'</div>';
   h+=mktSignature();
-  h+='</div>';
 
   return h;
 }
@@ -4662,9 +4922,18 @@ async function loadETHChart(){
 
 /* PORTFOLIO */
 var sP=function(){try{localStorage.setItem('nxp10',JSON.stringify(portfolio))}catch(e){}};
-function addPort(){var sym=document.getElementById('aSym').value.toUpperCase().trim(),amt=+document.getElementById('aAmt').value,pr=+document.getElementById('aPr').value;if(!sym||!amt)return;portfolio.push({sym:sym,amt:amt,bp:pr});sP();closeMo('addMo');renderPort()}
+function addPort(){
+  var raw=document.getElementById('aSym').value.toUpperCase().trim();
+  /* Whitelist symbol: A-Z and 0-9 only, max 10 chars */
+  var sym=raw.replace(/[^A-Z0-9]/g,'').slice(0,10);
+  var amt=+document.getElementById('aAmt').value;
+  var pr=+document.getElementById('aPr').value;
+  if(!sym||!amt||amt<=0||!isFinite(amt))return;
+  if(pr&&(pr<0||!isFinite(pr)))return;
+  portfolio.push({sym:sym,amt:amt,bp:pr});sP();closeMo('addMo');renderPort();
+}
 function rmPort(i){portfolio.splice(i,1);sP();renderPort()}
-function renderPort(){var tV=0,tC=0;portfolio.forEach(function(p){var d=T[p.sym];if(d){tV+=d.p*p.amt;tC+=p.bp*p.amt}});var pnl=tC>0?((tV-tC)/tC*100):0;document.getElementById('pVal').textContent=tV>0?fmt(tV):'$0';var pE=document.getElementById('pCh');if(tC>0){pE.textContent=(pnl>=0?'+':'')+pnl.toFixed(2)+'%';pE.style.color=pnl>=0?'var(--up)':'var(--dn)'}else{pE.textContent=t('add_coins');pE.style.color='var(--t3)'};document.getElementById('pList').innerHTML=portfolio.length?portfolio.map(function(p,i){var d=T[p.sym],cp=d?d.p:0,v=cp*p.amt,pnl=p.bp>0?((cp-p.bp)/p.bp*100):0;var bg=COL[p.sym]||'#444';return'<div class="port-i"><div style="display:flex;align-items:center;gap:8px"><div class="cr-ic" style="background:'+bg+'0a;color:'+bg+';border:1px solid '+bg+'22;width:26px;height:26px;font-size:9px">'+p.sym.slice(0,2)+'</div><div><div class="cr-n">'+p.sym+'</div><div class="cr-sub">'+p.amt+' × '+fP(cp)+'</div></div></div><div style="text-align:left"><div class="cr-p">'+fmt(v)+'</div><div style="font-family:var(--fm);font-size:9px;font-weight:700;color:'+(pnl>=0?'var(--up)':'var(--dn)')+'">'+(p.bp>0?(pnl>=0?'+':'')+pnl.toFixed(1)+'%':'--')+'</div><div style="font-size:7px;color:var(--t3);cursor:pointer" onclick="rmPort('+i+')">🗑</div></div></div>'}).join(''):'<div class="empty"><div class="empty-ic">💼</div><div class="empty-tx">'+t('empty_port')+'</div></div>'}
+function renderPort(){var tV=0,tC=0;portfolio.forEach(function(p){var d=T[p.sym];if(d){tV+=d.p*p.amt;tC+=p.bp*p.amt}});var pnl=tC>0?((tV-tC)/tC*100):0;document.getElementById('pVal').textContent=tV>0?fmt(tV):'$0';var pE=document.getElementById('pCh');if(tC>0){pE.textContent=(pnl>=0?'+':'')+pnl.toFixed(2)+'%';pE.style.color=pnl>=0?'var(--up)':'var(--dn)'}else{pE.textContent=t('add_coins');pE.style.color='var(--t3)'};document.getElementById('pList').innerHTML=portfolio.length?portfolio.map(function(p,i){var d=T[p.sym],cp=d?d.p:0,v=cp*p.amt,pnl=p.bp>0?((cp-p.bp)/p.bp*100):0;var bg=COL[p.sym]||'#444';return'<div class="port-i"><div style="display:flex;align-items:center;gap:8px"><div class="cr-ic" style="background:'+bg+'0a;color:'+bg+';border:1px solid '+bg+'22;width:26px;height:26px;font-size:9px">'+esc(p.sym.slice(0,2))+'</div><div><div class="cr-n">'+esc(p.sym)+'</div><div class="cr-sub">'+p.amt+' × '+fP(cp)+'</div></div></div><div style="text-align:left"><div class="cr-p">'+fmt(v)+'</div><div style="font-family:var(--fm);font-size:9px;font-weight:700;color:'+(pnl>=0?'var(--up)':'var(--dn)')+'">'+(p.bp>0?(pnl>=0?'+':'')+pnl.toFixed(1)+'%':'--')+'</div><div style="font-size:7px;color:var(--t3);cursor:pointer" onclick="rmPort('+i+')">🗑</div></div></div>'}).join(''):'<div class="empty"><div class="empty-ic">💼</div><div class="empty-tx">'+t('empty_port')+'</div></div>'}
 /* ═══ ⚖️ L/S INTELLIGENCE v2.0 ═══ */
 async function loadTakerVol(){/* taker data now loaded via PROXY in loadTk() */await loadTk()}
 
@@ -4903,14 +5172,14 @@ function renderTop3(){
     var d=T[r.s];if(!d||!d.p||d.p<=0)return;
 
     /* ═══ STRICT QUALITY GATE (before scoring) ═══ */
-    if(r.c>=6)return;
+    if(r.c>=8)return;
     if(r.c<=-5)return;
-    if(r.passed<3)return;
+    if(r.passed<2)return;
     if(T.BTC&&T.BTC.c<-4)return;
-    if(d.v<5000000)return;
+    if(d.v<3000000)return;
     try{var wPnLGate=calcWhalePnL(r.s);if(wPnLGate&&wPnLGate.pct<-3)return;}catch(e){}
     try{var iceGate=detectIceberg(r.s);if(iceGate&&iceGate.signal==='ICEBERG_SELL'&&iceGate.count>=2)return;}catch(e){}
-    if(FR[r.s]&&FR[r.s].rate>0.08)return;
+    if(FR[r.s]&&FR[r.s].rate>0.12)return;
     try{var predGate=getPredArrow(r.s);if(predGate&&predGate.sc<=-5)return;}catch(e){}
     if(r.ageMinutes>120&&r.changeFromDetection>5)return;
     if(typeof tokenUnlocks!=='undefined'&&tokenUnlocks&&tokenUnlocks.length){
@@ -4922,7 +5191,7 @@ function renderTop3(){
       });
       if(unlockMatch.length){
         var totalUnlockValue=unlockMatch.reduce(function(s,u){return s+(u.amount||0)},0);
-        if(totalUnlockValue>5000000)return;
+        if(totalUnlockValue>20000000)return;
       }
     }
 
@@ -5087,7 +5356,7 @@ function renderTop3(){
     if(sl>=d.p*0.99)sl=d.p*0.95;
     if(tp1<=d.p*1.01)tp1=d.p*1.05;
     if(tp2<=tp1)tp2=d.p*1.1;
-    if(rr<1.8)return;
+    if(rr<1.5)return;
 
     /* ═══ SIGNAL QUALITY GATE ═══ */
     try{var gate=signalQualityGate(r.s,'top3',r.score);if(!gate.pass)return}catch(e){}
@@ -5140,7 +5409,7 @@ function renderTop3(){
   var top=opps.slice(0,3);
 
   /* ═══ Quality controls ═══ */
-  if(!top.length||top[0].priority<35){
+  if(!top.length||top[0].priority<25){
     el.innerHTML='<div class="muted">'+(ar
       ?'🎯 لا صفقات VIP حالياً — الفلتر الذكي لا يقبل إلا الأفضل'
       :'🎯 No VIP trades right now — Smart filter accepts only the best')+'</div>';
@@ -5247,7 +5516,7 @@ function renderTop3(){
 }
 /* 📈 MARKET MOVEMENT PAGE */
 async function loadMarket(){if(curMktTab===0)loadBTCChart();else loadETHChart()}
-setInterval(function(){var pgEl=document.getElementById('pg-market');if(pgEl&&pgEl.classList.contains('act')){if(curMktTab===0&&Date.now()-btcCache.t>=MKT_TTL)loadBTCChart();else if(curMktTab===1&&Date.now()-ethCache.t>=MKT_TTL)loadETHChart()}},60000);
+/* Market chart auto-refresh interval moved into init() */
 /* 🤖 DATA VALIDATOR + AUTO-REPAIR + CONNECTION QUALITY */
 var validatorLog=[];var lastDataTime=Date.now();var validatorStatus='ok';
 var connMetrics={apiOk:0,apiFail:0,wsUp:false,lastLatency:0,lastCheck:Date.now()};
@@ -5310,13 +5579,7 @@ function updateValidatorUI(issues,fixes){
 function renderValidatorLog(){
   var el=document.getElementById('validatorPanel');if(!el)return;
   el.innerHTML=validatorLog.length?validatorLog.map(function(l){var a=timeAgo(l.time);return'<div style="display:flex;gap:6px;padding:4px 0;border-bottom:1px solid var(--bdr);font-size:9px"><span>'+l.type+'</span><span style="flex:1;color:var(--t1)">'+l.msg+'</span><span style="color:var(--t3);font-family:var(--fm);font-size:7px;flex-shrink:0">'+a.text+'</span></div>'}).join(''):'<div style="text-align:center;color:var(--t3);font-size:10px;padding:10px">🤖 '+(lang==='ar'?'لم يتم الفحص بعد':'Not scanned yet')+'</div>'}
-/* 🎯 BYBIT TOP GAINERS — catch Bybit-only movers */
-async function scanBybitGainers(){
-  try{var by=await fj('https://api.bybit.com/v5/market/tickers?category=spot');if(!by||!by.result)return;
-    var gainers=by.result.list.filter(function(x){return x.symbol.endsWith('USDT')&&+x.price24hPcnt*100>=3&&+x.turnover24h>50000}).sort(function(a,b){return+b.price24hPcnt-+a.price24hPcnt}).slice(0,20);
-    gainers.forEach(function(x){var s=x.symbol.replace('USDT','');var chg=+x.price24hPcnt*100;
-      if(!T[s]||T[s].src==='BY'){T[s]={p:+x.lastPrice,c:chg,v:+x.turnover24h,h:+x.highPrice24h,l:+x.lowPrice24h,src:'BY',by:+x.lastPrice}}
-      if(chg>=5&&chg<=15){var k='by_'+s+'_'+new Date().getHours();if(!notifiedSet[k]){notifiedSet[k]=true;try{localStorage.setItem('nxnot10',JSON.stringify(notifiedSet))}catch(e){};recSig(s,'breakout');if(chg<8)notify(s,'gem',0)}}})}catch(e){}}
+/* scanBybitGainers — removed as dead code (never called) */
 /* INIT */
 async function init(){try{document.getElementById('sInp').placeholder=t('search_ph')}catch(e){}try{document.getElementById('notifB').dataset.c='0'}catch(e){}
   loadProfile();loadToneUI();updateMenuLang();updateMenuTheme();
@@ -5344,6 +5607,14 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   setInterval(function(){try{notifiedSet={};localStorage.setItem('nxnot10','{}')}catch(e){}},3600000);
   setTimeout(function(){runValidator()},10000);
   setInterval(function(){runValidator()},90000);
+  /* Market chart auto-refresh (moved from module-level) */
+  setInterval(function(){
+    var pgEl=document.getElementById('pg-market');
+    if(pgEl&&pgEl.classList.contains('act')){
+      if(curMktTab===0&&Date.now()-btcCache.t>=MKT_TTL)loadBTCChart();
+      else if(curMktTab===1&&Date.now()-ethCache.t>=MKT_TTL)loadETHChart();
+    }
+  },60000);
   // === MONITOR: Weekly auto-tune / auto-improve check ===
   try {
     var weekMs = 7 * 24 * 3600000;

@@ -186,4 +186,42 @@ export default [
       'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
     },
   },
+
+  /* Tests — run under Node's built-in test runner; load src/*.js into the
+     current global scope via vm.runInThisContext, so every browser-side
+     helper they touch (esc, fmt, safeGetJSON, …) is a Node global at
+     runtime. */
+  {
+    files: ['tests/**/*.js'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'commonjs',
+      globals: {
+        ...globals.node,
+        /* From src/utils.js (loaded by tests/_setup.js) */
+        fmt: 'readonly',
+        fP: 'readonly',
+        esc: 'readonly',
+        h: 'readonly',
+        rawHtml: 'readonly',
+        safeC: 'readonly',
+        calcRSI: 'readonly',
+        calcMACD: 'readonly',
+        calcEMA: 'readonly',
+        /* From src/storage.js */
+        safeGet: 'readonly',
+        safeGetJSON: 'readonly',
+        safeSet: 'readonly',
+        safeSetJSON: 'readonly',
+        safeRemove: 'readonly',
+        makeDebouncedSaver: 'readonly',
+        /* Test fixtures from tests/_setup.js */
+        MemStorage: 'readonly',
+        localStorage: 'writable',
+      },
+    },
+    rules: {
+      'no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    },
+  },
 ];

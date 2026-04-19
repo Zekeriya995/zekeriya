@@ -58,6 +58,16 @@ export default [
         /* Declared in src/sectors.js */
         SECTORS: 'readonly',
         getCoinSector: 'readonly',
+        /* Declared in src/monitor-state.js */
+        MONITOR_VERSION: 'readonly',
+        DEFAULT_WEIGHTS: 'readonly',
+        DEFAULT_V3_WEIGHTS: 'readonly',
+        monitorState: 'writable',
+        factorLog: 'writable',
+        supervisorData: 'writable',
+        saveMonitor: 'readonly',
+        saveFactorLog: 'readonly',
+        saveSupervisor: 'readonly',
       },
     },
     rules: {

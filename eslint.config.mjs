@@ -17,9 +17,10 @@ export default [
   /* Baseline recommended rules */
   js.configs.recommended,
 
-  /* Browser bundle — app.js */
+  /* Browser bundle — app.js + extracted src/*.js (all share one global scope
+     because they're loaded as plain, non-module <script> tags) */
   {
-    files: ['app.js'],
+    files: ['app.js', 'src/**/*.js'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'script',
@@ -29,6 +30,22 @@ export default [
         Telegram: 'readonly',
         /* Optional runtime override for the proxy URL */
         NEXUS_PROXY: 'readonly',
+        /* Declared in src/constants.js, used across the app */
+        BN: 'readonly',
+        BF: 'readonly',
+        CG: 'readonly',
+        CB: 'readonly',
+        PROXY: 'readonly',
+        WL: 'writable',
+        COL: 'writable',
+        /* Declared in src/utils.js */
+        fmt: 'readonly',
+        fP: 'readonly',
+        esc: 'readonly',
+        safeC: 'readonly',
+        calcRSI: 'readonly',
+        calcMACD: 'readonly',
+        calcEMA: 'readonly',
       },
     },
     rules: {

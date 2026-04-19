@@ -1,14 +1,8 @@
-/* NEXUS PRO V10 — Early Detection + Sound Alerts + Smart Cache + 6 Checks */
+/* NEXUS PRO V10 — Early Detection + Sound Alerts + Smart Cache + 6 Checks
+   Shared constants (BN/BF/CG/CB/PROXY/WL/COL) live in src/constants.js and
+   pure helpers (esc/fmt/fP/safeC/calcRSI/calcMACD/calcEMA) in src/utils.js —
+   both are loaded before this file by index.html. */
 var tg=window.Telegram&&window.Telegram.WebApp?window.Telegram.WebApp:null;if(tg){tg.ready();tg.expand();tg.setHeaderColor('#060b14');tg.setBackgroundColor('#020408')}
-const BN='https://api.binance.com/api/v3',BF='https://fapi.binance.com/fapi/v1',CG='https://api.coingecko.com/api/v3',CB='https://api.coinbase.com/v2';
-/* PROXY endpoint — overridable via localStorage('nxProxyOverride') or window.NEXUS_PROXY
-   (set before this script loads) for dev / self-hosted deployments */
-const PROXY=(function(){
-  try{var o=localStorage.getItem('nxProxyOverride');if(o&&/^https?:\/\//.test(o))return o.replace(/\/+$/,'')}catch(e){}
-  try{if(typeof window!=='undefined'&&window.NEXUS_PROXY&&/^https?:\/\//.test(window.NEXUS_PROXY))return String(window.NEXUS_PROXY).replace(/\/+$/,'')}catch(e){}
-  return'https://jolly-bush-9254.nexus-proxy.workers.dev';
-})();
-var WL=['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','LINK','AVAX','DOT','MATIC','UNI','ATOM','LTC','NEAR','APT','ARB','OP','INJ','SUI','SEI','TIA','FTM','PEPE','WIF','FIL','HBAR','ICP','IMX','STX','MKR','AAVE','RENDER','GRT','FET','TAO','THETA','LDO','BONK','FLOKI','AR','ALGO','FLOW','MINA','AXS','SAND','MANA','GALA','ENJ','CRV','SNX','COMP','DYDX','GMX','SUSHI','PENDLE','JUP','ENA','W','STRK','TRX','TON','VET','RUNE','KAS','EOS','XLM','EGLD','ROSE','ONE','ZIL','CHZ','IOTA','ENS','WLD','PYTH','ONDO','JTO','PIXEL','BEAM','ORDI','TWT','CAKE','1INCH','BAL','YFI','ASTR','CFX','ANKR','IOTX','RVN','ZEC','QTUM','XEM','WAVES','NEO','KAVA','CKB','XTZ','CELO'];
 /* ═══ 🏆 AUTO TOP 100 — updates every hour from CoinGecko + trending from exchanges ═══ */
 async function updateTop100(){
   try{
@@ -77,7 +71,7 @@ function calcVPIN(sym){
   var vpin=tVol>0?tImb/tVol:0;var sc=0,sig='LOW_TOXICITY';
   if(vpin>0.7){sc+=12;sig='EXTREME_TOXICITY'}else if(vpin>0.55){sc+=8;sig='HIGH_TOXICITY'}else if(vpin>0.4){sc+=3;sig='MODERATE'}
   return{vpin:+vpin.toFixed(3),score:sc,signal:sig}}
-var COL={BTC:'#f7931a',ETH:'#627eea',SOL:'#9945ff',BNB:'#f0b90b',XRP:'#23292f',LINK:'#2a5ada',AVAX:'#e84142',DOGE:'#c2a633',ADA:'#0033ad',DOT:'#e6007a',MATIC:'#8247e5',UNI:'#ff007a',ATOM:'#2e3148',ARB:'#28a0f0',OP:'#ff0420',INJ:'#00f2fe',SUI:'#4da2ff',SEI:'#9b1c1c',TIA:'#7c3aed',FTM:'#1969ff',NEAR:'#00c08b',APT:'#00bfa6',LTC:'#bfbbbb',PEPE:'#4c8c2f',WIF:'#8b5cf6'};
+/* COL (coin colors) moved to src/constants.js */
 var T={},FR={},OI={},LS={},CBP={},ws=null,curCoin='BTC',curTF='1h',inds={vol:1,sma:0,rsi:0,sr:0,bb:0,macd:0,ema:0,pat:0};
 var lsHist={},takerData={}; /* L/S Intelligence v2.0 */
 var frHistory={},oiHistory={},topTradersLS={},globalLS={},aggCVD={},bookTickers={}; /* Binance Advanced */
@@ -941,16 +935,7 @@ var cache={scan:null,scanTime:0,whale:null,whaleTime:0,fr:null,frTime:0};
 var CACHE_TTL=60000;
 const TR={nav_home:{ar:'الرئيسية',en:'Home'},nav_scan:{ar:'السكانر',en:'Scanner'},nav_whale:{ar:'حيتان',en:'Whales'},nav_ind:{ar:'مؤشرات',en:'Indicators'},nav_me:{ar:'حسابي',en:'Profile'},breakout:{ar:'بداية صعود',en:'Rising'},whales:{ar:'شراء حيتان',en:'Whale Buying'},whale_sell:{ar:'بيع حيتان',en:'Whale Selling'},liquidity:{ar:'سيولة',en:'Liquidity'},my_trades:{ar:'صفقاتي',en:'My Trades'},my_stats:{ar:'إحصائياتي',en:'My Stats'},my_settings:{ar:'إعداداتي',en:'My Settings'},my_log:{ar:'سجل',en:'History'},notif_log:{ar:'سجل الإشعارات',en:'Notification History'},clear_log:{ar:'مسح السجل',en:'Clear History'},scanning:{ar:'جاري المسح...',en:'Scanning...'},all:{ar:'الكل',en:'All'},full_scan:{ar:'مسح شامل',en:'Full Scan'},refresh:{ar:'تحديث',en:'Refresh'},total:{ar:'إجمالي',en:'Total'},buying:{ar:'شراء',en:'Buying'},selling:{ar:'بيع',en:'Selling'},success:{ar:'النجاح',en:'Success'},portfolio:{ar:'المحفظة',en:'Portfolio'},risk_calc:{ar:'حاسبة المخاطر',en:'Risk Calc'},alerts:{ar:'تنبيهات',en:'Alerts'},add_coins:{ar:'أضف عملات',en:'Add coins'},add_coin:{ar:'إضافة عملة',en:'Add Coin'},add:{ar:'إضافة',en:'Add'},cancel:{ar:'إلغاء',en:'Cancel'},back:{ar:'رجوع',en:'Back'},capital:{ar:'رأس المال',en:'Capital'},risk_pct:{ar:'المخاطرة',en:'Risk'},entry_price:{ar:'سعر الدخول',en:'Entry'},enter_data:{ar:'ادخل البيانات',en:'Enter data'},search_ph:{ar:'ابحث عن أي عملة...',en:'Search any coin...'},no_ultra:{ar:'لا ULTRA حالياً',en:'No ULTRA'},no_whale:{ar:'لا تجميع حيتان',en:'No whales'},confirmed:{ar:'مؤكدة',en:'Confirmed'},buy_strong:{ar:'شراء قوي',en:'Strong Buy'},buy:{ar:'شراء',en:'Buy'},sell:{ar:'بيع',en:'Sell'},hold:{ar:'انتظار',en:'Hold'},risk_amt:{ar:'💰 المخاطرة',en:'💰 Risk'},pos_size:{ar:'📦 الحجم',en:'📦 Size'},pos_val:{ar:'💵 القيمة',en:'💵 Value'},leverage:{ar:'📊 الرافعة',en:'📊 Leverage'},exp_profit:{ar:'🎯 الربح',en:'🎯 Profit'},sl_loss:{ar:'🛑 الخسارة',en:'🛑 Loss'},no_data:{ar:'لا بيانات',en:'No data'},empty_port:{ar:'فارغة',en:'Empty'},market_health:{ar:'🏥 صحة السوق',en:'🏥 Market Health'},smart_warn:{ar:'تحذيرات ذكية',en:'Smart Warnings'},sec_accuracy:{ar:'📈 نسبة النجاح',en:'📈 Accuracy'},scan_desc:{ar:'صيد مبكر — 6 فحوصات — 🏆 Top 100 Focus','en':'Early detection — 6 checks — 🏆 Top 100 Focus'},days:{ar:'يوم',en:'days'},today:{ar:'اليوم!',en:'Today!'},instant:{ar:'فوري',en:'Instant'},strong_signal:{ar:'شراء/بيع قوي',en:'Strong signal'},before_unlock:{ar:'قبل الفك',en:'Before unlock'},gems:{ar:'جواهر',en:'Gems'},gem_desc:{ar:'💎 عملات صغيرة بحركة غير عادية — فرص أرباح كبيرة',en:'💎 Small caps with unusual moves — big profit potential'},wl_desc:{ar:'👁 أضف عملات لمراقبتها 24/7',en:'👁 Add coins to watch 24/7'},stable_flow:{ar:'حركة الأموال',en:'Money Flow'},sf_index:{ar:'مؤشر التدفق',en:'Flow Index'},sf_buy:{ar:'شراء كريبتو',en:'Buying Crypto'},sf_sell:{ar:'بيع كريبتو',en:'Selling Crypto'},sf_neutral:{ar:'متوازن',en:'Balanced'},online:{ar:'متصل',en:'online'},settings:{ar:'الإعدادات',en:'Settings'},profile:{ar:'👤 الملف الشخصي',en:'👤 Profile'},general:{ar:'⚙️ عام',en:'⚙️ General'},language:{ar:'اللغة',en:'Language'},theme:{ar:'الثيم',en:'Theme'},sound:{ar:'الصوت',en:'Sound'},tone:{ar:'🔔 نغمة الإشعار',en:'🔔 Notification Tone'},t_bell:{ar:'جرس',en:'Bell'},t_horn:{ar:'بوق',en:'Horn'},t_pulse:{ar:'نبض',en:'Pulse'},t_silent:{ar:'صامت',en:'Silent'},about:{ar:'عن المنصة',en:'About'},clear_data:{ar:'مسح البيانات',en:'Clear Data'},mkt_dir:{ar:'اتجاه السوق',en:'Market Direction'},mkt_dir_sub:{ar:'تقرير مفصل — BTC & ETH — كل 4 ساعات',en:'Detailed Report — BTC & ETH — Every 4h'},nav_market:{ar:'حركة السوق',en:'Market'},top3:{ar:'🏆 أقوى 3 صفقات مضاربة VIP',en:'🏆 Top 3 VIP Trades'},scan_trade:{ar:'صفقات مضاربة',en:'Trading'},scan_trend:{ar:'ترند القطاعات',en:'Sector Trends'},scan_gems:{ar:'صيد الجواهر',en:'Gem Hunter'},scan_all:{ar:'الكل',en:'All'},scan_fast:{ar:'⚡ سريع',en:'⚡ Fast'},scan_daily:{ar:'📊 يومي',en:'📊 Daily'},scan_early:{ar:'🟢 مبكر',en:'🟢 Early'},scan_still:{ar:'🟡 فرصة',en:'🟡 Still'},scan_late:{ar:'🔴 متأخر',en:'🔴 Late'},scan_signals:{ar:'إشارة',en:'signals'},scan_sectors:{ar:'قطاعات',en:'sectors'},scan_gems_found:{ar:'جواهر مكتشفة',en:'gems found'},scan_updated:{ar:'آخر تحديث',en:'Updated'},scan_enter:{ar:'▶ ادخل',en:'▶ Enter'},scan_chart:{ar:'📈 شارت',en:'📈 Chart'},scan_duration:{ar:'مدة متوقعة',en:'Duration'},scan_warn_small:{ar:'⚠️ ربح عالي + مخاطرة عالية — لا تدخل أكثر من 5% من رأس مالك!',en:'⚠️ High profit + High risk — max 5% of capital!'},mkt_daily:{ar:'تحليل يومي',en:'Daily Analysis'},mkt_full:{ar:'تقرير شامل',en:'Full Report'},mkt_hourly:{ar:'كل ساعة',en:'Hourly'},mkt_4h:{ar:'كل 4 ساعات — 12 طبقة',en:'Every 4h — 12 layers'},mkt_fresh:{ar:'بيانات طازجة',en:'Fresh data'},mkt_stale:{ar:'بيانات قديمة — حدّث!',en:'Stale — Refresh!'},scan_coins_loaded:{ar:'عملات',en:'Coins'},scan_source:{ar:'المصدر',en:'Source'}};
 function t(k){return TR[k]?TR[k][lang]:(k||'')}
-function fmt(n){if(n>=1e9)return'$'+(n/1e9).toFixed(1)+'B';if(n>=1e6)return'$'+(n/1e6).toFixed(1)+'M';if(n>=1e3)return'$'+(n/1e3).toFixed(1)+'K';return'$'+n.toFixed(0)}
-function fP(p){if(!p||isNaN(p))return'$0';if(p>=1e3)return'$'+p.toLocaleString('en',{maximumFractionDigits:2});if(p>=1)return'$'+p.toFixed(2);if(p>=.01)return'$'+p.toFixed(4);return'$'+p.toFixed(6)}
-/* HTML escape — wrap API-derived strings that enter innerHTML */
-function esc(s){
-  if(s==null)return'';
-  return String(s).replace(/[&<>"']/g,function(c){
-    return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
-  });
-}
-function safeC(c){return(c&&!isNaN(c))?c:0} /* NaN-safe change % */
+/* fmt/fP/esc/safeC/calcRSI/calcMACD/calcEMA moved to src/utils.js */
 var apiCooldown={until:0,reason:''};
 async function fj(u){
   if(Date.now()<apiCooldown.until)return null;
@@ -965,9 +950,6 @@ async function fj(u){
     connMetrics.apiOk++;return r.json()
   }catch(e){connMetrics.apiFail++;return null}
 }
-function calcRSI(c,p){p=p||14;if(c.length<p+1)return 50;var g=0,l=0;for(var i=c.length-p;i<c.length;i++){var d=c[i]-c[i-1];if(d>0)g+=d;else l+=Math.abs(d)}return 100-100/(1+g/Math.max(l,.001))}
-function calcMACD(c){if(c.length<26)return{h:0,signal:0,cross:'none'};var ema=function(d,p){var k=2/(p+1),e=d[0];for(var i=1;i<d.length;i++)e=d[i]*k+e*(1-k);return e};var macdLine=ema(c.slice(-12),12)-ema(c,26);var macdHist=[];for(var i=26;i<=c.length;i++){macdHist.push(ema(c.slice(i-12,i),12)-ema(c.slice(0,i),26))}var signal=macdHist.length>=9?ema(macdHist.slice(-9),9):macdLine;var prev=macdHist.length>=2?macdHist[macdHist.length-2]:0;var cross=macdLine>signal&&prev<=signal?'bull':macdLine<signal&&prev>=signal?'bear':'none';return{h:macdLine,signal:signal,cross:cross}}
-function calcEMA(data,period){if(!data||data.length<period)return data&&data.length?data[data.length-1]:0;var k=2/(period+1);var ema=data.slice(0,period).reduce(function(a,b){return a+b},0)/period;for(var i=period;i<data.length;i++){ema=data[i]*k+ema*(1-k)}return ema}
 function timeAgo(ts){var d=Date.now()-ts,m=Math.floor(d/60000),h=Math.floor(d/3600000);if(m<2)return{text:lang==='ar'?'🆕 الآن':'🆕 Now',cls:'fresh'};if(m<60)return{text:lang==='ar'?'منذ '+m+' دقيقة':m+'m ago',cls:'fresh'};return{text:lang==='ar'?'منذ '+h+' ساعة':h+'h ago',cls:h<6?'':'old'}}
 function timeBadge(ts){var a=timeAgo(ts);return'<span class="time-badge '+a.cls+'">⏱ '+a.text+'</span>'}
 function recSig(sym,type,price){

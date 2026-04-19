@@ -1,6 +1,13 @@
-var CACHE_NAME = 'nexus-v10-v6-patched';
+var CACHE_NAME = 'nexus-v10-v7-modules';
 /* Critical assets — install fails if any fail */
-var CRITICAL_ASSETS = ['./', './index.html', './app.js', './manifest.json'];
+var CRITICAL_ASSETS = [
+  './',
+  './index.html',
+  './app.js',
+  './manifest.json',
+  './src/constants.js',
+  './src/utils.js',
+];
 /* Optional assets — best-effort cache, failure does not block install */
 var OPTIONAL_ASSETS = [
   'https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@400;500;600;700;800&display=swap',

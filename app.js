@@ -98,11 +98,22 @@ var notifiedSet={};try{notifiedSet=JSON.parse(localStorage.getItem('nxnot10')||'
 var lang='ar';try{lang=localStorage.getItem('nxlang')||'ar'}catch(e){}
 var fgValue=50,btcDom=50;
 /* ═══ 🤖 PLATFORM MONITOR — PART A ═══ */
-var MONITOR_VERSION = 1;
-var DEFAULT_WEIGHTS = {trend:2, whales:2, rsi:1, fr:1, oi:1, vol:0.5, macd:0.5, confluence:1, structure:1};
+var MONITOR_VERSION = 2;
+var DEFAULT_WEIGHTS = {trend:2, whales:2, rsi:1, fr:1, oi:1, vol:0.5, macd:0.5, confluence:1, structure:1, smart:1, flow:1, mood:0.5};
 
 var monitorState = null;
 try { monitorState = JSON.parse(localStorage.getItem('nxMonitor')); } catch(e) { monitorState = null; }
+/* v2 migration: preserve existing stats but add new factor keys for smart/flow/mood */
+if (monitorState && monitorState.v === 1) {
+  /* Preserve learned data, just add new factor stats + weight keys */
+  if (!monitorState.factorStats) monitorState.factorStats = {};
+  ['smart','flow','mood'].forEach(function(k){
+    if (!monitorState.factorStats[k]) monitorState.factorStats[k] = {wins:0, losses:0, total:0, winRate:0};
+    if (monitorState.weights && monitorState.weights[k] === undefined) monitorState.weights[k] = DEFAULT_WEIGHTS[k];
+  });
+  monitorState.v = MONITOR_VERSION;
+  try { localStorage.setItem('nxMonitor', JSON.stringify(monitorState)); } catch(e) {}
+}
 if (!monitorState || monitorState.v !== MONITOR_VERSION) {
   monitorState = {
     v: MONITOR_VERSION,
@@ -116,7 +127,10 @@ if (!monitorState || monitorState.v !== MONITOR_VERSION) {
       vol:    {wins:0, losses:0, total:0, winRate:0},
       macd:   {wins:0, losses:0, total:0, winRate:0},
       confluence:{wins:0, losses:0, total:0, winRate:0},
-      structure: {wins:0, losses:0, total:0, winRate:0}
+      structure: {wins:0, losses:0, total:0, winRate:0},
+      smart:  {wins:0, losses:0, total:0, winRate:0},
+      flow:   {wins:0, losses:0, total:0, winRate:0},
+      mood:   {wins:0, losses:0, total:0, winRate:0}
     },
     confCalib: {},
     hourStats: {},
@@ -367,7 +381,11 @@ function captureFactorSnapshot(sym) {
       vol:        d.v > 5e7,
       macd:       true,
       confluence: true,
-      structure:  true
+      structure:  true,
+      /* NEW: market direction v2 factors */
+      smart:      (function(){var s=false;try{if(topTradersLS[sym]&&topTradersLS[sym].accounts&&topTradersLS[sym].accounts.length){var tl=topTradersLS[sym].accounts[topTradersLS[sym].accounts.length-1];if(tl.long>0.55)s=true;}}catch(e){}try{if(!s&&typeof cbPremium!=='undefined'&&((sym==='BTC'&&cbPremium.BTC_pct>0.1)||(sym==='ETH'&&cbPremium.ETH_pct>0.1)))s=true;}catch(e){}try{if(!s&&bitfinexMargin[sym]&&bitfinexMargin[sym].longPct>60)s=true;}catch(e){}return s;})(),
+      flow:       (function(){var f=false;try{var ic=detectIceberg(sym);if(ic&&ic.signal==='ICEBERG_BUY')f=true;}catch(e){}try{if(!f){var vp=calcVPIN(sym);if(vp&&vp.vpin>0.6)f=true;}}catch(e){}try{if(!f&&takerData[sym]&&takerData[sym].ratio>1.3)f=true;}catch(e){}return f;})(),
+      mood:       (function(){var m=false;try{if(typeof fgValue!=='undefined'&&fgValue>=40&&fgValue<=70)m=true;}catch(e){}try{if(!m&&newsSentiment){var nsScore=newsSentiment.score!==undefined?newsSentiment.score:((newsSentiment.pos||0)/Math.max(1,((newsSentiment.pos||0)+(newsSentiment.neg||0)+(newsSentiment.neu||0)))*100);if(nsScore>55)m=true;}}catch(e){}return m;})()
     },
     v3categories: {
       whale: wConf >= 40 || (ww && ww.waves && ww.waves.length >= 2),

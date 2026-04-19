@@ -16,8 +16,20 @@
 /* Set when an upstream API tells us to back off (HTTP 429 / 418 / 403).
    While Date.now() < apiCooldown.until, fj() returns null without even
    trying the network — so a single rate-limit response also gates the
-   ~30 sibling requests that would otherwise pile in. */
-var apiCooldown = { until: 0, reason: '' };
+   ~30 sibling requests that would otherwise pile in.
+
+   The .attempts counter drives an exponential backoff: repeated 403s do
+   not re-arm the same 10-minute ban every time; instead the cooldown
+   grows (1×, 2×, 4×, capped at 8×) until we get a successful response,
+   at which point it resets to 0 — so a transient outage doesn't evict
+   the user for an hour. */
+var apiCooldown = { until: 0, reason: '', attempts: 0 };
+function applyBackoff(baseMs, reason) {
+  var multiplier = Math.min(8, Math.pow(2, apiCooldown.attempts));
+  apiCooldown.until = Date.now() + baseMs * multiplier;
+  apiCooldown.reason = reason;
+  apiCooldown.attempts++;
+}
 
 /* ─── connection metrics (reset never; tab-lifetime counters) ──── */
 var connMetrics = {
@@ -45,20 +57,17 @@ async function fj(u) {
     clearTimeout(tm);
     connMetrics.lastLatency = Date.now() - t0;
     if (r.status === 429) {
-      apiCooldown.until = Date.now() + 60000;
-      apiCooldown.reason = '429 Rate Limited';
+      applyBackoff(60000, '429 Rate Limited');
       connMetrics.apiFail++;
       return null;
     }
     if (r.status === 418) {
-      apiCooldown.until = Date.now() + 300000;
-      apiCooldown.reason = '418 IP Banned';
+      applyBackoff(300000, '418 IP Banned');
       connMetrics.apiFail++;
       return null;
     }
     if (r.status === 403) {
-      apiCooldown.until = Date.now() + 600000;
-      apiCooldown.reason = '403 Forbidden';
+      applyBackoff(60000, '403 Forbidden');
       connMetrics.apiFail++;
       return null;
     }
@@ -67,6 +76,9 @@ async function fj(u) {
       return null;
     }
     connMetrics.apiOk++;
+    /* Any successful response clears the backoff history, so a one-off
+       429 doesn't keep the app in a long-tail penalty window. */
+    apiCooldown.attempts = 0;
     return r.json();
   } catch (e) {
     connMetrics.apiFail++;

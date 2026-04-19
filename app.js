@@ -55,16 +55,18 @@ async function refreshTiers(){if(Date.now()-tierLastRefresh<4*3600000&&tier2Coin
   var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD'];var ranked=Object.entries(T).filter(function(e){return!STABLES.includes(e[0])&&!TIER1.has(e[0])&&e[1].v>1000000}).sort(function(a,b){return b[1].v-a[1].v}).map(function(e){return e[0]});
   tier2Coins=ranked.slice(0,75);tier3Coins=ranked.slice(75,275);
   console.log('[Tiers] T1:'+TIER1.size+' T2:'+tier2Coins.length+' T3:'+tier3Coins.length)}
-/* Volume Spike: T3 → T2 auto-promote */
-var volBaselines={};
-function checkVolSpikes(){/* Disabled — TOP 100 focus only */}
+/* Volume-spike auto-promotion was disabled in a previous iteration
+   (TOP-100 focus). The stubs are removed here to keep the call sites honest. */
 /* VPIN Calculator — simple version using REST trades */
 var vpinBuckets={};
 function updateVPIN(sym,price,qty,isBuyerMaker){
-  if(!vpinBuckets[sym])vpinBuckets[sym]={buckets:[],cur:{bv:0,sv:0,n:0}};
-  var d=vpinBuckets[sym];var val=price*qty;
+  if(!vpinBuckets[sym])vpinBuckets[sym]={buckets:[],cur:{bv:0,sv:0,n:0},touched:Date.now()};
+  var d=vpinBuckets[sym];d.touched=Date.now();var val=price*qty;
   if(isBuyerMaker)d.cur.sv+=val;else d.cur.bv+=val;d.cur.n++;
   if(d.cur.n>=30){d.buckets.push({bv:d.cur.bv,sv:d.cur.sv});if(d.buckets.length>40)d.buckets.shift();d.cur={bv:0,sv:0,n:0}}}
+/* Evict buckets untouched for >1h so long-running tabs don't leak memory on
+   coins that dropped off the watchlist after a brief pump. */
+function pruneVPINBuckets(){var cutoff=Date.now()-3600000;Object.keys(vpinBuckets).forEach(function(s){if((vpinBuckets[s].touched||0)<cutoff)delete vpinBuckets[s]})}
 function calcVPIN(sym){
   var d=vpinBuckets[sym];if(!d||d.buckets.length<8)return{vpin:0,score:0,signal:'NO_DATA'};
   var tImb=0,tVol=0;d.buckets.forEach(function(b){tImb+=Math.abs(b.bv-b.sv);tVol+=b.bv+b.sv});
@@ -96,7 +98,14 @@ var prevOB={}; /* Previous Order Book snapshots */
    src/portfolio.js. openTrade / closeTrade / monitorTrades stay here
    because they reach into the monitor + whale subsystems. */
 var lang=safeGet('nxlang','ar');
-var fgValue=50,btcDom=50;
+/* Null means "never fetched" — distinct from a legitimate reading of 50.
+   Any UI that surfaces fgValue must guard for null and render '—'. */
+var fgValue=null,fgTime=0,btcDom=null,btcDomTime=0;
+/* Hoisted from later in the file: getConnQuality() in src/connection.js
+   reads lastDataTime on every updateConnStatus() tick, including calls
+   that fire before the rest of this file has executed. Declaring it at
+   the top guarantees a real number instead of NaN. */
+var lastDataTime=Date.now();
 
 /* monitorState / factorLog / supervisorData + their save helpers
    (saveMonitor, saveFactorLog, saveSupervisor) and the MONITOR_VERSION /
@@ -1165,7 +1174,7 @@ async function loadTk(){
   if(all){
     _proxyAlive=true;
     /* — tickers — */
-    if(all.tickers){Object.keys(all.tickers).forEach(function(s){var d=all.tickers[s];if(!d)return;var chg=d.change!==undefined?+d.change:(d.c!==undefined?+d.c:0);T[s]={p:+d.price||+d.p||0,c:isNaN(chg)?0:chg,v:+d.volume||+d.v||0,h:+d.high||+d.h||0,l:+d.low||+d.l||0,src:d.src||'PROXY'};if(d.by)T[s].by=+d.by})}
+    if(all.tickers){Object.keys(all.tickers).forEach(function(s){var d=all.tickers[s];if(!d)return;var chg=d.change!==undefined?+d.change:(d.c!==undefined?+d.c:0);var price=+d.price||+d.p||0;if(!(price>0))return;/* Skip zero/negative prices — better to omit than to render $0 as live data. */ T[s]={p:price,c:isNaN(chg)?0:chg,v:+d.volume||+d.v||0,h:+d.high||+d.h||0,l:+d.low||+d.l||0,src:d.src||'PROXY',loaded:true,t:Date.now()};if(d.by)T[s].by=+d.by})}
     /* — funding rates — */
     if(all.fr){Object.keys(all.fr).forEach(function(s){var d=all.fr[s];if(!d)return;FR[s]={rate:d.rate!==undefined?+d.rate:0,mark:d.mark!==undefined?+d.mark:(d.markPrice!==undefined?+d.markPrice:0)}})}
     /* — open interest — */
@@ -1183,8 +1192,8 @@ async function loadTk(){
     if(all.depth){Object.keys(all.depth).forEach(function(s){var d=all.depth[s];if(!d)return;depthSnapshots[s]={bids:d.bids||d.b||[],asks:d.asks||d.a||[],time:+d.time||Date.now()}})}
     /* — market overview (FG + BTC dom + Coinbase) — */
     if(all.market){
-      if(all.market.fgi!==undefined||all.market.fg!==undefined){fgValue=+(all.market.fgi||all.market.fg);var fgE=document.getElementById('fgV');if(fgE)fgE.textContent=fgValue;var pFGE=document.getElementById('pFG');if(pFGE)pFGE.textContent=fgValue;var fgLE=document.getElementById('fgL');if(fgLE)fgLE.textContent=all.market.fgiLabel||all.market.fgLabel||''}
-      if(all.market.btcDom!==undefined){btcDom=+all.market.btcDom;var btcDE=document.getElementById('btcD');if(btcDE)btcDE.textContent=btcDom.toFixed(1)+'%'}
+      if(all.market.fgi!==undefined||all.market.fg!==undefined){var fgRaw=+(all.market.fgi||all.market.fg);if(!isNaN(fgRaw)){fgValue=fgRaw;fgTime=Date.now();var fgE=document.getElementById('fgV');if(fgE)fgE.textContent=fgValue;var pFGE=document.getElementById('pFG');if(pFGE)pFGE.textContent=fgValue;var fgLE=document.getElementById('fgL');if(fgLE)fgLE.textContent=all.market.fgiLabel||all.market.fgLabel||''}}
+      if(all.market.btcDom!==undefined){var bdRaw=+all.market.btcDom;if(!isNaN(bdRaw)){btcDom=bdRaw;btcDomTime=Date.now();var btcDE=document.getElementById('btcD');if(btcDE)btcDE.textContent=btcDom.toFixed(1)+'%'}}
       if(all.market.cbp){Object.keys(all.market.cbp).forEach(function(c){CBP[c]=+all.market.cbp[c]})}
     }
     /* — whales engine data — */
@@ -1221,7 +1230,9 @@ async function loadTk(){
             if(!tk.symbol||!tk.symbol.endsWith('USDT'))return;
             var sym=tk.symbol.replace('USDT','');
             if(STABLES_FB.includes(sym)||sym.length>10)return;
-            T[sym]={p:+tk.lastPrice||0,c:+tk.priceChangePercent||0,v:+tk.quoteVolume||0,h:+tk.highPrice||0,l:+tk.lowPrice||0,src:'BN_DIRECT'};
+            var price=+tk.lastPrice||0;
+            if(!(price>0))return;/* Skip zero prices on the direct-API path too. */
+            T[sym]={p:price,c:+tk.priceChangePercent||0,v:+tk.quoteVolume||0,h:+tk.highPrice||0,l:+tk.lowPrice||0,src:'BN_DIRECT',loaded:true,t:Date.now()};
           });
           console.log('[FALLBACK] ✅ Binance tickers loaded: '+Object.keys(T).length+' coins');
           /* Update TIER1 from loaded data */
@@ -1836,11 +1847,13 @@ function closeTrade(trade,exitPrice,reason){
   saveTrades();
   // === MONITOR HOOK: Process outcome ===
   try { processTradeOutcome(trade); } catch(e) {}
-  /* Notification */
+  /* Notification — src/notifications.js is loaded before app.js by index.html,
+     but if closeTrade() ever fires during early init we don't want a missing
+     helper to crash the trade-exit path. */
   var ic=trade.finalPnl>=0?'✅':'❌';var pnlStr=(trade.finalPnl>=0?'+':'')+trade.finalPnl.toFixed(1)+'%';
   var durH=Math.floor(trade.duration/3600000);var durM=Math.floor((trade.duration%3600000)/60000);
-  showPopup(ic,trade.sym+' '+pnlStr,reason);
-  addNotifHist(ic,trade.sym,'Exit',pnlStr+' | '+reason);
+  if(typeof showPopup==='function')showPopup(ic,trade.sym+' '+pnlStr,reason);
+  if(typeof addNotifHist==='function')addNotifHist(ic,trade.sym,'Exit',pnlStr+' | '+reason);
   sendTG('<b>'+ic+' '+trade.sym+'/USDT — '+reason+'</b>\n'
     +(lang==='ar'?'دخول':'Entry')+': '+fP(trade.entry)+' → '+(lang==='ar'?'خروج':'Exit')+': '+fP(exitPrice)+'\n'
     +(lang==='ar'?'النتيجة':'Result')+': <b>'+pnlStr+'</b>\n'
@@ -3049,11 +3062,14 @@ async function loadDash(){
   try{ fetchDeFiLlama(); }catch(e){} /* DeFiLlama — stablecoins + TVL */
   try{ fetchTokenUnlocks(); }catch(e){} /* Token Unlocks */
   try{ refreshTiers(); }catch(e){}
-  try{ checkVolSpikes(); }catch(e){}
+  try{ pruneVPINBuckets(); }catch(e){}
   try{ await loadTop4Ext(); }catch(e){}
   try{
   /* Only fetch from direct API if proxy didn't provide FG value */
-  if(fgValue===50||!fgValue){var fg=await fj('https://api.alternative.me/fng/?limit=1');if(fg&&fg.data){fgValue=+fg.data[0].value;var fgE=document.getElementById('fgV');if(fgE)fgE.textContent=fgValue;var fgLE=document.getElementById('fgL');if(fgLE)fgLE.textContent=fg.data[0].value_classification;var pFGE=document.getElementById('pFG');if(pFGE)pFGE.textContent=fgValue}}
+  /* Direct-fetch fallback only when the proxy hasn't delivered a reading yet
+     (or delivered one we haven't refreshed in >30 min). Comparing against
+     50 — a valid reading — would silently re-fetch on every tick. */
+  if(fgValue===null||Date.now()-fgTime>1800000){var fg=await fj('https://api.alternative.me/fng/?limit=1');if(fg&&fg.data&&fg.data[0]){var fgRaw2=+fg.data[0].value;if(!isNaN(fgRaw2)){fgValue=fgRaw2;fgTime=Date.now();var fgE=document.getElementById('fgV');if(fgE)fgE.textContent=fgValue;var fgLE=document.getElementById('fgL');if(fgLE)fgLE.textContent=fg.data[0].value_classification;var pFGE=document.getElementById('pFG');if(pFGE)pFGE.textContent=fgValue}}}
   }catch(e){}
   try{
   /* Only fetch from direct API if proxy didn't provide BTC Dom */
@@ -3515,7 +3531,12 @@ function buildBitfinexCard(){
 }
 
 /* COIN DETAIL */
-async function openCoin(sym){curCoin=sym;curTF='1h';document.getElementById('sRes').classList.remove('show');document.getElementById('sInp').value='';var d=T[sym]||{p:0,c:0,v:0,h:0,l:0};document.getElementById('cmT').textContent=sym+'/USDT';document.getElementById('cmP').textContent=fP(d.p);document.getElementById('cmC').style.color=d.c>=0?'var(--up)':'var(--dn)';document.getElementById('cmC').textContent=(d.c>=0?'+':'')+d.c.toFixed(2)+'%';document.getElementById('cmSts').innerHTML='<div class="st"><div class="st-l">VOL</div><div class="st-v" style="color:var(--neon)">'+fmt(d.v)+'</div></div><div class="st"><div class="st-l">HIGH</div><div class="st-v" style="color:var(--up)">'+fP(d.h)+'</div></div><div class="st"><div class="st-l">LOW</div><div class="st-v" style="color:var(--dn)">'+fP(d.l)+'</div></div>';var ex='';var fr=FR[sym];if(fr)ex+='<div class="fr-row" style="margin-top:6px"><span>📊 FR</span><span class="fr-val" style="color:'+(fr.rate>0.05?'var(--dn)':fr.rate<-0.01?'var(--up)':'var(--warn)')+'">'+(fr.rate>=0?'+':'')+fr.rate.toFixed(4)+'%</span></div>';if(OI[sym])ex+='<div class="fr-row"><span>📈 OI</span><span class="fr-val" style="color:var(--neon)">'+fmt(OI[sym])+'</span></div>';if(LS[sym])ex+='<div class="fr-row"><span>⚖️ L/S</span><span class="fr-val">'+LS[sym].long.toFixed(0)+'%/'+LS[sym].short.toFixed(0)+'%</span></div>';if(d.by)ex+='<div class="fr-row"><span>Bybit</span><span class="fr-val">'+fP(d.by)+'</span></div>';if(CBP[sym])ex+='<div class="fr-row"><span>Coinbase</span><span class="fr-val">'+fP(CBP[sym])+'</span></div>';if(topTradersLS[sym]&&topTradersLS[sym].accounts&&topTradersLS[sym].accounts.length){var tla=topTradersLS[sym].accounts[topTradersLS[sym].accounts.length-1];ex+='<div class="fr-row"><span>🏆 Top L/S</span><span class="fr-val" style="color:'+(tla.long>0.55?'var(--up)':tla.long<0.45?'var(--dn)':'var(--warn)')+'">'+(tla.long*100).toFixed(0)+'%/'+(tla.short*100).toFixed(0)+'%</span></div>'}if(aggCVD[sym]){var cv=aggCVD[sym];ex+='<div class="fr-row"><span>🔬 CVD</span><span class="fr-val" style="color:'+(cv.trend==='BUYING'?'var(--up)':cv.trend==='SELLING'?'var(--dn)':'var(--warn)')+'">'+(cv.trend==='BUYING'?(lang==='ar'?'شراء':'Buy'):cv.trend==='SELLING'?(lang==='ar'?'بيع':'Sell'):(lang==='ar'?'متوازن':'Balanced'))+'</span></div>'}if(bookTickers[sym]){ex+='<div class="fr-row"><span>📐 Spread</span><span class="fr-val" style="color:'+(bookTickers[sym].spread>0.05?'var(--dn)':'var(--t2)')+'">'+bookTickers[sym].spread.toFixed(3)+'%</span></div>'}if(frHistory[sym]&&frHistory[sym].length>=4){ex+='<div class="fr-row" style="justify-content:space-between"><span>📉 FR Hist</span>'+frHistBars(sym)+'</div>'}/* NEW: Multi-Exchange Coin Detail */if(coinalyzeOI[sym])ex+='<div class="fr-row"><span>🌐 OI Agg</span><span class="fr-val" style="color:var(--neon)">'+fmtB(coinalyzeOI[sym].value)+'</span></div>';if(coinalyzeFR[sym])ex+='<div class="fr-row"><span>🌐 FR Agg</span><span class="fr-val" style="color:'+(coinalyzeFR[sym].rate>0.03?'var(--dn)':coinalyzeFR[sym].rate<-0.01?'var(--up)':'var(--warn)')+'">'+(coinalyzeFR[sym].rate>=0?'+':'')+coinalyzeFR[sym].rate.toFixed(4)+'%</span></div>';if(hyperliquidData[sym])ex+='<div class="fr-row"><span>🔬 HL FR</span><span class="fr-val" style="color:var(--neon)">'+(hyperliquidData[sym].funding>=0?'+':'')+hyperliquidData[sym].funding.toFixed(4)+'%</span></div>';if(okxFR[sym])ex+='<div class="fr-row"><span>📊 OKX FR</span><span class="fr-val">'+(okxFR[sym].rate>=0?'+':'')+okxFR[sym].rate.toFixed(4)+'%</span></div>';if(cbPremium.time&&sym==='BTC')ex+='<div class="fr-row"><span>🏦 CB Prem</span><span class="fr-val" style="color:'+(cbPremium.BTC_pct>0?'var(--up)':'var(--dn)')+'">'+(cbPremium.BTC_pct>=0?'+':'')+(cbPremium.BTC_pct||0).toFixed(3)+'%</span></div>';if(bitfinexMargin[sym])ex+='<div class="fr-row"><span>📊 BFX L/S</span><span class="fr-val">'+bitfinexMargin[sym].longPct.toFixed(0)+'%/'+bitfinexMargin[sym].shortPct.toFixed(0)+'%</span></div>';document.getElementById('cmExtra').innerHTML=ex;openMo('coinMo');document.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act');if(b.dataset.t2==='1h')b.classList.add('act')});drawChart(sym,'1h')}
+async function openCoin(sym){curCoin=sym;curTF='1h';document.getElementById('sRes').classList.remove('show');document.getElementById('sInp').value='';
+  /* Never fabricate a $0 card when the upstream APIs haven't delivered this
+     symbol yet. Show a placeholder line and the same loaders so the user
+     sees "loading" instead of a bogus price they might act on. */
+  var d=T[sym];var haveData=!!(d&&d.loaded&&d.p>0);if(!haveData)d={p:0,c:0,v:0,h:0,l:0};
+  document.getElementById('cmT').textContent=sym+'/USDT';document.getElementById('cmP').textContent=haveData?fP(d.p):'—';document.getElementById('cmC').style.color=d.c>=0?'var(--up)':'var(--dn)';document.getElementById('cmC').textContent=(d.c>=0?'+':'')+d.c.toFixed(2)+'%';document.getElementById('cmSts').innerHTML='<div class="st"><div class="st-l">VOL</div><div class="st-v" style="color:var(--neon)">'+fmt(d.v)+'</div></div><div class="st"><div class="st-l">HIGH</div><div class="st-v" style="color:var(--up)">'+fP(d.h)+'</div></div><div class="st"><div class="st-l">LOW</div><div class="st-v" style="color:var(--dn)">'+fP(d.l)+'</div></div>';var ex='';var fr=FR[sym];if(fr)ex+='<div class="fr-row" style="margin-top:6px"><span>📊 FR</span><span class="fr-val" style="color:'+(fr.rate>0.05?'var(--dn)':fr.rate<-0.01?'var(--up)':'var(--warn)')+'">'+(fr.rate>=0?'+':'')+fr.rate.toFixed(4)+'%</span></div>';if(OI[sym])ex+='<div class="fr-row"><span>📈 OI</span><span class="fr-val" style="color:var(--neon)">'+fmt(OI[sym])+'</span></div>';if(LS[sym])ex+='<div class="fr-row"><span>⚖️ L/S</span><span class="fr-val">'+LS[sym].long.toFixed(0)+'%/'+LS[sym].short.toFixed(0)+'%</span></div>';if(d.by)ex+='<div class="fr-row"><span>Bybit</span><span class="fr-val">'+fP(d.by)+'</span></div>';if(CBP[sym])ex+='<div class="fr-row"><span>Coinbase</span><span class="fr-val">'+fP(CBP[sym])+'</span></div>';if(topTradersLS[sym]&&topTradersLS[sym].accounts&&topTradersLS[sym].accounts.length){var tla=topTradersLS[sym].accounts[topTradersLS[sym].accounts.length-1];ex+='<div class="fr-row"><span>🏆 Top L/S</span><span class="fr-val" style="color:'+(tla.long>0.55?'var(--up)':tla.long<0.45?'var(--dn)':'var(--warn)')+'">'+(tla.long*100).toFixed(0)+'%/'+(tla.short*100).toFixed(0)+'%</span></div>'}if(aggCVD[sym]){var cv=aggCVD[sym];ex+='<div class="fr-row"><span>🔬 CVD</span><span class="fr-val" style="color:'+(cv.trend==='BUYING'?'var(--up)':cv.trend==='SELLING'?'var(--dn)':'var(--warn)')+'">'+(cv.trend==='BUYING'?(lang==='ar'?'شراء':'Buy'):cv.trend==='SELLING'?(lang==='ar'?'بيع':'Sell'):(lang==='ar'?'متوازن':'Balanced'))+'</span></div>'}if(bookTickers[sym]){ex+='<div class="fr-row"><span>📐 Spread</span><span class="fr-val" style="color:'+(bookTickers[sym].spread>0.05?'var(--dn)':'var(--t2)')+'">'+bookTickers[sym].spread.toFixed(3)+'%</span></div>'}if(frHistory[sym]&&frHistory[sym].length>=4){ex+='<div class="fr-row" style="justify-content:space-between"><span>📉 FR Hist</span>'+frHistBars(sym)+'</div>'}/* NEW: Multi-Exchange Coin Detail */if(coinalyzeOI[sym])ex+='<div class="fr-row"><span>🌐 OI Agg</span><span class="fr-val" style="color:var(--neon)">'+fmtB(coinalyzeOI[sym].value)+'</span></div>';if(coinalyzeFR[sym])ex+='<div class="fr-row"><span>🌐 FR Agg</span><span class="fr-val" style="color:'+(coinalyzeFR[sym].rate>0.03?'var(--dn)':coinalyzeFR[sym].rate<-0.01?'var(--up)':'var(--warn)')+'">'+(coinalyzeFR[sym].rate>=0?'+':'')+coinalyzeFR[sym].rate.toFixed(4)+'%</span></div>';if(hyperliquidData[sym])ex+='<div class="fr-row"><span>🔬 HL FR</span><span class="fr-val" style="color:var(--neon)">'+(hyperliquidData[sym].funding>=0?'+':'')+hyperliquidData[sym].funding.toFixed(4)+'%</span></div>';if(okxFR[sym])ex+='<div class="fr-row"><span>📊 OKX FR</span><span class="fr-val">'+(okxFR[sym].rate>=0?'+':'')+okxFR[sym].rate.toFixed(4)+'%</span></div>';if(cbPremium.time&&sym==='BTC')ex+='<div class="fr-row"><span>🏦 CB Prem</span><span class="fr-val" style="color:'+(cbPremium.BTC_pct>0?'var(--up)':'var(--dn)')+'">'+(cbPremium.BTC_pct>=0?'+':'')+(cbPremium.BTC_pct||0).toFixed(3)+'%</span></div>';if(bitfinexMargin[sym])ex+='<div class="fr-row"><span>📊 BFX L/S</span><span class="fr-val">'+bitfinexMargin[sym].longPct.toFixed(0)+'%/'+bitfinexMargin[sym].shortPct.toFixed(0)+'%</span></div>';document.getElementById('cmExtra').innerHTML=ex;openMo('coinMo');document.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act');if(b.dataset.t2==='1h')b.classList.add('act')});drawChart(sym,'1h')}
 function cTF(tf,btn){curTF=tf;document.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');drawChart(curCoin,tf)}
 function tgI(ind,btn){inds[ind]=inds[ind]?0:1;btn.classList.toggle('act');drawChart(curCoin,curTF)}
 var chartData=null,chartCtx=null,chartW=0,crosshair={active:false,x:0,y:0};
@@ -5234,7 +5255,7 @@ function renderTop3(){
 async function loadMarket(){if(curMktTab===0)loadBTCChart();else loadETHChart()}
 /* Market chart auto-refresh interval moved into init() */
 /* 🤖 DATA VALIDATOR + AUTO-REPAIR + CONNECTION QUALITY */
-var validatorLog=[];var lastDataTime=Date.now();var validatorStatus='ok';
+var validatorLog=[];var validatorStatus='ok';/* lastDataTime hoisted to module top — connection.js reads it during early init */
 function addVLog(type,msg){validatorLog.unshift({type:type,msg:msg,time:Date.now()});if(validatorLog.length>30)validatorLog=validatorLog.slice(0,30)}
 async function runValidator(){
   var issues=0,fixes=0;

@@ -1,4 +1,4 @@
-var CACHE_NAME = 'nexus-v10-v13-modules';
+var CACHE_NAME = 'nexus-v10-v14-modules';
 /* Critical assets — install fails if any fail */
 var CRITICAL_ASSETS = [
   './',
@@ -10,6 +10,7 @@ var CRITICAL_ASSETS = [
   './src/storage.js',
   './src/translations.js',
   './src/sectors.js',
+  './src/connection.js',
   './src/monitor-state.js',
   './src/whale-state.js',
   './src/portfolio.js',

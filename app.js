@@ -826,20 +826,7 @@ var cache={scan:null,scanTime:0,whale:null,whaleTime:0,fr:null,frTime:0};
 var CACHE_TTL=60000;
 /* TR (translations) + t() moved to src/translations.js
    fmt/fP/esc/safeC/calcRSI/calcMACD/calcEMA moved to src/utils.js */
-var apiCooldown={until:0,reason:''};
-async function fj(u){
-  if(Date.now()<apiCooldown.until)return null;
-  try{
-    var c=new AbortController();var tm=setTimeout(function(){c.abort()},8000);
-    var t0=Date.now();var r=await fetch(u,{signal:c.signal});clearTimeout(tm);
-    connMetrics.lastLatency=Date.now()-t0;
-    if(r.status===429){apiCooldown.until=Date.now()+60000;apiCooldown.reason='429 Rate Limited';connMetrics.apiFail++;return null}
-    if(r.status===418){apiCooldown.until=Date.now()+300000;apiCooldown.reason='418 IP Banned';connMetrics.apiFail++;return null}
-    if(r.status===403){apiCooldown.until=Date.now()+600000;apiCooldown.reason='403 Forbidden';connMetrics.apiFail++;return null}
-    if(!r.ok){connMetrics.apiFail++;return null}
-    connMetrics.apiOk++;return r.json()
-  }catch(e){connMetrics.apiFail++;return null}
-}
+/* apiCooldown + fj moved to src/connection.js */
 function timeAgo(ts){var d=Date.now()-ts,m=Math.floor(d/60000),h=Math.floor(d/3600000);if(m<2)return{text:lang==='ar'?'🆕 الآن':'🆕 Now',cls:'fresh'};if(m<60)return{text:lang==='ar'?'منذ '+m+' دقيقة':m+'m ago',cls:'fresh'};return{text:lang==='ar'?'منذ '+h+' ساعة':h+'h ago',cls:h<6?'':'old'}}
 function timeBadge(ts){var a=timeAgo(ts);return'<span class="time-badge '+a.cls+'">⏱ '+a.text+'</span>'}
 /* NOTIFICATION HISTORY */
@@ -5250,29 +5237,7 @@ async function loadMarket(){if(curMktTab===0)loadBTCChart();else loadETHChart()}
 /* Market chart auto-refresh interval moved into init() */
 /* 🤖 DATA VALIDATOR + AUTO-REPAIR + CONNECTION QUALITY */
 var validatorLog=[];var lastDataTime=Date.now();var validatorStatus='ok';
-var connMetrics={apiOk:0,apiFail:0,wsUp:false,lastLatency:0,lastCheck:Date.now()};
 function addVLog(type,msg){validatorLog.unshift({type:type,msg:msg,time:Date.now()});if(validatorLog.length>30)validatorLog=validatorLog.slice(0,30)}
-function getConnQuality(){
-  var score=100;
-  /* Data freshness */
-  var age=Date.now()-lastDataTime;
-  if(age>30000)score-=40;else if(age>15000)score-=15;
-  /* API success rate */
-  var total=connMetrics.apiOk+connMetrics.apiFail;
-  if(total>0){var rate=connMetrics.apiOk/total;if(rate<0.5)score-=30;else if(rate<0.8)score-=10}
-  /* Coins loaded */
-  var coins=Object.keys(T).length;
-  if(coins<100)score-=20;else if(coins<300)score-=5;
-  return Math.max(0,Math.min(100,score))}
-function updateConnStatus(){
-  var q=getConnQuality();var el=document.getElementById('connStatus');var dot=document.getElementById('validatorDot');
-  var txt,col;
-  if(q>=80){txt=lang==='ar'?'ممتازة':'Excellent';col='var(--up)'}
-  else if(q>=50){txt=lang==='ar'?'جيدة':'Good';col='var(--neon)'}
-  else if(q>=30){txt=lang==='ar'?'عادية':'Fair';col='var(--warn)'}
-  else{txt=lang==='ar'?'ضعيفة':'Poor';col='var(--dn)'}
-  if(el){el.textContent=txt;el.style.color=col}
-  if(dot){dot.style.background=col;dot.style.boxShadow='0 0 6px '+col}}
 async function runValidator(){
   var issues=0,fixes=0;
   var tkAge=Date.now()-lastDataTime;

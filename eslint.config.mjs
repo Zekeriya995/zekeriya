@@ -115,10 +115,17 @@ export default [
         addPort: 'readonly',
         rmPort: 'readonly',
         renderPort: 'readonly',
+        /* Declared in src/connection.js */
+        apiCooldown: 'writable',
+        connMetrics: 'writable',
+        fj: 'readonly',
+        getConnQuality: 'readonly',
+        updateConnStatus: 'readonly',
         /* Defined in app.js but referenced by other modules at call time */
         T: 'writable',
         FR: 'writable',
         CBP: 'writable',
+        lastDataTime: 'writable',
         timeBadge: 'readonly',
         signalQualityGate: 'readonly',
         openTrade: 'readonly',

@@ -30,6 +30,9 @@ export default [
         Telegram: 'readonly',
         /* Optional runtime override for the proxy URL */
         NEXUS_PROXY: 'readonly',
+        /* Language toggle — declared in app.js, read by t() in
+           src/translations.js. Writable because setLang / togLang reassign it. */
+        lang: 'writable',
         /* Declared in src/constants.js, used across the app */
         BN: 'readonly',
         BF: 'readonly',
@@ -49,6 +52,12 @@ export default [
         calcRSI: 'readonly',
         calcMACD: 'readonly',
         calcEMA: 'readonly',
+        /* Declared in src/translations.js */
+        TR: 'readonly',
+        t: 'readonly',
+        /* Declared in src/sectors.js */
+        SECTORS: 'readonly',
+        getCoinSector: 'readonly',
       },
     },
     rules: {

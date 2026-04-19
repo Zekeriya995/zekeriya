@@ -1,4 +1,4 @@
-var CACHE_NAME = 'nexus-v10-v7-modules';
+var CACHE_NAME = 'nexus-v10-v8-modules';
 /* Critical assets — install fails if any fail */
 var CRITICAL_ASSETS = [
   './',
@@ -7,6 +7,8 @@ var CRITICAL_ASSETS = [
   './manifest.json',
   './src/constants.js',
   './src/utils.js',
+  './src/translations.js',
+  './src/sectors.js',
 ];
 /* Optional assets — best-effort cache, failure does not block install */
 var OPTIONAL_ASSETS = [

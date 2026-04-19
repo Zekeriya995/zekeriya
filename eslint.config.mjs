@@ -102,6 +102,19 @@ export default [
         calcWhaleAvgEntry: 'readonly',
         calcWhalePnL: 'readonly',
         calcFlowRate: 'readonly',
+        /* Declared in src/portfolio.js */
+        portfolio: 'writable',
+        predictions: 'writable',
+        activeTrades: 'writable',
+        sigHist: 'writable',
+        recSig: 'readonly',
+        getSigTime: 'readonly',
+        savePred: 'readonly',
+        getAcc: 'readonly',
+        sP: 'readonly',
+        addPort: 'readonly',
+        rmPort: 'readonly',
+        renderPort: 'readonly',
         /* Defined in app.js but referenced by other modules at call time */
         T: 'writable',
         FR: 'writable',
@@ -110,6 +123,7 @@ export default [
         signalQualityGate: 'readonly',
         openTrade: 'readonly',
         openCoin: 'readonly',
+        closeMo: 'readonly',
       },
     },
     rules: {

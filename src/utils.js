@@ -26,6 +26,32 @@ function esc(s) {
   });
 }
 
+/* Tagged template for safe HTML. Every `${value}` interpolation is passed
+   through esc(), so user / API input can be dropped in without
+   hand-escaping. The static template parts pass through untouched, so
+   markup you literally wrote in the source is preserved.
+   Usage:  el.innerHTML = h`<div>${user.name} bought ${coin}</div>`;
+   For intentionally-raw HTML, wrap the value with rawHtml() (rarely needed). */
+function h(strings) {
+  var out = strings[0];
+  for (var i = 1; i < arguments.length; i++) {
+    var v = arguments[i];
+    out += (v && v.__rawHtml ? v.value : esc(v)) + strings[i];
+  }
+  return out;
+}
+
+/* Escape hatch for the h tag — mark a string as already-safe HTML. */
+function rawHtml(s) {
+  return { __rawHtml: true, value: s == null ? '' : String(s) };
+}
+
+/* Tiny setter so every innerHTML-write in the app can be audited from one
+   place. Accepts only strings; pairs naturally with h``. */
+function setHtml(el, html) {
+  if (el) el.innerHTML = typeof html === 'string' ? html : '';
+}
+
 /* NaN-safe change % — falls back to 0 for NaN/undefined/null */
 function safeC(c) {
   return c && !isNaN(c) ? c : 0;

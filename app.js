@@ -3344,7 +3344,7 @@ async function loadDash(){
   }catch(e){}
   try{ loadStableFlow(); }catch(e){}
   try{
-  var wbE=document.getElementById('warnBox');if(wbE)wbE.innerHTML=getWarnings().map(function(w){return'<div class="warn-box"><div class="w-ic">'+w.ic+'</div><div class="w-txt">'+w.txt+'</div></div>'}).join('');
+  var wbE=document.getElementById('warnBox');if(wbE)setHtml(wbE,getWarnings().map(function(w){return h`<div class="warn-box"><div class="w-ic">${w.ic}</div><div class="w-txt">${w.txt}</div></div>`}).join(''));
   var bk=Object.values(T).filter(function(x){return x.c>=8}).length;var bkE=document.getElementById('brkC');if(bkE)bkE.textContent=bk;var pBE=document.getElementById('pBrk');if(pBE)pBE.textContent=bk;
   }catch(e){}
   try{
@@ -5584,7 +5584,17 @@ function updateValidatorUI(issues,fixes){
   renderValidatorLog()}
 function renderValidatorLog(){
   var el=document.getElementById('validatorPanel');if(!el)return;
-  el.innerHTML=validatorLog.length?validatorLog.map(function(l){var a=timeAgo(l.time);return'<div style="display:flex;gap:6px;padding:4px 0;border-bottom:1px solid var(--bdr);font-size:9px"><span>'+l.type+'</span><span style="flex:1;color:var(--t1)">'+l.msg+'</span><span style="color:var(--t3);font-family:var(--fm);font-size:7px;flex-shrink:0">'+a.text+'</span></div>'}).join(''):'<div style="text-align:center;color:var(--t3);font-size:10px;padding:10px">🤖 '+(lang==='ar'?'لم يتم الفحص بعد':'Not scanned yet')+'</div>'}
+  /* l.type / l.msg may contain API-derived coin symbols; route everything
+     through the h`` tag so interpolations are HTML-escaped. */
+  if(!validatorLog.length){
+    setHtml(el,'<div style="text-align:center;color:var(--t3);font-size:10px;padding:10px">🤖 '+(lang==='ar'?'لم يتم الفحص بعد':'Not scanned yet')+'</div>');
+    return;
+  }
+  setHtml(el,validatorLog.map(function(l){
+    var a=timeAgo(l.time);
+    return h`<div style="display:flex;gap:6px;padding:4px 0;border-bottom:1px solid var(--bdr);font-size:9px"><span>${l.type}</span><span style="flex:1;color:var(--t1)">${l.msg}</span><span style="color:var(--t3);font-family:var(--fm);font-size:7px;flex-shrink:0">${a.text}</span></div>`;
+  }).join(''));
+}
 /* scanBybitGainers — removed as dead code (never called) */
 /* INIT */
 async function init(){try{document.getElementById('sInp').placeholder=t('search_ph')}catch(e){}try{document.getElementById('notifB').dataset.c='0'}catch(e){}

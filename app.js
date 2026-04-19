@@ -1,7 +1,13 @@
 /* NEXUS PRO V10 — Early Detection + Sound Alerts + Smart Cache + 6 Checks */
 var tg=window.Telegram&&window.Telegram.WebApp?window.Telegram.WebApp:null;if(tg){tg.ready();tg.expand();tg.setHeaderColor('#060b14');tg.setBackgroundColor('#020408')}
 const BN='https://api.binance.com/api/v3',BF='https://fapi.binance.com/fapi/v1',CG='https://api.coingecko.com/api/v3',CB='https://api.coinbase.com/v2';
-const PROXY='https://jolly-bush-9254.nexus-proxy.workers.dev';
+/* PROXY endpoint — overridable via localStorage('nxProxyOverride') or window.NEXUS_PROXY
+   (set before this script loads) for dev / self-hosted deployments */
+const PROXY=(function(){
+  try{var o=localStorage.getItem('nxProxyOverride');if(o&&/^https?:\/\//.test(o))return o.replace(/\/+$/,'')}catch(e){}
+  try{if(typeof window!=='undefined'&&window.NEXUS_PROXY&&/^https?:\/\//.test(window.NEXUS_PROXY))return String(window.NEXUS_PROXY).replace(/\/+$/,'')}catch(e){}
+  return'https://jolly-bush-9254.nexus-proxy.workers.dev';
+})();
 var WL=['BTC','ETH','SOL','BNB','XRP','ADA','DOGE','LINK','AVAX','DOT','MATIC','UNI','ATOM','LTC','NEAR','APT','ARB','OP','INJ','SUI','SEI','TIA','FTM','PEPE','WIF','FIL','HBAR','ICP','IMX','STX','MKR','AAVE','RENDER','GRT','FET','TAO','THETA','LDO','BONK','FLOKI','AR','ALGO','FLOW','MINA','AXS','SAND','MANA','GALA','ENJ','CRV','SNX','COMP','DYDX','GMX','SUSHI','PENDLE','JUP','ENA','W','STRK','TRX','TON','VET','RUNE','KAS','EOS','XLM','EGLD','ROSE','ONE','ZIL','CHZ','IOTA','ENS','WLD','PYTH','ONDO','JTO','PIXEL','BEAM','ORDI','TWT','CAKE','1INCH','BAL','YFI','ASTR','CFX','ANKR','IOTX','RVN','ZEC','QTUM','XEM','WAVES','NEO','KAVA','CKB','XTZ','CELO'];
 /* ═══ 🏆 AUTO TOP 100 — updates every hour from CoinGecko + trending from exchanges ═══ */
 async function updateTop100(){
@@ -1353,7 +1359,7 @@ async function loadSmallCapsUI(){
     else{slEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">💎</div><div class="sc-empty-title">'+(lang==='ar'?'لا جواهر مكتشفة حالياً':'No gems found right now')+'</div><div class="sc-empty-sub">'+(lang==='ar'?'السكانر يبحث عن عملات صغيرة بحركة غير عادية — حاول لاحقاً':'Scanner looking for small caps with unusual moves — try later')+'</div></div>';}
   }catch(e){
     console.error('[GemHunter] Error:',e);
-    slEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">❌</div><div class="sc-empty-title">'+(lang==='ar'?'خطأ في التحليل':'Analysis error')+'</div><div class="sc-empty-sub">'+e.message+'</div></div>';
+    slEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">❌</div><div class="sc-empty-title">'+(lang==='ar'?'خطأ في التحليل':'Analysis error')+'</div><div class="sc-empty-sub">'+esc(e&&e.message?e.message:'unknown')+'</div></div>';
   }
 }
 async function loadSmallCaps2(){if(!Object.keys(T).length)await loadTk();var cands=Object.entries(T).filter(function(e){var d=e[1];var tier=getCoinTier(e[0]);return d.p>0&&d.p<20&&d.v>100000&&!TIER1.has(e[0])}).sort(function(a,b){return b[1].v-a[1].v}).slice(0,50);var res=[];
@@ -5622,7 +5628,7 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))try{await loadDash()}catch(e){}},120000);
   setInterval(monitorTrades,10000);
   setInterval(function(){try{renderTop3()}catch(e){}},60000); /* Auto-update VIP trades every minute */
-  setInterval(function(){try{notifiedSet={};localStorage.setItem('nxnot10','{}')}catch(e){}},3600000);
+  setInterval(function(){try{notifiedSet={};localStorage.setItem('nxnot10','{}')}catch(e){};try{tgSent={}}catch(e){}},3600000);
   setTimeout(function(){runValidator()},10000);
   setInterval(function(){runValidator()},90000);
   /* Market chart auto-refresh (moved from module-level) */

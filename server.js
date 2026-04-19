@@ -51,10 +51,11 @@ const CONFIG = {
   TG_BOT_TOKEN: process.env.TG_BOT_TOKEN || '',
   TG_CHAT_ID: process.env.TG_CHAT_ID || '',
 
-  /* Allowed origins for CORS */
+  /* Allowed origins for CORS — default empty (same-origin / server-to-server only).
+     Set ALLOWED_ORIGINS=* explicitly in .env if you really want to allow any origin. */
   ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS
-    ? process.env.ALLOWED_ORIGINS.split(',')
-    : ['*'],
+    ? process.env.ALLOWED_ORIGINS.split(',').map(function(s){return s.trim()}).filter(Boolean)
+    : [],
 
   /* Request timeout */
   TIMEOUT: 8000
@@ -73,15 +74,23 @@ app.use(cors({
   }
 }));
 
-app.use(express.json());
+app.use(express.json({ limit: '32kb' }));
 
-/* Rate limiting — 30 requests per minute per IP */
+/* Rate limiting — 30 requests per minute per IP for data APIs */
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
   message: { error: 'Too many requests, slow down' }
 });
 app.use('/api/', limiter);
+
+/* Tighter limiter for the Telegram-relay endpoint (abusable + costs real money) */
+const notifyLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: 'Too many notifications, slow down' }
+});
+app.use('/notify', notifyLimiter);
 
 /* ═══ DATA CACHE ═══ */
 const cache = {
@@ -430,21 +439,49 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-/* Telegram notification proxy */
+/* Telegram notification proxy — allowlist-based HTML sanitization.
+   Telegram accepts only a small HTML subset (b, strong, i, em, u, s, code, pre, a).
+   We escape everything, then re-introduce a controlled set of tags. */
+function sanitizeTelegramHtml(raw) {
+  if (typeof raw !== 'string') return '';
+  /* Cap length — Telegram's hard limit is 4096 */
+  const input = raw.slice(0, 4000);
+  /* 1. Escape all HTML-significant chars */
+  const escaped = input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  /* 2. Re-enable an allowlist of simple tags (no attributes accepted) */
+  const simpleTags = ['b', 'strong', 'i', 'em', 'u', 's', 'code', 'pre'];
+  let out = escaped;
+  simpleTags.forEach((tag) => {
+    const open = new RegExp('&lt;' + tag + '&gt;', 'gi');
+    const close = new RegExp('&lt;/' + tag + '&gt;', 'gi');
+    out = out.replace(open, '<' + tag + '>').replace(close, '</' + tag + '>');
+  });
+  return out;
+}
+
 app.post('/notify', async (req, res) => {
   if (!CONFIG.TG_BOT_TOKEN || !CONFIG.TG_CHAT_ID) {
-    return res.json({ ok: false, error: 'Telegram not configured' });
+    return res.status(503).json({ ok: false, error: 'Telegram not configured' });
   }
 
   try {
-    const { message } = req.body;
-    if (!message) return res.json({ ok: false, error: 'No message' });
+    const { message } = req.body || {};
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ ok: false, error: 'Invalid message' });
+    }
 
-    /* Sanitize message — remove script tags */
-    const cleanMsg = message.replace(/<script[^>]*>.*?<\/script>/gi, '');
+    const cleanMsg = sanitizeTelegramHtml(message);
+    if (!cleanMsg.trim()) {
+      return res.status(400).json({ ok: false, error: 'Empty after sanitization' });
+    }
 
     await axios.post(
-      `https://api.telegram.org/bot${CONFIG.TG_BOT_TOKEN}/sendMessage`,
+      'https://api.telegram.org/bot' + encodeURIComponent(CONFIG.TG_BOT_TOKEN) + '/sendMessage',
       {
         chat_id: CONFIG.TG_CHAT_ID,
         text: cleanMsg,
@@ -456,7 +493,9 @@ app.post('/notify', async (req, res) => {
 
     res.json({ ok: true });
   } catch (err) {
-    res.json({ ok: false, error: err.message });
+    /* Never leak axios response bodies (which may contain the bot token path) */
+    console.error('[TG] notify failed:', err && err.message ? err.message : 'unknown');
+    res.status(502).json({ ok: false, error: 'Upstream error' });
   }
 });
 

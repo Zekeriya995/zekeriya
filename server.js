@@ -20,12 +20,20 @@
 
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const axios = require('axios');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+/* Trust the first reverse proxy hop so express-rate-limit keys by the real
+   client IP (not a spoofable X-Forwarded-For). Set TRUST_PROXY=true only if
+   actually deployed behind a proxy you control. */
+if (process.env.TRUST_PROXY === 'true') {
+  app.set('trust proxy', 1);
+}
 
 /* ═══ CONFIGURATION ═══ */
 const CONFIG = {
@@ -52,14 +60,21 @@ const CONFIG = {
   TG_CHAT_ID: process.env.TG_CHAT_ID || '',
 
   /* Allowed origins for CORS — default empty (same-origin / server-to-server only).
-     Set ALLOWED_ORIGINS=* explicitly in .env if you really want to allow any origin. */
+     Must be an explicit comma-separated list of origins. A literal `*` is
+     intentionally NOT accepted: wildcard-with-credentials is unsafe and there
+     is no legitimate use case for this proxy. */
   ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',')
         .map(function (s) {
           return s.trim();
         })
-        .filter(Boolean)
+        .filter(function (s) {
+          return s && s !== '*';
+        })
     : [],
+
+  /* /api/all TTL cache — one snapshot shared across all clients */
+  API_ALL_TTL_MS: 3000,
 
   /* Request timeout */
   TIMEOUT: 8000,
@@ -67,15 +82,23 @@ const CONFIG = {
 
 /* ═══ MIDDLEWARE ═══ */
 
+/* Security headers — frame-blocking, sniff-blocking, HSTS, referrer policy.
+   CSP is declared in index.html (<meta http-equiv>) because the static file
+   is served from a different origin in production; disabling it here avoids
+   duplicate / conflicting policies. */
+app.use(
+  helmet({
+    contentSecurityPolicy: false,
+    crossOriginEmbedderPolicy: false,
+  })
+);
+
 /* CORS — restrict to your app's domain */
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (
-        CONFIG.ALLOWED_ORIGINS.includes('*') ||
-        !origin ||
-        CONFIG.ALLOWED_ORIGINS.includes(origin)
-      ) {
+      /* Allow same-origin (no Origin header) and explicit allowlist only. */
+      if (!origin || CONFIG.ALLOWED_ORIGINS.includes(origin)) {
         callback(null, true);
       } else {
         callback(new Error('Not allowed by CORS'));
@@ -86,10 +109,16 @@ app.use(
 
 app.use(express.json({ limit: '32kb' }));
 
-/* Rate limiting — 30 requests per minute per IP for data APIs */
+/* Rate limiting — 30 requests per minute per IP for data APIs.
+   keyGenerator uses req.ip which honours `trust proxy` when configured,
+   so limits follow the real client instead of the reverse-proxy hop. */
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  /* Use the library's default IP-based key generator — it handles IPv6
+     normalisation correctly when paired with `app.set('trust proxy', …)`. */
   message: { error: 'Too many requests, slow down' },
 });
 app.use('/api/', limiter);
@@ -98,6 +127,10 @@ app.use('/api/', limiter);
 const notifyLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  /* Use the library's default IP-based key generator — it handles IPv6
+     normalisation correctly when paired with `app.set('trust proxy', …)`. */
   message: { error: 'Too many notifications, slow down' },
 });
 app.use('/notify', notifyLimiter);
@@ -410,9 +443,14 @@ async function fetchMarket() {
 
 /* ═══ API ROUTES ═══ */
 
-/* Main endpoint — returns ALL data */
-app.get('/api/all', (req, res) => {
-  res.json({
+/* Main endpoint — returns ALL data.
+   Snapshot is built at most once per API_ALL_TTL_MS and shared across
+   every concurrent client, so a burst of 500 dashboards still costs a
+   single serialization pass. */
+let apiAllSnapshot = null;
+let apiAllSnapshotAt = 0;
+function buildApiAllSnapshot() {
+  return {
     tickers: cache.tickers,
     fr: cache.fr,
     oi: cache.oi,
@@ -426,8 +464,18 @@ app.get('/api/all', (req, res) => {
       lastUpdate: cache.lastUpdate,
       uptime: Math.floor(process.uptime()),
       version: '10.1',
+      snapshotAt: Date.now(),
     },
-  });
+  };
+}
+app.get('/api/all', (req, res) => {
+  const now = Date.now();
+  if (!apiAllSnapshot || now - apiAllSnapshotAt > CONFIG.API_ALL_TTL_MS) {
+    apiAllSnapshot = buildApiAllSnapshot();
+    apiAllSnapshotAt = now;
+  }
+  res.set('Cache-Control', 'public, max-age=' + Math.ceil(CONFIG.API_ALL_TTL_MS / 1000));
+  res.json(apiAllSnapshot);
 });
 
 /* Health check */
@@ -498,13 +546,16 @@ app.post('/notify', async (req, res) => {
 
     res.json({ ok: true });
   } catch (err) {
-    /* Never leak axios response bodies (which may contain the bot token path) */
-    console.error('[TG] notify failed:', err && err.message ? err.message : 'unknown');
+    /* Log only the upstream HTTP status — axios error .message and response
+       body can contain the bot-token path we just sent to Telegram. */
+    const status = err && err.response && err.response.status ? err.response.status : 'n/a';
+    console.error('[TG] notify failed: status=' + status);
     res.status(502).json({ ok: false, error: 'Upstream error' });
   }
 });
 
 /* ═══ STARTUP ═══ */
+const refreshTimers = [];
 async function startDataLoops() {
   console.log('═══ NEXUS PRO Proxy Server V10.1 ═══');
   console.log(`Starting on port ${PORT}...`);
@@ -536,19 +587,57 @@ async function startDataLoops() {
 
   console.log(`[INIT] ✅ Ready — ${Object.keys(cache.tickers).length} coins loaded`);
 
-  /* Set up refresh intervals */
-  setInterval(fetchTickers, CONFIG.TICKER_INTERVAL);
-  setInterval(fetchFundingRates, CONFIG.FR_INTERVAL);
-  setInterval(fetchOpenInterest, CONFIG.OI_INTERVAL);
-  setInterval(fetchLongShort, CONFIG.LS_INTERVAL);
-  setInterval(fetchTaker, CONFIG.TAKER_INTERVAL);
-  setInterval(fetchDepth, CONFIG.DEPTH_INTERVAL);
-  setInterval(fetchLiquidations, CONFIG.LIQ_INTERVAL);
-  setInterval(fetchMarket, CONFIG.MARKET_INTERVAL);
+  /* Set up refresh intervals — kept in a list so we can tear them down
+     on shutdown instead of leaking timers into the container runtime. */
+  refreshTimers.push(
+    setInterval(fetchTickers, CONFIG.TICKER_INTERVAL),
+    setInterval(fetchFundingRates, CONFIG.FR_INTERVAL),
+    setInterval(fetchOpenInterest, CONFIG.OI_INTERVAL),
+    setInterval(fetchLongShort, CONFIG.LS_INTERVAL),
+    setInterval(fetchTaker, CONFIG.TAKER_INTERVAL),
+    setInterval(fetchDepth, CONFIG.DEPTH_INTERVAL),
+    setInterval(fetchLiquidations, CONFIG.LIQ_INTERVAL),
+    setInterval(fetchMarket, CONFIG.MARKET_INTERVAL)
+  );
 }
 
+/* Process-level safety nets. An unhandled rejection or uncaught exception
+   used to be swallowed silently, which left the data loops running on top
+   of a half-broken process. Exit so the supervisor (PM2 / systemd / k8s)
+   can restart us clean. */
+process.on('unhandledRejection', function (reason) {
+  console.error('[FATAL] unhandledRejection:', reason && reason.message ? reason.message : reason);
+  process.exit(1);
+});
+process.on('uncaughtException', function (err) {
+  console.error('[FATAL] uncaughtException:', err && err.message ? err.message : err);
+  process.exit(1);
+});
+
 /* Start server */
-app.listen(PORT, '0.0.0.0', () => {
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`Server listening on port ${PORT}`);
   startDataLoops();
+});
+
+/* Graceful shutdown — stop accepting new connections, cancel all refresh
+   timers, then exit. Gives in-flight requests a 10s grace window. */
+function shutdown(signal) {
+  console.log('[SHUTDOWN] Received ' + signal + ', draining...');
+  refreshTimers.forEach(clearInterval);
+  refreshTimers.length = 0;
+  server.close(function () {
+    console.log('[SHUTDOWN] HTTP server closed');
+    process.exit(0);
+  });
+  setTimeout(function () {
+    console.warn('[SHUTDOWN] Grace timeout reached, forcing exit');
+    process.exit(1);
+  }, 10000).unref();
+}
+process.on('SIGTERM', function () {
+  shutdown('SIGTERM');
+});
+process.on('SIGINT', function () {
+  shutdown('SIGINT');
 });

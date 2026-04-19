@@ -116,9 +116,14 @@ try {
   soundEnabled = localStorage.getItem('nxsndon10') !== 'off';
 } catch (e) {}
 
-function playSound() {
-  if (!soundEnabled || soundPref === 'silent') return;
-  previewTone(soundPref);
+/* Callers pass a tone name ('ultra' / 'whale' / 'bell' / ...). Earlier this
+   parameter was silently discarded because the function took no arguments,
+   so every notification played the global default regardless of importance.
+   tone === 'silent' is an explicit mute per-call. */
+function playSound(tone) {
+  var pick = tone || soundPref;
+  if (!soundEnabled || pick === 'silent') return;
+  previewTone(pick);
 }
 
 function saveSoundPref() {

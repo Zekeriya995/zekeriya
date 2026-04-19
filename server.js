@@ -30,14 +30,14 @@ const PORT = process.env.PORT || 3000;
 /* ═══ CONFIGURATION ═══ */
 const CONFIG = {
   /* Refresh intervals (ms) */
-  TICKER_INTERVAL: 10000,     /* 10 seconds */
-  FR_INTERVAL: 60000,         /* 1 minute */
-  OI_INTERVAL: 60000,         /* 1 minute */
-  LS_INTERVAL: 120000,        /* 2 minutes */
-  MARKET_INTERVAL: 300000,    /* 5 minutes */
-  TAKER_INTERVAL: 60000,      /* 1 minute */
-  DEPTH_INTERVAL: 15000,      /* 15 seconds — critical for whale engine */
-  LIQ_INTERVAL: 30000,        /* 30 seconds */
+  TICKER_INTERVAL: 10000 /* 10 seconds */,
+  FR_INTERVAL: 60000 /* 1 minute */,
+  OI_INTERVAL: 60000 /* 1 minute */,
+  LS_INTERVAL: 120000 /* 2 minutes */,
+  MARKET_INTERVAL: 300000 /* 5 minutes */,
+  TAKER_INTERVAL: 60000 /* 1 minute */,
+  DEPTH_INTERVAL: 15000 /* 15 seconds — critical for whale engine */,
+  LIQ_INTERVAL: 30000 /* 30 seconds */,
 
   /* API URLs */
   BINANCE_SPOT: 'https://api.binance.com/api/v3',
@@ -51,54 +51,73 @@ const CONFIG = {
   TG_BOT_TOKEN: process.env.TG_BOT_TOKEN || '',
   TG_CHAT_ID: process.env.TG_CHAT_ID || '',
 
-  /* Allowed origins for CORS */
+  /* Allowed origins for CORS — default empty (same-origin / server-to-server only).
+     Set ALLOWED_ORIGINS=* explicitly in .env if you really want to allow any origin. */
   ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS
     ? process.env.ALLOWED_ORIGINS.split(',')
-    : ['*'],
+        .map(function (s) {
+          return s.trim();
+        })
+        .filter(Boolean)
+    : [],
 
   /* Request timeout */
-  TIMEOUT: 8000
+  TIMEOUT: 8000,
 };
 
 /* ═══ MIDDLEWARE ═══ */
 
 /* CORS — restrict to your app's domain */
-app.use(cors({
-  origin: function (origin, callback) {
-    if (CONFIG.ALLOWED_ORIGINS.includes('*') || !origin || CONFIG.ALLOWED_ORIGINS.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  }
-}));
+app.use(
+  cors({
+    origin: function (origin, callback) {
+      if (
+        CONFIG.ALLOWED_ORIGINS.includes('*') ||
+        !origin ||
+        CONFIG.ALLOWED_ORIGINS.includes(origin)
+      ) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
+  })
+);
 
-app.use(express.json());
+app.use(express.json({ limit: '32kb' }));
 
-/* Rate limiting — 30 requests per minute per IP */
+/* Rate limiting — 30 requests per minute per IP for data APIs */
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
-  message: { error: 'Too many requests, slow down' }
+  message: { error: 'Too many requests, slow down' },
 });
 app.use('/api/', limiter);
 
+/* Tighter limiter for the Telegram-relay endpoint (abusable + costs real money) */
+const notifyLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { error: 'Too many notifications, slow down' },
+});
+app.use('/notify', notifyLimiter);
+
 /* ═══ DATA CACHE ═══ */
 const cache = {
-  tickers: {},      /* { BTC: { price, change, volume, high, low, src } } */
-  fr: {},           /* { BTC: { rate, mark } } */
-  oi: {},           /* { BTC: number } */
-  ls: {},           /* { BTC: { long, short, ratio, hist } } */
-  taker: {},        /* { BTC: { ratio, buyVol, sellVol, trend } } */
-  liq: [],          /* [ { sym, side, price, value, time } ] */
-  depth: {},        /* { BTC: { bids, asks } } */
-  market: {         /* Market overview */
-    fgi: 50,
+  tickers: {} /* { BTC: { price, change, volume, high, low, src } } */,
+  fr: {} /* { BTC: { rate, mark } } */,
+  oi: {} /* { BTC: number } */,
+  ls: {} /* { BTC: { long, short, ratio, hist } } */,
+  taker: {} /* { BTC: { ratio, buyVol, sellVol, trend } } */,
+  liq: [] /* [ { sym, side, price, value, time } ] */,
+  depth: {} /* { BTC: { bids, asks } } */,
+  market: {
+    /* Market overview */ fgi: 50,
     fgiLabel: 'Neutral',
     btcDom: 50,
-    cbp: {}         /* Coinbase prices */
+    cbp: {} /* Coinbase prices */,
   },
-  lastUpdate: {}
+  lastUpdate: {},
 };
 
 /* ═══ SAFE FETCH — with timeout and error handling ═══ */
@@ -118,15 +137,12 @@ async function safeFetch(url, label) {
 async function fetchTickers() {
   try {
     /* Binance 24hr tickers */
-    const bnData = await safeFetch(
-      CONFIG.BINANCE_SPOT + '/ticker/24hr',
-      'BN-TICKERS'
-    );
+    const bnData = await safeFetch(CONFIG.BINANCE_SPOT + '/ticker/24hr', 'BN-TICKERS');
 
     if (bnData) {
       bnData
-        .filter(t => t.symbol.endsWith('USDT'))
-        .forEach(t => {
+        .filter((t) => t.symbol.endsWith('USDT'))
+        .forEach((t) => {
           const sym = t.symbol.replace('USDT', '');
           cache.tickers[sym] = {
             price: parseFloat(t.lastPrice),
@@ -134,21 +150,18 @@ async function fetchTickers() {
             volume: parseFloat(t.quoteVolume),
             high: parseFloat(t.highPrice),
             low: parseFloat(t.lowPrice),
-            src: 'BN'
+            src: 'BN',
           };
         });
     }
 
     /* Bybit spot tickers */
-    const byData = await safeFetch(
-      CONFIG.BYBIT + '/market/tickers?category=spot',
-      'BY-TICKERS'
-    );
+    const byData = await safeFetch(CONFIG.BYBIT + '/market/tickers?category=spot', 'BY-TICKERS');
 
     if (byData && byData.result && byData.result.list) {
       byData.result.list
-        .filter(t => t.symbol.endsWith('USDT'))
-        .forEach(t => {
+        .filter((t) => t.symbol.endsWith('USDT'))
+        .forEach((t) => {
           const sym = t.symbol.replace('USDT', '');
           if (cache.tickers[sym]) {
             cache.tickers[sym].by = parseFloat(t.lastPrice);
@@ -160,7 +173,7 @@ async function fetchTickers() {
               high: parseFloat(t.highPrice24h),
               low: parseFloat(t.lowPrice24h),
               src: 'BY',
-              by: parseFloat(t.lastPrice)
+              by: parseFloat(t.lastPrice),
             };
           }
         });
@@ -176,17 +189,14 @@ async function fetchTickers() {
 /* 2. FUNDING RATES — Binance Futures */
 async function fetchFundingRates() {
   try {
-    const data = await safeFetch(
-      CONFIG.BINANCE_FUTURES + '/premiumIndex',
-      'FR'
-    );
+    const data = await safeFetch(CONFIG.BINANCE_FUTURES + '/premiumIndex', 'FR');
 
     if (data) {
-      data.forEach(item => {
+      data.forEach((item) => {
         const sym = item.symbol.replace('USDT', '');
         cache.fr[sym] = {
           rate: parseFloat(item.lastFundingRate) * 100,
-          mark: parseFloat(item.markPrice)
+          mark: parseFloat(item.markPrice),
         };
       });
       cache.lastUpdate.fr = Date.now();
@@ -202,18 +212,18 @@ async function fetchOpenInterest() {
   try {
     /* Get top symbols */
     const topSymbols = Object.keys(cache.tickers)
-      .filter(s => cache.tickers[s].volume > 5000000)
+      .filter((s) => cache.tickers[s].volume > 5000000)
       .slice(0, 50);
 
-    const promises = topSymbols.map(sym =>
-      safeFetch(
-        CONFIG.BINANCE_FUTURES + '/openInterest?symbol=' + sym + 'USDT',
-        'OI-' + sym
-      ).then(data => {
-        if (data && data.openInterest) {
-          cache.oi[sym] = parseFloat(data.openInterest) * (cache.tickers[sym] ? cache.tickers[sym].price : 0);
+    const promises = topSymbols.map((sym) =>
+      safeFetch(CONFIG.BINANCE_FUTURES + '/openInterest?symbol=' + sym + 'USDT', 'OI-' + sym).then(
+        (data) => {
+          if (data && data.openInterest) {
+            cache.oi[sym] =
+              parseFloat(data.openInterest) * (cache.tickers[sym] ? cache.tickers[sym].price : 0);
+          }
         }
-      })
+      )
     );
 
     await Promise.allSettled(promises);
@@ -228,26 +238,29 @@ async function fetchOpenInterest() {
 async function fetchLongShort() {
   try {
     const topSymbols = Object.keys(cache.tickers)
-      .filter(s => cache.tickers[s].volume > 10000000)
+      .filter((s) => cache.tickers[s].volume > 10000000)
       .slice(0, 30);
 
-    const promises = topSymbols.map(sym =>
+    const promises = topSymbols.map((sym) =>
       safeFetch(
-        CONFIG.BINANCE_FUTURES + '/topLongShortPositionRatio?symbol=' + sym + 'USDT&period=1h&limit=4',
+        CONFIG.BINANCE_FUTURES +
+          '/topLongShortPositionRatio?symbol=' +
+          sym +
+          'USDT&period=1h&limit=4',
         'LS-' + sym
-      ).then(data => {
+      ).then((data) => {
         if (data && data.length) {
           const latest = data[data.length - 1];
           cache.ls[sym] = {
             long: parseFloat(latest.longAccount) * 100,
             short: parseFloat(latest.shortAccount) * 100,
             ratio: parseFloat(latest.longShortRatio),
-            hist: data.map(d => ({
+            hist: data.map((d) => ({
               long: parseFloat(d.longAccount) * 100,
               short: parseFloat(d.shortAccount) * 100,
               ratio: parseFloat(d.longShortRatio),
-              time: d.timestamp
-            }))
+              time: d.timestamp,
+            })),
           };
         }
       })
@@ -265,27 +278,31 @@ async function fetchLongShort() {
 async function fetchTaker() {
   try {
     const topSymbols = Object.keys(cache.tickers)
-      .filter(s => cache.tickers[s].volume > 10000000)
+      .filter((s) => cache.tickers[s].volume > 10000000)
       .slice(0, 30);
 
-    const promises = topSymbols.map(sym =>
+    const promises = topSymbols.map((sym) =>
       safeFetch(
         CONFIG.BINANCE_FUTURES + '/takerlongshortRatio?symbol=' + sym + 'USDT&period=1h&limit=4',
         'TAKER-' + sym
-      ).then(data => {
+      ).then((data) => {
         if (data && data.length) {
           const latest = data[data.length - 1];
           const buyVol = parseFloat(latest.buyVol);
           const sellVol = parseFloat(latest.sellVol);
           const ratio = sellVol > 0 ? buyVol / sellVol : 1;
-          const avg = data.reduce((s, d) => s + parseFloat(d.buyVol) / Math.max(1, parseFloat(d.sellVol)), 0) / data.length;
+          const avg =
+            data.reduce(
+              (s, d) => s + parseFloat(d.buyVol) / Math.max(1, parseFloat(d.sellVol)),
+              0
+            ) / data.length;
 
           cache.taker[sym] = {
             ratio: Math.round(ratio * 100) / 100,
             avg: Math.round(avg * 100) / 100,
             buyVol: buyVol,
             sellVol: sellVol,
-            trend: ratio > 1.3 ? 'BUY_HEAVY' : ratio < 0.7 ? 'SELL_HEAVY' : 'FLAT'
+            trend: ratio > 1.3 ? 'BUY_HEAVY' : ratio < 0.7 ? 'SELL_HEAVY' : 'FLAT',
           };
         }
       })
@@ -303,20 +320,20 @@ async function fetchTaker() {
 async function fetchDepth() {
   try {
     const topSymbols = Object.keys(cache.tickers)
-      .filter(s => cache.tickers[s].volume > 10000000)
+      .filter((s) => cache.tickers[s].volume > 10000000)
       .sort((a, b) => cache.tickers[b].volume - cache.tickers[a].volume)
       .slice(0, 20);
 
-    const promises = topSymbols.map(sym =>
+    const promises = topSymbols.map((sym) =>
       safeFetch(
         CONFIG.BINANCE_SPOT + '/depth?symbol=' + sym + 'USDT&limit=20',
         'DEPTH-' + sym
-      ).then(data => {
+      ).then((data) => {
         if (data && data.bids && data.asks) {
           cache.depth[sym] = {
             bids: data.bids.slice(0, 10),
             asks: data.asks.slice(0, 10),
-            time: Date.now()
+            time: Date.now(),
           };
         }
       })
@@ -333,21 +350,18 @@ async function fetchDepth() {
 /* 7. LIQUIDATION DATA — from Binance Futures forceOrders */
 async function fetchLiquidations() {
   try {
-    const data = await safeFetch(
-      CONFIG.BINANCE_FUTURES + '/allForceOrders?limit=50',
-      'LIQ'
-    );
+    const data = await safeFetch(CONFIG.BINANCE_FUTURES + '/allForceOrders?limit=50', 'LIQ');
 
     if (data && data.length) {
       cache.liq = data
-        .filter(item => item.symbol.endsWith('USDT'))
-        .map(item => ({
+        .filter((item) => item.symbol.endsWith('USDT'))
+        .map((item) => ({
           sym: item.symbol.replace('USDT', ''),
           side: item.side,
           price: parseFloat(item.price),
           qty: parseFloat(item.origQty),
           value: parseFloat(item.price) * parseFloat(item.origQty),
-          time: item.time
+          time: item.time,
         }))
         .slice(-100);
 
@@ -411,8 +425,8 @@ app.get('/api/all', (req, res) => {
       coins: Object.keys(cache.tickers).length,
       lastUpdate: cache.lastUpdate,
       uptime: Math.floor(process.uptime()),
-      version: '10.1'
-    }
+      version: '10.1',
+    },
   });
 });
 
@@ -426,37 +440,67 @@ app.get('/api/health', (req, res) => {
     oi: Object.keys(cache.oi).length,
     ls: Object.keys(cache.ls).length,
     uptime: Math.floor(process.uptime()),
-    lastUpdate: cache.lastUpdate
+    lastUpdate: cache.lastUpdate,
   });
 });
 
-/* Telegram notification proxy */
+/* Telegram notification proxy — allowlist-based HTML sanitization.
+   Telegram accepts only a small HTML subset (b, strong, i, em, u, s, code, pre, a).
+   We escape everything, then re-introduce a controlled set of tags. */
+function sanitizeTelegramHtml(raw) {
+  if (typeof raw !== 'string') return '';
+  /* Cap length — Telegram's hard limit is 4096 */
+  const input = raw.slice(0, 4000);
+  /* 1. Escape all HTML-significant chars */
+  const escaped = input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+  /* 2. Re-enable an allowlist of simple tags (no attributes accepted) */
+  const simpleTags = ['b', 'strong', 'i', 'em', 'u', 's', 'code', 'pre'];
+  let out = escaped;
+  simpleTags.forEach((tag) => {
+    const open = new RegExp('&lt;' + tag + '&gt;', 'gi');
+    const close = new RegExp('&lt;/' + tag + '&gt;', 'gi');
+    out = out.replace(open, '<' + tag + '>').replace(close, '</' + tag + '>');
+  });
+  return out;
+}
+
 app.post('/notify', async (req, res) => {
   if (!CONFIG.TG_BOT_TOKEN || !CONFIG.TG_CHAT_ID) {
-    return res.json({ ok: false, error: 'Telegram not configured' });
+    return res.status(503).json({ ok: false, error: 'Telegram not configured' });
   }
 
   try {
-    const { message } = req.body;
-    if (!message) return res.json({ ok: false, error: 'No message' });
+    const { message } = req.body || {};
+    if (!message || typeof message !== 'string') {
+      return res.status(400).json({ ok: false, error: 'Invalid message' });
+    }
 
-    /* Sanitize message — remove script tags */
-    const cleanMsg = message.replace(/<script[^>]*>.*?<\/script>/gi, '');
+    const cleanMsg = sanitizeTelegramHtml(message);
+    if (!cleanMsg.trim()) {
+      return res.status(400).json({ ok: false, error: 'Empty after sanitization' });
+    }
 
     await axios.post(
-      `https://api.telegram.org/bot${CONFIG.TG_BOT_TOKEN}/sendMessage`,
+      'https://api.telegram.org/bot' + encodeURIComponent(CONFIG.TG_BOT_TOKEN) + '/sendMessage',
       {
         chat_id: CONFIG.TG_CHAT_ID,
         text: cleanMsg,
         parse_mode: 'HTML',
-        disable_web_page_preview: true
+        disable_web_page_preview: true,
       },
       { timeout: 5000 }
     );
 
     res.json({ ok: true });
   } catch (err) {
-    res.json({ ok: false, error: err.message });
+    /* Never leak axios response bodies (which may contain the bot token path) */
+    console.error('[TG] notify failed:', err && err.message ? err.message : 'unknown');
+    res.status(502).json({ ok: false, error: 'Upstream error' });
   }
 });
 

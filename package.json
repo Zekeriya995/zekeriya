@@ -1,0 +1,43 @@
+{
+  "name": "nexus-pro",
+  "version": "10.1.0",
+  "description": "NEXUS PRO — crypto trading intelligence platform (PWA + proxy server).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test tests/*.test.js",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "npm run lint && npm run format:check && npm test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://local_proxy@127.0.0.1:43285/git/Zekeriya995/zekeriya"
+  },
+  "keywords": [
+    "crypto",
+    "trading",
+    "binance",
+    "telegram",
+    "pwa"
+  ],
+  "license": "ISC",
+  "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "eslint": "^9.39.4",
+    "globals": "^17.5.0",
+    "prettier": "^3.8.3"
+  },
+  "dependencies": {
+    "axios": "^1.15.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.3.2"
+  }
+}

@@ -1,0 +1,16 @@
+# Generated / vendored
+node_modules/
+coverage/
+dist/
+package-lock.json
+
+# Legacy bundles — skip formatting until the planned refactor (step 2)
+# Running prettier on these produces a massive reformat diff that would
+# obscure every real change. Once they're split into modules, remove these.
+app.js
+index.html
+
+# Docs are hand-authored
+CHANGELOG.md
+AUDIT_REPORT.md
+NEXUS_V10_AUDIT_REPORT.md

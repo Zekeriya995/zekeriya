@@ -88,7 +88,8 @@ var whaleAlerts=[]; /* Whale Alert */
 var multiExCache={t:0}; /* Cache for multi-exchange fetch — 3 min */
 var defiCache={t:0},unlockCache={t:0};
 var sparkHist={}; /* Real sparkline data per coin */
-var whaleWaves={};try{whaleWaves=JSON.parse(localStorage.getItem('nxww10')||'{}')}catch(e){}
+/* whaleWaves + calcRealTotalBuy / calcWhaleAvgEntry / calcWhalePnL /
+   calcFlowRate moved to src/whale-state.js */
 var prevOB={}; /* Previous Order Book snapshots */
 var portfolio=[];try{portfolio=JSON.parse(localStorage.getItem('nxp10')||'[]')}catch(e){}
 var predictions=[];try{predictions=JSON.parse(localStorage.getItem('nxpred10')||'[]')}catch(e){}
@@ -2271,43 +2272,6 @@ async function whaleL3(sym){
   var r={score:sc,longLiqValue:longLiq,shortLiqValue:shortLiq,signal:sig,count:recent.length};
   wSet('L3_'+sym,r,30000);return r}
 
-/* ═══ WHALE INFLOW METER — 4 utility functions ═══ */
-function calcRealTotalBuy(sym){
-  var ww=whaleWaves[sym];
-  if(!ww||!ww.waves||!ww.waves.length)return 0;
-  var now=Date.now();
-  var activeWaves=ww.waves.filter(function(w){return now-w.time<7200000});
-  return activeWaves.reduce(function(s,w){return s+(w.source==='ESTIMATE'?0:w.amount)},0);
-}
-function calcWhaleAvgEntry(sym){
-  var ww=whaleWaves[sym];
-  if(!ww||!ww.waves||!ww.waves.length)return 0;
-  var totalAmount=0,weightedPrice=0;
-  ww.waves.forEach(function(w){
-    if(w.source!=='ESTIMATE'&&w.price>0){
-      totalAmount+=w.amount;
-      weightedPrice+=w.amount*w.price;
-    }
-  });
-  return totalAmount>0?weightedPrice/totalAmount:0;
-}
-function calcWhalePnL(sym){
-  var avgEntry=calcWhaleAvgEntry(sym);
-  if(!avgEntry||!T[sym])return{pnl:0,pct:0,status:'UNKNOWN'};
-  var current=T[sym].p;
-  var pct=((current-avgEntry)/avgEntry)*100;
-  var status=pct>3?'PROFIT_TAKING_RISK':pct>0?'IN_PROFIT':pct>-3?'UNDERWATER':'DEEP_LOSS_DUMP_RISK';
-  return{pnl:current-avgEntry,pct:pct,avgEntry:avgEntry,status:status};
-}
-function calcFlowRate(sym){
-  var ww=whaleWaves[sym];
-  if(!ww||!ww.waves||ww.waves.length<2)return 0;
-  var recent=ww.waves.filter(function(w){return Date.now()-w.time<900000});
-  if(!recent.length)return 0;
-  var totalAmount=recent.reduce(function(s,w){return s+w.amount},0);
-  var timeSpan=(Date.now()-recent[0].time)/60000;
-  return timeSpan>0?totalAmount/timeSpan:0;
-}
 
 /* LAYER 4: Funding Rate Anomaly (10%) — UPGRADED with 6 data sources */
 function whaleL4(sym){

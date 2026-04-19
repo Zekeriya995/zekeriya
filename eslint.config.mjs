@@ -96,11 +96,16 @@ export default [
         tgNotify: 'readonly',
         alertPrefs: 'writable',
         saveAlertPref: 'readonly',
-        /* Defined in app.js but referenced by notifications.js at call time */
+        /* Declared in src/whale-state.js */
+        whaleWaves: 'writable',
+        calcRealTotalBuy: 'readonly',
+        calcWhaleAvgEntry: 'readonly',
+        calcWhalePnL: 'readonly',
+        calcFlowRate: 'readonly',
+        /* Defined in app.js but referenced by other modules at call time */
         T: 'writable',
         FR: 'writable',
         CBP: 'writable',
-        whaleWaves: 'writable',
         timeBadge: 'readonly',
         signalQualityGate: 'readonly',
         openTrade: 'readonly',

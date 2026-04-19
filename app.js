@@ -95,7 +95,7 @@ var prevOB={}; /* Previous Order Book snapshots */
    savePred / getAcc / sP / addPort / rmPort / renderPort moved to
    src/portfolio.js. openTrade / closeTrade / monitorTrades stay here
    because they reach into the monitor + whale subsystems. */
-var lang='ar';try{lang=localStorage.getItem('nxlang')||'ar'}catch(e){}
+var lang=safeGet('nxlang','ar');
 var fgValue=50,btcDom=50;
 
 /* monitorState / factorLog / supervisorData + their save helpers
@@ -807,7 +807,7 @@ function runAutoImprove() {
     overallRate: monitorState.perf.overallRate
   };
 
-  try { localStorage.setItem('nxWeeklyReport', JSON.stringify(report)); } catch(e) {}
+  safeSetJSON('nxWeeklyReport', report);
   monitorState.lastTune = Date.now();
   saveMonitor();
 
@@ -831,10 +831,10 @@ function timeAgo(ts){var d=Date.now()-ts,m=Math.floor(d/60000),h=Math.floor(d/36
 function timeBadge(ts){var a=timeAgo(ts);return'<span class="time-badge '+a.cls+'">⏱ '+a.text+'</span>'}
 /* NOTIFICATION HISTORY */
 /* LANG/THEME/NAV */
-function togLang(){lang=lang==='ar'?'en':'ar';try{localStorage.setItem('nxlang',lang)}catch(e){};document.documentElement.lang=lang;document.documentElement.dir=lang==='ar'?'rtl':'ltr';document.body.dataset.lang=lang;var sI=document.getElementById('sInp');if(sI)sI.placeholder=t('search_ph');document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(TR[k])el.textContent=TR[k][lang]});updateMenuLang()}
-function togTh(){var d=document.body.dataset.theme==='dark'?'light':'dark';document.body.dataset.theme=d;if(tg){try{tg.setHeaderColor(d==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(d==='dark'?'#020408':'#f0f4f8')}catch(e){}}try{localStorage.setItem('nxt10',d)}catch(e){};updateMenuTheme()}
-function setLang(l){lang=l;try{localStorage.setItem('nxlang',lang)}catch(e){};document.documentElement.lang=lang;document.documentElement.dir=lang==='ar'?'rtl':'ltr';document.body.dataset.lang=lang;var sI=document.getElementById('sInp');if(sI)sI.placeholder=t('search_ph');document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(TR[k])el.textContent=TR[k][lang]});updateMenuLang()}
-function setTheme(d){document.body.dataset.theme=d;if(tg){try{tg.setHeaderColor(d==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(d==='dark'?'#020408':'#f0f4f8')}catch(e){}}try{localStorage.setItem('nxt10',d)}catch(e){};updateMenuTheme()}
+function togLang(){lang=lang==='ar'?'en':'ar';safeSet('nxlang',lang);document.documentElement.lang=lang;document.documentElement.dir=lang==='ar'?'rtl':'ltr';document.body.dataset.lang=lang;var sI=document.getElementById('sInp');if(sI)sI.placeholder=t('search_ph');document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(TR[k])el.textContent=TR[k][lang]});updateMenuLang()}
+function togTh(){var d=document.body.dataset.theme==='dark'?'light':'dark';document.body.dataset.theme=d;if(tg){try{tg.setHeaderColor(d==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(d==='dark'?'#020408':'#f0f4f8')}catch(e){}}safeSet('nxt10',d);updateMenuTheme()}
+function setLang(l){lang=l;safeSet('nxlang',lang);document.documentElement.lang=lang;document.documentElement.dir=lang==='ar'?'rtl':'ltr';document.body.dataset.lang=lang;var sI=document.getElementById('sInp');if(sI)sI.placeholder=t('search_ph');document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(TR[k])el.textContent=TR[k][lang]});updateMenuLang()}
+function setTheme(d){document.body.dataset.theme=d;if(tg){try{tg.setHeaderColor(d==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(d==='dark'?'#020408':'#f0f4f8')}catch(e){}}safeSet('nxt10',d);updateMenuTheme()}
 /* SIDEBAR MENU */
 function toggleMenu(){var sm=document.getElementById('sideMenu');var so=document.getElementById('sideOverlay');if(!sm||!so)return;sm.classList.toggle('open');so.classList.toggle('open')}
 /* PROFILE */
@@ -845,7 +845,7 @@ function saveProfile(){userProfile.name=document.getElementById('userName').valu
 function updateMenuLang(){var isAr=lang==='ar';document.getElementById('sLangAr').classList.toggle('act',isAr);document.getElementById('sLangEn').classList.toggle('act',!isAr)}
 function updateMenuTheme(){var isDark=document.body.dataset.theme==='dark';document.getElementById('sThDark').classList.toggle('act',isDark);document.getElementById('sThLight').classList.toggle('act',!isDark)}
 /* Active users removed */
-(function(){try{if(localStorage.getItem('nxt10')==='light'){document.body.dataset.theme='light'}}catch(e){};if(lang==='en')togLang()})();
+(function(){if(safeGet('nxt10')==='light'){document.body.dataset.theme='light'}if(lang==='en')togLang()})();
 document.querySelectorAll('.bb').forEach(function(b){b.onclick=function(){sp(b.dataset.p)}});
 function sp(id){document.querySelectorAll('.pg').forEach(function(p){p.classList.remove('act')});document.querySelectorAll('.bb').forEach(function(b){b.classList.remove('act')});var el=document.getElementById('pg-'+id);if(el)el.classList.add('act');document.querySelectorAll('[data-p="'+id+'"]').forEach(function(b){b.classList.add('act')});if(id==='scan')scanTab(curScanTab,document.querySelector('#pg-scan .big-tab.act'));if(id==='whale')loadWhales();if(id==='ind')loadInd();if(id==='me')renderPort();if(id==='market')loadMarket();window.scrollTo({top:0})}
 function openMo(id){var e=document.getElementById(id);if(e)e.classList.add('show')}
@@ -916,7 +916,7 @@ function renderMySettings(){
   var isDark=document.body.dataset.theme==='dark';
   h+='<div style="display:flex;gap:6px;margin-bottom:14px"><button class="rfr" onclick="setTheme(\'dark\');renderMySettings()" style="flex:1;margin:0;'+(isDark?'background:var(--ud);color:var(--up);border-color:var(--up)':'')+'">🌙 '+(ar?'مظلم':'Dark')+'</button><button class="rfr" onclick="setTheme(\'light\');renderMySettings()" style="flex:1;margin:0;'+(!isDark?'background:var(--ud);color:var(--up);border-color:var(--up)':'')+'">☀️ '+(ar?'فاتح':'Light')+'</button></div>';
   h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:0 0 10px">🔊 '+(ar?'الصوت':'Sound')+'</div>';
-  h+='<div class="al-i"><div class="al-l"><div style="font-size:18px">🔊</div><div><div style="font-weight:600;font-size:12px">'+(ar?'تفعيل الصوت':'Enable Sound')+'</div></div></div><div class="tgl '+(soundEnabled?'on':'')+'" onclick="this.classList.toggle(\'on\');soundEnabled=!soundEnabled;try{localStorage.setItem(\'nxsndon10\',soundEnabled?\'on\':\'off\')}catch(e){}"><div class="tgl-k"></div></div></div>';
+  h+='<div class="al-i"><div class="al-l"><div style="font-size:18px">🔊</div><div><div style="font-weight:600;font-size:12px">'+(ar?'تفعيل الصوت':'Enable Sound')+'</div></div></div><div class="tgl '+(soundEnabled?'on':'')+'" onclick="this.classList.toggle(\'on\');soundEnabled=!soundEnabled;safeSet(\'nxsndon10\',soundEnabled?\'on\':\'off\')"><div class="tgl-k"></div></div></div>';
   h+='<div style="font-weight:800;font-size:14px;color:var(--t0);margin:14px 0 10px">🔔 '+(ar?'التنبيهات':'Alerts')+'</div>';
   var alerts=[{key:'ultra',ic:'⭐',nm:'ULTRA',sub:ar?'إشارات ≥85% ثقة':'Signals ≥85%'},{key:'whale',ic:'🐋',nm:ar?'حيتان':'Whales',sub:ar?'فوق $100K':'Above $100K'},{key:'breakout',ic:'💥',nm:ar?'انفجار':'Breakout',sub:'Score 60+'},{key:'warning',ic:'⚠️',nm:ar?'تحذيرات':'Warnings',sub:'FR + OI'},{key:'watchlist',ic:'👁',nm:'Watchlist',sub:ar?'تحرك ±3%':'Move ±3%'}];
   alerts.forEach(function(a){
@@ -1138,7 +1138,7 @@ var wsAgg=null,wsLiq=null,wsDepth=null,liquidationData={},depthSnapshots={};
 var onChainData={};
 async function fetchOnChainBTC(){try{var data=await fj('https://mempool.space/api/mempool/recent');if(!data||!data.length)return;var whale=data.filter(function(tx){return tx.fee>500000});onChainData.BTC={count:whale.length,time:Date.now(),signal:whale.length>=3?'WHALE_RUSH':whale.length>=1?'MODERATE':'LOW'}}catch(e){}}
 /* ═══ 👛 FEATURE 3: WALLET TRACKING ═══ */
-var trackedWallets=[];try{trackedWallets=JSON.parse(localStorage.getItem('nxwallets')||'[]')}catch(e){}
+var trackedWallets=safeGetJSON('nxwallets',[]);
 function addWallet(addr,label){
   if(trackedWallets.length>=20)return false;
   /* Whitelist address: 0x + 40 hex chars only (Ethereum address shape) */
@@ -1148,12 +1148,12 @@ function addWallet(addr,label){
   /* Label: strip HTML-significant chars, cap at 30 chars */
   var cleanLabel=String(label||'').replace(/[<>"'&]/g,'').slice(0,30)||cleanAddr.slice(0,10);
   trackedWallets.push({address:cleanAddr,label:cleanLabel,chain:'ethereum',lastBal:null,lastChk:0});
-  try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){}
+  safeSetJSON('nxwallets',trackedWallets);
   return true;
 }
-function rmWallet(i){trackedWallets.splice(i,1);try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){}}
+function rmWallet(i){trackedWallets.splice(i,1);safeSetJSON('nxwallets',trackedWallets)}
 window.addWallet=addWallet;window.rmWallet=rmWallet;
-async function checkWallets(){for(var i=0;i<trackedWallets.length;i++){var w=trackedWallets[i];if(Date.now()-w.lastChk<60000)continue;try{var res=await fj('https://api.etherscan.io/api?module=account&action=balance&address='+encodeURIComponent(w.address)+'&tag=latest');if(res&&res.result){var bal=+res.result/1e18;if(w.lastBal!==null){var chg=bal-w.lastBal;var pct=w.lastBal>0?(chg/w.lastBal)*100:0;if(Math.abs(pct)>5){var ic=chg>0?'📥':'📤';showPopup(ic,w.label+(chg>0?' received':' sent'),Math.abs(chg).toFixed(2)+' ETH');addNotifHist(ic,w.label,'Wallet',pct.toFixed(1)+'%')}}w.lastBal=bal;w.lastChk=Date.now()}}catch(e){}await new Promise(function(r){setTimeout(r,6000)})}try{localStorage.setItem('nxwallets',JSON.stringify(trackedWallets))}catch(e){}}
+async function checkWallets(){for(var i=0;i<trackedWallets.length;i++){var w=trackedWallets[i];if(Date.now()-w.lastChk<60000)continue;try{var res=await fj('https://api.etherscan.io/api?module=account&action=balance&address='+encodeURIComponent(w.address)+'&tag=latest');if(res&&res.result){var bal=+res.result/1e18;if(w.lastBal!==null){var chg=bal-w.lastBal;var pct=w.lastBal>0?(chg/w.lastBal)*100:0;if(Math.abs(pct)>5){var ic=chg>0?'📥':'📤';showPopup(ic,w.label+(chg>0?' received':' sent'),Math.abs(chg).toFixed(2)+' ETH');addNotifHist(ic,w.label,'Wallet',pct.toFixed(1)+'%')}}w.lastBal=bal;w.lastChk=Date.now()}}catch(e){}await new Promise(function(r){setTimeout(r,6000)})}safeSetJSON('nxwallets',trackedWallets)}
 /* LOAD TICKERS — ALL 3 EXCHANGES */
 var _proxyAlive=true,_directFallbackRunning=false,_lastDirectFetch=0;
 var _loadTkRunning=false;
@@ -1826,7 +1826,7 @@ function openTrade(sym,price,type,score,extra){
   trade.confAtEntry = score;
   activeTrades.push(trade);saveTrades();return trade}
 
-function saveTrades(){if(activeTrades.length>200)activeTrades=activeTrades.slice(-200);try{localStorage.setItem('nxTrades',JSON.stringify(activeTrades))}catch(e){}}
+function saveTrades(){if(activeTrades.length>200)activeTrades=activeTrades.slice(-200);safeSetJSON('nxTrades',activeTrades)}
 
 function closeTrade(trade,exitPrice,reason){
   trade.status='CLOSED';trade.exitPrice=exitPrice;trade.exitTime=Date.now();trade.exitReason=reason;
@@ -1989,7 +1989,7 @@ function ultraCard(r){var predKey=r.s+'_'+new Date().getHours();if(!predictions.
     +'</div>'}
 /* ═══ 🐋 WHALE INTELLIGENCE ENGINE v3.0 — 5 Layers + 8 Techniques ═══ */
 var wCache={};var prevOBSnapshots={};var liqEvents=[];
-var cvdData={};var icebergData={};var whaleLearning={preds:[],layerAcc:{}};try{whaleLearning.preds=JSON.parse(localStorage.getItem('nxwlrn')||'[]');whaleLearning.layerAcc=JSON.parse(localStorage.getItem('nxwlacc')||'{}')}catch(e){}
+var cvdData={};var icebergData={};var whaleLearning={preds:safeGetJSON('nxwlrn',[]),layerAcc:safeGetJSON('nxwlacc',{})};
 function wGet(k){var c=wCache[k];if(c&&Date.now()-c.t<c.ttl)return c.d;return null}
 function wSet(k,d,ttl){wCache[k]={d:d,t:Date.now(),ttl:ttl||15000}}
 
@@ -2106,7 +2106,7 @@ function wlRecordSignal(sym,conf,layers,price){
   if(verified.length>200)verified=verified.slice(-200);
   if(pending.length>100)pending=pending.slice(-100);
   whaleLearning.preds=verified.concat(pending);
-  try{localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds))}catch(e){}
+  safeSetJSON('nxwlrn',whaleLearning.preds);
 }
 function wlVerify(){
   /* Iterate only unchecked predictions old enough — saves ~95% of work */
@@ -2129,10 +2129,8 @@ function wlVerify(){
     }
   }
   if(ch){
-    try{
-      localStorage.setItem('nxwlrn',JSON.stringify(whaleLearning.preds));
-      localStorage.setItem('nxwlacc',JSON.stringify(whaleLearning.layerAcc));
-    }catch(e){}
+    safeSetJSON('nxwlrn',whaleLearning.preds);
+    safeSetJSON('nxwlacc',whaleLearning.layerAcc);
   }
 }
 function wlGetStats(){var c=whaleLearning.preds.filter(function(p){return p.chk});var h=c.filter(function(p){return p.hit});return{total:c.length,hits:h.length,rate:c.length>0?Math.round(h.length/c.length*100):0}}
@@ -2473,7 +2471,7 @@ async function detectWhaleWaves(candidates){
     if(l4.score+l5.score>5){
       if(!whaleWaves[c.s])whaleWaves[c.s]={waves:[],totalBuy:0,engine:null};
       whaleWaves[c.s].engine={confidence:Math.round((l4.score+l5.score)*2),signal:'POSSIBLE_WHALE_ACTIVITY',strength:'WEAK',layers:{ob:{score:0,signal:'SKIP'},trades:{score:0,signal:'SKIP'},liqs:{score:0,signal:'SKIP'},fr:l4,xex:l5},activeLayers:2,reasons:[]}}});
-  try{localStorage.setItem('nxww10',JSON.stringify(whaleWaves))}catch(e){}}
+  safeSetJSON('nxww10',whaleWaves)}
 
 /* ═══ WHALE CARD v4.0 — 5 Layers + 8 Techniques + Inflow Meter + Timeline ═══ */
 function whaleCard(r,rank){
@@ -3712,7 +3710,7 @@ async function loadGems(){
     +'<div style="margin-top:4px"><div class="prw"><div class="prb" style="width:'+Math.min(100,g.score)+'%;background:'+(g.timing==='early'?'var(--up)':g.timing==='still'?'var(--warn)':'var(--dn)')+'"></div></div></div>'
     +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div><span style="font-family:var(--fm);font-size:9px;color:var(--t2)">Vol:'+fmt(g.v)+'</span></div>'
     +'</div>'}).join(''):'<div class="empty"><div class="empty-ic">💎</div><div class="empty-tx">'+(lang==='ar'?'لا جواهر حالياً — السوق هادئ':'No gems now — Market quiet')+'</div></div>'}/* WATCHLIST */
-var watchlist=[];try{watchlist=JSON.parse(localStorage.getItem('nxwl10')||'[]')}catch(e){}
+var watchlist=safeGetJSON('nxwl10',[]);
 /* 📊 MARKET DIRECTION REPORT — Parallel + Error-Safe */
 /* ═══ MARKET REPORT v2.0 ═══ */
 /* calcEMA — defined earlier */
@@ -3722,9 +3720,9 @@ var btcCache={h:null,t:0};
 var ethCache={h:null,t:0};
 var MKT_TTL=4*3600000;
 var RPT_COINS=[{s:'BTC',ic:'\u20bf',col:'#f7931a'},{s:'ETH',ic:'\u039e',col:'#627eea'},{s:'SOL',ic:'\u25ce',col:'#9945ff'},{s:'BNB',ic:'\u2b21',col:'#f0b90b'},{s:'XRP',ic:'\u2715',col:'#0085c0'}];
-var reportHistory=[];try{reportHistory=JSON.parse(localStorage.getItem('nxRptHist')||'[]')}catch(e){reportHistory=[]}
-var prevReport=null;try{prevReport=JSON.parse(localStorage.getItem('nxPrevRpt')||'null')}catch(e){prevReport=null}
-var hourlyLog=[];try{hourlyLog=JSON.parse(localStorage.getItem('nxHrLog')||'[]')}catch(e){hourlyLog=[]}
+var reportHistory=safeGetJSON('nxRptHist',[]);
+var prevReport=safeGetJSON('nxPrevRpt',null);
+var hourlyLog=safeGetJSON('nxHrLog',[]);
 var FOMC_DATES=['2026-01-28','2026-03-18','2026-05-06','2026-06-17','2026-07-29','2026-09-16','2026-11-04','2026-12-16'];
 var CPI_DATES=['2026-01-14','2026-02-12','2026-03-11','2026-04-10','2026-05-13','2026-06-10','2026-07-15','2026-08-12','2026-09-11','2026-10-14','2026-11-12','2026-12-10'];
 var TOKEN_UNLOCKS=[];
@@ -3827,7 +3825,7 @@ function buildStory(coin,data){
   return tmpl.replace(/\{(\w+)\}/g,function(m){return vars[m]!=null?String(vars[m]):m});
 }
 
-function addHourlyLog(msg){hourlyLog.push({time:Date.now(),txt:msg});if(hourlyLog.length>20)hourlyLog=hourlyLog.slice(-20);try{localStorage.setItem('nxHrLog',JSON.stringify(hourlyLog))}catch(e){}}
+function addHourlyLog(msg){hourlyLog.push({time:Date.now(),txt:msg});if(hourlyLog.length>20)hourlyLog=hourlyLog.slice(-20);safeSetJSON('nxHrLog',hourlyLog)}
 
 function getChanges(btc){
   if(!prevReport)return[];var ch=[];
@@ -5310,7 +5308,7 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))try{await loadDash()}catch(e){}},120000);
   setInterval(monitorTrades,10000);
   setInterval(function(){try{renderTop3()}catch(e){}},60000); /* Auto-update VIP trades every minute */
-  setInterval(function(){try{notifiedSet={};localStorage.setItem('nxnot10','{}')}catch(e){};try{tgSent={}}catch(e){}},3600000);
+  setInterval(function(){notifiedSet={};safeSet('nxnot10','{}');tgSent={}},3600000);
   setTimeout(function(){runValidator()},10000);
   setInterval(function(){runValidator()},90000);
   /* Market chart auto-refresh (moved from module-level) */

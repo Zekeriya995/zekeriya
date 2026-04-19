@@ -215,6 +215,15 @@ export default [
         safeSetJSON: 'readonly',
         safeRemove: 'readonly',
         makeDebouncedSaver: 'readonly',
+        /* From src/notifications.js (loaded in tests/load.test.js) */
+        notify: 'readonly',
+        /* Other globals seeded by tests for the cross-file flow check */
+        whaleWaves: 'writable',
+        signalQualityGate: 'writable',
+        openTrade: 'writable',
+        T: 'writable',
+        document: 'writable',
+        fetch: 'writable',
         /* Test fixtures from tests/_setup.js */
         MemStorage: 'readonly',
         localStorage: 'writable',

@@ -52,6 +52,13 @@ export default [
         calcRSI: 'readonly',
         calcMACD: 'readonly',
         calcEMA: 'readonly',
+        /* Declared in src/storage.js */
+        safeGetJSON: 'readonly',
+        safeGet: 'readonly',
+        safeSetJSON: 'readonly',
+        safeSet: 'readonly',
+        safeRemove: 'readonly',
+        makeDebouncedSaver: 'readonly',
         /* Declared in src/translations.js */
         TR: 'readonly',
         t: 'readonly',

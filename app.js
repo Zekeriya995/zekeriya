@@ -867,9 +867,9 @@ function setTheme(d){document.body.dataset.theme=d;if(tg){try{tg.setHeaderColor(
 /* SIDEBAR MENU */
 function toggleMenu(){var sm=document.getElementById('sideMenu');var so=document.getElementById('sideOverlay');if(!sm||!so)return;sm.classList.toggle('open');so.classList.toggle('open')}
 /* PROFILE */
-var userProfile={};try{userProfile=JSON.parse(localStorage.getItem('nxprof10')||'{}')}catch(e){}
+var userProfile=safeGetJSON('nxprof10',{});
 function loadProfile(){if(userProfile.name)document.getElementById('userName').value=userProfile.name;if(userProfile.nick)document.getElementById('userNick').value=userProfile.nick;var av=document.getElementById('sideAvatar');if(userProfile.name)av.textContent=userProfile.name.charAt(0).toUpperCase();else av.textContent='👤'}
-function saveProfile(){userProfile.name=document.getElementById('userName').value;userProfile.nick=document.getElementById('userNick').value;try{localStorage.setItem('nxprof10',JSON.stringify(userProfile))}catch(e){};var av=document.getElementById('sideAvatar');if(userProfile.name)av.textContent=userProfile.name.charAt(0).toUpperCase()}
+function saveProfile(){userProfile.name=document.getElementById('userName').value;userProfile.nick=document.getElementById('userNick').value;safeSetJSON('nxprof10',userProfile);var av=document.getElementById('sideAvatar');if(userProfile.name)av.textContent=userProfile.name.charAt(0).toUpperCase()}
 /* MENU STATE SYNC */
 function updateMenuLang(){var isAr=lang==='ar';document.getElementById('sLangAr').classList.toggle('act',isAr);document.getElementById('sLangEn').classList.toggle('act',!isAr)}
 function updateMenuTheme(){var isDark=document.body.dataset.theme==='dark';document.getElementById('sThDark').classList.toggle('act',isDark);document.getElementById('sThLight').classList.toggle('act',!isDark)}
@@ -2784,7 +2784,7 @@ function whaleSellCard(r,rank){
 function scanItem(r){var sc=r.score>=60?'background:var(--ud);color:var(--up)':r.score>=40?'background:var(--wd);color:var(--warn)':'background:rgba(56,72,96,.3);color:var(--t2)';var tb=getTierBadge(r.s);return'<div class="'+(r.ultra?'scan-r ultra-r':'scan-r')+'" onclick="openCoin(\''+r.s+'\')"><div class="scan-h"><div class="scan-sym">'+(r.ultra?'⭐':r.confirmed?'🟢':'💎')+' '+r.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+' '+timeBadge(r.detectedAt)+'</div><span class="scan-score" style="'+sc+'">'+r.score+' · '+r.passed+'/'+r.total+'✓</span></div><div class="scan-det"><span>💰 <b>'+fP(r.p)+'</b></span><span>'+(r.c>=0?'+':'')+r.c.toFixed(1)+'%</span><span>'+fmt(r.v)+'</span>'+(r.cb?'<span>CB:'+fP(r.cb)+'</span>':'')+'</div><div class="scan-checks">'+r.tags.slice(0,5).map(function(x){return'<span class="scan-chk chk-y">'+x+'</span>'}).join('')+'</div><div class="prw"><div class="prb" style="width:'+Math.min(100,r.score)+'%;background:'+(r.ultra?'linear-gradient(90deg,var(--ultra),var(--dn))':r.score>=50?'var(--up)':'var(--warn)')+'"></div></div></div>'}
 function frRow(){return''} /* replaced by accordion */
 /* ═══ 🆕 QUICK ACCESS CARDS ═══ */
-var favorites=[];try{favorites=JSON.parse(localStorage.getItem('nxfav10')||'[]')}catch(e){favorites=[]}
+var favorites=safeGetJSON('nxfav10',[]);
 function openQA(page){
   document.querySelectorAll('.pg').forEach(function(p){p.classList.remove('act');p.style.display=''});
   document.querySelectorAll('.bb').forEach(function(b){b.classList.remove('act')});
@@ -2836,10 +2836,10 @@ function addFav(){
   var raw=inp.value.toUpperCase().trim();
   var sym=raw.replace(/[^A-Z0-9]/g,'').slice(0,10);
   if(!sym||favorites.indexOf(sym)!==-1)return;
-  favorites.push(sym);try{localStorage.setItem('nxfav10',JSON.stringify(favorites))}catch(e){}
+  favorites.push(sym);safeSetJSON('nxfav10',favorites);
   inp.value='';renderFavs();updateQACards();
 }
-function rmFav(i){favorites.splice(i,1);try{localStorage.setItem('nxfav10',JSON.stringify(favorites))}catch(e){}renderFavs();updateQACards()}
+function rmFav(i){favorites.splice(i,1);safeSetJSON('nxfav10',favorites);renderFavs();updateQACards()}
 function renderFavs(){
   var el=document.getElementById('favList');if(!el)return;
   if(!favorites.length){el.innerHTML='<div class="empty"><div class="empty-ic">⭐</div><div class="empty-tx">'+(lang==='ar'?'أضف عملاتك المفضلة':'Add your favorites')+'</div></div>';return}

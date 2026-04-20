@@ -3073,7 +3073,10 @@ async function loadDash(){
   }catch(e){}
   try{
   /* Only fetch from direct API if proxy didn't provide BTC Dom */
-  if(btcDom===50||!btcDom){var gl=await fj(CG+'/global');if(gl&&gl.data){btcDom=gl.data.market_cap_percentage?gl.data.market_cap_percentage.btc:50;var btcDE=document.getElementById('btcD');if(btcDE)btcDE.textContent=btcDom.toFixed(1)+'%'}}
+  /* Only fetch when we've never received a reading. Do NOT paper over
+     a failed fetch with a fabricated 50% dominance — the UI guards
+     handle null and render em-dash. */
+  if(btcDom==null){var gl=await fj(CG+'/global');if(gl&&gl.data&&gl.data.market_cap_percentage&&gl.data.market_cap_percentage.btc!=null){var bdRaw=+gl.data.market_cap_percentage.btc;if(!isNaN(bdRaw)){btcDom=bdRaw;btcDomTime=Date.now();var btcDE=document.getElementById('btcD');if(btcDE)btcDE.textContent=btcDom.toFixed(1)+'%'}}}
   }catch(e){}
   try{
   var h=calcHealth();var hc=h.score>=70?'up':h.score>=45?'warn':'dn';
@@ -3815,11 +3818,10 @@ function rP(p){
 
 function mktSignature(){
   return'<div class="mkt-signature">'
-    +'<div class="mkt-sig-name">'+(lang==='ar'?'تحليل مقدّم من خبير زكريا الأحمد':'Analysis by expert Zakaria Al-Ahmad')+'</div>'
-    +'<div class="mkt-sig-wish">'+(lang==='ar'?'أتمنى لكم النجاح 🎯':'Wishing you success 🎯')+'</div>'
+    +'<div class="mkt-sig-name">'+(lang==='ar'?'تحليل فني من NEXUS PRO':'NEXUS PRO Technical Analysis')+'</div>'
     +'<div class="mkt-sig-note">'+(lang==='ar'
-      ?'⚠️ ملاحظة: هذا تحليل حسب نظرة السوق — احتمال أي خبر كبير يقلب التحليل عكس النتائج'
-      :'⚠️ Note: This analysis is based on market outlook — any major news could reverse the results')+'</div>'
+      ?'⚠️ ملاحظة: هذه مؤشرات فنية للاطلاع فقط — احتمال أي خبر كبير يقلب التحليل عكس النتائج.'
+      :'⚠️ Note: Technical indicators for informational purposes only — major news may reverse the analysis.')+'</div>'
     +'</div>';
 }
 
@@ -4436,9 +4438,11 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     var corrVal=bothUp||bothDown?'≈ 0.85':'≈ 0.35';
     h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'الارتباط':'Correlation')+'</span><span class="mkt-row-val" style="font-family:var(--fm)">'+corrVal+' — '+corrLabel+'</span></div>';
   }
-  if(typeof btcDom!=='undefined'){
+  if(btcDom!=null){
     var domTrend=btcDom>55?'↑':btcDom<50?'↓':'→';
     h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'هيمنة BTC':'BTC Dominance')+'</span><span class="mkt-row-val" style="font-family:var(--fm)">'+btcDom.toFixed(1)+'% '+domTrend+'</span></div>';
+  }else{
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'هيمنة BTC':'BTC Dominance')+'</span><span class="mkt-row-val" style="font-family:var(--fm);color:var(--t3)">—</span></div>';
   }
   if(data.ethBtcRatio){
     h+='<div class="mkt-row"><span class="mkt-row-label">ETH/BTC</span><span class="mkt-row-val" style="font-family:var(--fm);direction:ltr">'+data.ethBtcRatio.toFixed(5)+'</span></div>';
@@ -4464,7 +4468,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     ctxChips+='<span style="padding:3px 8px;background:'+fgC+'15;color:'+fgC+';border-radius:8px;font-size:10px;font-weight:700">'+(isAr?'خوف/طمع: ':'F&G: ')+fgValue+' — '+fgL+'</span>';
   }
   /* BTC Dom */
-  if(typeof btcDom!=='undefined'){
+  if(btcDom!=null){
     ctxChips+='<span style="padding:3px 8px;background:rgba(247,147,26,.1);color:#f7931a;border-radius:8px;font-size:10px;font-weight:700">BTC Dom: '+btcDom.toFixed(1)+'%</span>';
   }
   /* News */
@@ -4803,7 +4807,7 @@ function getSmartSummary(sym){
     else if(ls.ratio<0.6)sigs.push({t:'b',w:2,ar:'Short Squeeze محتمل',en:'Possible short squeeze'})}
   var d=T[sym];if(d){if(d.c>15)sigs.push({t:'s',w:1,ar:'صعد كثير — حذر',en:'Overextended — caution'});
     if(d.c<-10)sigs.push({t:'n',w:1,ar:'هبوط حاد — انتظر',en:'Sharp drop — wait'})}
-  if(sym==='BTC'&&btcDom>55)sigs.push({t:'b',w:1,ar:'هيمنة BTC عالية',en:'High BTC dominance'});
+  if(sym==='BTC'&&btcDom!=null&&btcDom>55)sigs.push({t:'b',w:1,ar:'هيمنة BTC عالية',en:'High BTC dominance'});
   if(fgValue<20)sigs.push({t:'s',w:1,ar:'خوف شديد بالسوق',en:'Extreme fear'});
   else if(fgValue>80)sigs.push({t:'s',w:1,ar:'طمع شديد — حذر',en:'Extreme greed — caution'});
   if(!sigs.length)return{text:lang==='ar'?'⏳ لا إشارات واضحة — انتظر':'⏳ No clear signals — wait',col:'var(--t2)'};
@@ -4863,7 +4867,7 @@ function renderTopCoins(){
     var srH=ext?'<div class="cc-sr"><span style="color:var(--up)">S:'+fP(ext.sup)+'</span><span style="color:var(--t3)">──</span><span style="font-weight:700;color:var(--t0)">'+fP(d.p)+'</span><span style="color:var(--t3)">──</span><span style="color:var(--dn)">R:'+fP(ext.res)+'</span></div>':'';
     /* Liquidation risk */
     var liqH=ext?'<span style="font-size:8px;padding:2px 5px;border-radius:4px;background:'+(ext.liq==='HIGH'?'var(--dd)':ext.liq==='MEDIUM'?'var(--wd)':'var(--ud)')+';color:'+(ext.liq==='HIGH'?'var(--dn)':ext.liq==='MEDIUM'?'var(--warn)':'var(--up)') +'">'+(lang==='ar'?'خطر:':'Risk:')+ext.liq+'</span>':'';
-    var domH=s==='BTC'?'<span style="font-size:8px;color:var(--t2)">Dom:'+btcDom.toFixed(1)+'%</span>':'';
+    var domH=s==='BTC'&&btcDom!=null?'<span style="font-size:8px;color:var(--t2)">Dom:'+btcDom.toFixed(1)+'%</span>':'';
     return'<div class="coin-card '+(up?'up':'dn')+' '+pulse+'" onclick="openCoin(\''+s+'\')">'
       /* Row 1: Icon + Name + Signal + Arrow */
       +'<div class="cc-row1"><div class="coin-card-name"><div class="coin-card-ic" style="background:'+bg+'18;color:'+bg+';border:1px solid '+bg+'30">'+TOP4_ICONS[s]+'</div><span>'+s+'/USDT</span></div>'

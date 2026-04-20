@@ -5241,7 +5241,22 @@ function renderTop3(){
   }).join('');
 }
 /* 📈 MARKET MOVEMENT PAGE */
-async function loadMarket(){if(curMktTab===0)loadBTCChart();else loadETHChart()}
+/* Disclaimer modal — shown on the user's first visit to the Market
+   section. The dismiss handler sets a localStorage flag so subsequent
+   visits skip the modal. Kept as a named global so the button's
+   onclick can reference it without inline JS that CSP would flag. */
+function showDisclaimerModalIfNeeded(){
+  try{if(localStorage.getItem('nxDisclaimerShown')==='1')return;}catch(e){return}
+  var m=document.getElementById('disclaimerModal');
+  if(m)m.style.display='flex';
+}
+function dismissDisclaimer(){
+  try{localStorage.setItem('nxDisclaimerShown','1');}catch(e){}
+  var m=document.getElementById('disclaimerModal');
+  if(m)m.style.display='none';
+}
+
+async function loadMarket(){showDisclaimerModalIfNeeded();if(curMktTab===0)loadBTCChart();else loadETHChart()}
 /* Market chart auto-refresh interval moved into init() */
 /* 🤖 DATA VALIDATOR + AUTO-REPAIR + CONNECTION QUALITY */
 var validatorLog=[];var validatorStatus='ok';/* lastDataTime hoisted to module top — connection.js reads it during early init */

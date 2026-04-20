@@ -3739,7 +3739,7 @@ var watchlist=safeGetJSON('nxwl10',[]);
 var curMktTab=0;
 var btcCache={h:null,t:0};
 var ethCache={h:null,t:0};
-var MKT_TTL=4*3600000;
+var MKT_TTL=30*60*1000;
 var RPT_COINS=[{s:'BTC',ic:'\u20bf',col:'#f7931a'},{s:'ETH',ic:'\u039e',col:'#627eea'},{s:'SOL',ic:'\u25ce',col:'#9945ff'},{s:'BNB',ic:'\u2b21',col:'#f0b90b'},{s:'XRP',ic:'\u2715',col:'#0085c0'}];
 var reportHistory=safeGetJSON('nxRptHist',[]);
 var prevReport=safeGetJSON('nxPrevRpt',null);
@@ -4624,24 +4624,33 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   return h;
 }
 
+/* Build the freshness banner from the cache timestamp at render time.
+   The previous version baked getMktFresh(Date.now()) into the cached
+   HTML string, so a 4-hour-old cache kept claiming it was "fresh".
+   Now the cached payload contains only the analysis body — the badge
+   is re-rendered against btcCache.t / ethCache.t on every display. */
+function renderMktFresh(cacheTime){
+  var frsh=getMktFresh(cacheTime);
+  var ts=new Date(cacheTime).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
+  return'<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' \u2014 '+ts+'</div>';
+}
+
 /* ═══ loadBTCChart ═══ */
 async function loadBTCChart(){
   var el=document.getElementById('mktBTC');
   if(btcCache.h&&Date.now()-btcCache.t<MKT_TTL){
-    if(el)el.innerHTML=btcCache.h;
+    if(el)el.innerHTML=renderMktFresh(btcCache.t)+btcCache.h;
     return;
   }
   if(el)el.innerHTML='<div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div><div style="font-size:11px;color:var(--t2);margin-top:10px">'+(lang==='ar'?'\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 12 \u0642\u0633\u0645...':'Analyzing 12 sections...')+'</div></div>';
   try{
     var data=await analyzeCoinRpt('BTC');
     if(!data){if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u0644\u0627 \u0628\u064a\u0627\u0646\u0627\u062a':'No data')+'</div></div>';return}
-    var frsh=getMktFresh(Date.now());
-    var xml='<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' \u2014 '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
-    xml+=buildChartHTML(data,'#f7931a','\u20bf',{ar:'\u0627\u0644\u0628\u064a\u062a\u0643\u0648\u064a\u0646',en:'Bitcoin'});
-    xml+='<button class="rfr" onclick="btcCache.t=0;loadBTCChart()">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
-    btcCache.h=xml;
+    var body=buildChartHTML(data,'#f7931a','\u20bf',{ar:'\u0627\u0644\u0628\u064a\u062a\u0643\u0648\u064a\u0646',en:'Bitcoin'});
+    body+='<button class="rfr" onclick="btcCache.t=0;loadBTCChart()">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
+    btcCache.h=body;
     btcCache.t=Date.now();
-    if(el)el.innerHTML=xml;
+    if(el)el.innerHTML=renderMktFresh(btcCache.t)+body;
   }catch(e){
     if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u062e\u0637\u0623 \u2014 \u062d\u0627\u0648\u0644 \u0644\u0627\u062d\u0642\u0627\u064b':'Error \u2014 try later')+'</div></div><button class="rfr" onclick="btcCache.t=0;loadBTCChart()">\u{1F504}</button>';
   }
@@ -4651,20 +4660,18 @@ async function loadBTCChart(){
 async function loadETHChart(){
   var el=document.getElementById('mktETH');
   if(ethCache.h&&Date.now()-ethCache.t<MKT_TTL){
-    if(el)el.innerHTML=ethCache.h;
+    if(el)el.innerHTML=renderMktFresh(ethCache.t)+ethCache.h;
     return;
   }
   if(el)el.innerHTML='<div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div><div style="font-size:11px;color:var(--t2);margin-top:10px">'+(lang==='ar'?'\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 12 \u0642\u0633\u0645...':'Analyzing 12 sections...')+'</div></div>';
   try{
     var data=await analyzeCoinRpt('ETH');
     if(!data){if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u0644\u0627 \u0628\u064a\u0627\u0646\u0627\u062a':'No data')+'</div></div>';return}
-    var frsh=getMktFresh(Date.now());
-    var xml='<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' \u2014 '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
-    xml+=buildChartHTML(data,'#627eea','\u039e',{ar:'\u0627\u0644\u0625\u064a\u062b\u064a\u0631\u064a\u0648\u0645',en:'Ethereum'});
-    xml+='<button class="rfr" onclick="ethCache.t=0;loadETHChart()">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
-    ethCache.h=xml;
+    var body=buildChartHTML(data,'#627eea','\u039e',{ar:'\u0627\u0644\u0625\u064a\u062b\u064a\u0631\u064a\u0648\u0645',en:'Ethereum'});
+    body+='<button class="rfr" onclick="ethCache.t=0;loadETHChart()">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
+    ethCache.h=body;
     ethCache.t=Date.now();
-    if(el)el.innerHTML=xml;
+    if(el)el.innerHTML=renderMktFresh(ethCache.t)+body;
   }catch(e){
     if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u062e\u0637\u0623 \u2014 \u062d\u0627\u0648\u0644 \u0644\u0627\u062d\u0642\u0627\u064b':'Error \u2014 try later')+'</div></div><button class="rfr" onclick="ethCache.t=0;loadETHChart()">\u{1F504}</button>';
   }

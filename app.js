@@ -4493,46 +4493,26 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   }
   h+='</div></div>';
 
-  /* ════════ SECTION 14: Multi-Level Entry Zones (Enhanced) ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">🎯 14. '+(isAr?'مناطق الدخول متعددة المستويات':'Multi-Level Entry Zones')+'</div>';
-  var zones=[];
-  /* Zone 1 — aggressive (current price) */
-  var z1Entry=data.price;var z1Stop=data.f618D;var z1Target=data.f618U;
-  var z1RR=Math.abs(z1Entry-z1Stop)>0?((z1Target-z1Entry)/Math.abs(z1Entry-z1Stop)):0;
-  zones.push({n:1,type:isAr?'عدوانية':'Aggressive',col:'var(--up)',bg:'rgba(0,255,136,.06)',range:rP(z1Entry),stop:z1Stop,target:z1Target,rr:z1RR,reason:isAr?'فوق EMA20 + '+(data.macd.h>0?'MACD صعودي':'MACD محايد'):'Above EMA20 + '+(data.macd.h>0?'MACD bull':'MACD flat')});
-  /* Zone 2 — safe (at FVG or EMA50) */
-  var z2Mid=data.ema50?Math.min(data.ema50,data.supp*1.01):data.supp*1.01;
-  var z2Lo=z2Mid*0.995;var z2Hi=z2Mid*1.005;
-  var z2Stop=data.supp*0.98;var z2Target=data.f618U;
-  var z2RR=Math.abs(z2Mid-z2Stop)>0?((z2Target-z2Mid)/Math.abs(z2Mid-z2Stop)):0;
-  var z2Reasons=[];
-  if(data.ema50)z2Reasons.push('EMA50');
-  if(data.fvgs&&data.fvgs.some(function(f){return f.type==='bullish'}))z2Reasons.push(isAr?'فجوة صعودية':'Bullish FVG');
-  z2Reasons.push(isAr?'ارتد مراراً':'Prior bounces');
-  zones.push({n:2,type:isAr?'آمنة':'Safe',col:'var(--blue)',bg:'rgba(91,156,255,.06)',range:rP(z2Lo)+' - '+rP(z2Hi),stop:z2Stop,target:z2Target,rr:z2RR,reason:z2Reasons.join(' + ')});
-  /* Zone 3 — deep (OB + weekly support) */
-  var z3Hi=data.supp;var z3Lo=data.supp*0.97;
-  var z3Stop=data.supp*0.95;var z3Target=data.f100U;
-  var z3Mid=(z3Hi+z3Lo)/2;
-  var z3RR=Math.abs(z3Mid-z3Stop)>0?((z3Target-z3Mid)/Math.abs(z3Mid-z3Stop)):0;
-  var z3Reasons=[];
-  if(data.orderBlocks&&data.orderBlocks.some(function(ob){return ob.type==='bullish'}))z3Reasons.push('Order Block');
-  z3Reasons.push(isAr?'Fib 0.618':'Fib 0.618');
-  z3Reasons.push(isAr?'دعم أسبوعي':'Weekly support');
-  zones.push({n:3,type:isAr?'عميقة':'Deep',col:'var(--purple)',bg:'rgba(176,124,255,.06)',range:rP(z3Lo)+' - '+rP(z3Hi),stop:z3Stop,target:z3Target,rr:z3RR,reason:z3Reasons.join(' + ')});
-  /* Render zones */
-  zones.forEach(function(z){
-    h+='<div style="padding:10px;background:'+z.bg+';border:1px solid '+z.col+'20;border-left:3px solid '+z.col+';border-radius:8px;margin-bottom:6px">';
-    h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-weight:800;color:'+z.col+';font-size:12px">'+(isAr?'المنطقة ':'Zone ')+z.n+' — '+z.type+'</span><span style="font-family:var(--fm);font-weight:700;color:'+z.col+';direction:ltr">'+z.range+'</span></div>';
-    h+='<div style="font-size:10px;color:var(--t1);margin-bottom:4px">'+z.reason+'</div>';
-    h+='<div style="display:flex;gap:8px;font-size:10px;direction:ltr">';
-    h+='<span style="color:var(--up)">TP: '+rP(z.target)+'</span>';
-    h+='<span style="color:var(--dn)">SL: '+rP(z.stop)+'</span>';
-    h+='<span style="color:'+z.col+';font-weight:800">R:R 1:'+z.rr.toFixed(1)+'x</span>';
-    h+='</div></div>';
+  /* ════════ SECTION 14: Key Price Levels (informational only) ════════
+     Neutral horizontal R2/R1/price/S1/S2 reference levels derived from
+     recent highs, lows and Fibonacci extensions. No entry, stop, target
+     or R:R — this section used to conflict with the bearish conclusion
+     in section 15 by always presenting "buy zones" regardless of trend. */
+  h+='<div class="mkt-section"><div class="mkt-section-t">📍 14. '+(isAr?'المستويات الرئيسية':'Key Levels')+'</div>';
+  var levels=[
+    {lbl:'R2',price:data.f100U,col:'var(--dn)',bg:'rgba(255,56,96,.06)',note:isAr?'مقاومة قوية':'Strong resistance'},
+    {lbl:'R1',price:data.f618U,col:'var(--dn)',bg:'rgba(255,56,96,.04)',note:isAr?'مقاومة متوسطة':'Medium resistance'},
+    {lbl:isAr?'السعر الحالي':'Current',price:data.price,col:'var(--blue)',bg:'rgba(91,156,255,.08)',note:isAr?'مرجع حالي':'Current reference'},
+    {lbl:'S1',price:data.supp,col:'var(--up)',bg:'rgba(0,255,136,.04)',note:isAr?'دعم':'Support'},
+    {lbl:'S2',price:data.f618D,col:'var(--up)',bg:'rgba(0,255,136,.06)',note:isAr?'دعم قوي':'Strong support'}
+  ];
+  levels.forEach(function(lv){
+    h+='<div style="padding:8px 10px;background:'+lv.bg+';border:1px solid '+lv.col+'20;border-left:3px solid '+lv.col+';border-radius:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">';
+    h+='<div><span style="font-weight:800;color:'+lv.col+';font-size:12px">'+lv.lbl+'</span> <span style="font-size:10px;color:var(--t2);margin-right:6px;margin-left:6px">'+lv.note+'</span></div>';
+    h+='<span style="font-family:var(--fm);font-weight:700;color:'+lv.col+';direction:ltr">'+rP(lv.price)+'</span>';
+    h+='</div>';
   });
-  /* Overall targets */
-  h+='<div style="padding:8px;background:var(--bg2);border-radius:8px;margin-top:4px;text-align:center;font-size:10px;direction:ltr;color:var(--t1)">'+(isAr?'الأهداف: ':'Targets: ')+'<span style="color:var(--up);font-weight:700;font-family:var(--fm)">'+rP(data.f618U)+' → '+rP(data.f100U)+'</span> | '+(isAr?'الوقف الأساسي: ':'Main SL: ')+'<span style="color:var(--dn);font-weight:700;font-family:var(--fm)">'+rP(data.f618D)+'</span></div>';
+  h+='<div style="padding:6px 8px;margin-top:4px;font-size:10px;color:var(--t2);text-align:center;line-height:1.5">'+(isAr?'مستويات أفقية مرجعية — ليست توصيات دخول أو خروج.':'Reference horizontal levels — not entry or exit recommendations.')+'</div>';
   h+='</div>';
 
   /* ════════ SECTION 15: ختام التحليل (CONCLUSION — AT BOTTOM) ════════ */

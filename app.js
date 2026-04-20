@@ -3753,7 +3753,7 @@ var CANDLE_NAMES={
 };
 var MKT_TPL={
   bull_strong:['{coin} \u064a\u0648\u0627\u0635\u0644 \u0635\u0639\u0648\u062f\u0647 \u0645\u062f\u0639\u0648\u0645\u0627\u0628\u0640{reason1}. \u0627\u0644\u0625\u063a\u0644\u0627\u0642 \u0641\u0648\u0642 {ema} \u064a\u0639\u0632\u0632 \u0627\u0644\u0625\u064a\u062c\u0627\u0628\u064a\u0629. \u0627\u0644\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u062d\u0631\u062c {resistance} \u2014 \u0627\u062e\u062a\u0631\u0627\u0642\u0647 \u064a\u0641\u062a\u062d \u0627\u0644\u0628\u0627\u0628 \u0644\u0640{target}. {warning}','{coin} \u0641\u064a \u0627\u062a\u062c\u0627\u0647 \u0635\u0639\u0648\u062f\u064a \u0642\u0648\u064a \u2014 {reason1}. \u0627\u0644\u0633\u0639\u0631 \u062b\u0627\u0628\u062a \u0641\u0648\u0642 {support} \u0645\u0639 \u062d\u062c\u0645 {volStatus}. \u0627\u0644\u0647\u062f\u0641 {target}. {warning}'],
-  bull_mild:['{coin} \u064a\u0645\u064a\u0644 \u0644\u0644\u0635\u0639\u0648\u062f \u2014 {reason1}. \u0627\u0644\u0633\u0639\u0631 \u0641\u0648\u0642 {ema} \u0644\u0643\u0646 {warning}. \u062f\u062e\u0648\u0644 \u0639\u0646\u062f {entry} \u0648\u0642\u0641 {stop}.','{coin} \u0625\u064a\u062c\u0627\u0628\u064a \u0628\u0634\u0643\u0644 \u0639\u0627\u0645 \u2014 {reason1}. \u0627\u0644\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0645\u0647\u0645 {resistance}. {warning}'],
+  bull_mild:['{coin} \u064a\u0645\u064a\u0644 \u0644\u0644\u0635\u0639\u0648\u062f \u2014 {reason1}. \u0627\u0644\u0633\u0639\u0631 \u0641\u0648\u0642 {ema} \u0644\u0643\u0646 {warning}. \u062f\u0639\u0645 \u0642\u0631\u064a\u0628 {support} \u0648\u0645\u0642\u0627\u0648\u0645\u0629 {resistance}.','{coin} \u0625\u064a\u062c\u0627\u0628\u064a \u0628\u0634\u0643\u0644 \u0639\u0627\u0645 \u2014 {reason1}. \u0627\u0644\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0645\u0647\u0645 {resistance}. {warning}'],
   neutral:['{coin} \u064a\u062a\u062f\u0627\u0648\u0644 \u062c\u0627\u0646\u0628\u064a\u0627\u064b \u0628\u064a\u0646 {support} \u0648 {resistance}. {reason1}. \u0627\u0646\u062a\u0638\u0631 \u0627\u062e\u062a\u0631\u0627\u0642 \u0648\u0627\u0636\u062d. {warning}','{coin} \u0641\u064a \u0645\u0646\u0637\u0642\u0629 \u0645\u062d\u0627\u064a\u062f\u0629 \u2014 \u0644\u0627 \u0625\u0634\u0627\u0631\u0627\u062a \u0642\u0648\u064a\u0629. {reason1}. \u0627\u0644\u0623\u0641\u0636\u0644 \u0627\u0644\u0627\u0646\u062a\u0638\u0627\u0631.'],
   bear_mild:['{coin} \u064a\u0645\u064a\u0644 \u0644\u0644\u0647\u0628\u0648\u0637 \u2014 {reason1}. \u062a\u062d\u062a {ema}. \u062f\u0639\u0645 \u0645\u0647\u0645 {support}. \u0643\u0633\u0631\u0647 \u064a\u0641\u062a\u062d \u0647\u0628\u0648\u0637 \u0646\u062d\u0648 {target}. {warning}'],
   bear_strong:['{coin} \u0641\u064a \u0647\u0628\u0648\u0637 \u0642\u0648\u064a \u2014 {reason1}. \u0643\u0633\u0631 {support} \u064a\u0633\u0631\u0651\u0639 \u0627\u0644\u0647\u0628\u0648\u0637. \u062a\u062c\u0646\u0628 \u0627\u0644\u0634\u0631\u0627\u0621 \u062d\u0627\u0644\u064a\u0627\u064b. {warning}']
@@ -3838,8 +3838,6 @@ function buildStory(coin,data){
     '{support}':rP(data.supp),
     '{resistance}':rP(data.resist),
     '{target}':rP(data.f618U),
-    '{entry}':rP(data.price*0.99),
-    '{stop}':rP(data.supp),
     '{volStatus}':data.volT>1.3?(lang==='ar'?'قوي':'strong'):(lang==='ar'?'ضعيف':'weak'),
     '{warning}':data.warning||''
   };
@@ -4051,7 +4049,10 @@ async function analyzeCoinRpt(sym){
   if(newsScore&&newsScore.score>55)moodSc+=0.5;
   addSc(lang==='ar'?'مزاج':'Mood',Math.min(1.0,moodSc),'mood');
 
-  var rec,recIc;if(ts>=4){rec=lang==='ar'?'💰 شراء قوي — وقف '+fP(f618D):'💰 Strong Buy — Stop '+fP(f618D);recIc='💰'}else if(ts>=2){rec=lang==='ar'?'📈 شراء — دخول تدريجي':'📈 Buy — Scale in';recIc='📈'}else if(ts<=-4){rec=lang==='ar'?'⛔ تجنب — هبوط قوي':'⛔ Avoid';recIc='⛔'}else if(ts<=-2){rec=lang==='ar'?'⚠️ حذر — انتظر':'⚠️ Caution — Wait';recIc='⚠️'}else{rec=lang==='ar'?'⏳ انتظار — محايد':'⏳ Wait';recIc='⏳'}
+  /* Technical state summary — informational only. No action verbs,
+     no implied entry/exit advice. Mirrors the Arabic-first wording
+     the team agreed on during the audit. */
+  var rec,recIc;if(ts>=4){rec=lang==='ar'?'📊 زخم فني إيجابي قوي':'📊 Strong positive technical momentum';recIc='📊'}else if(ts>=2){rec=lang==='ar'?'📊 زخم فني إيجابي':'📊 Positive technical momentum';recIc='📊'}else if(ts<=-4){rec=lang==='ar'?'⚠️ إشارات متضاربة':'⚠️ Conflicting signals';recIc='⚠️'}else if(ts<=-2){rec=lang==='ar'?'📊 زخم فني سلبي':'📊 Negative technical momentum';recIc='📊'}else{rec=lang==='ar'?'📊 حالة محايدة':'📊 Neutral state';recIc='📊'}
   /* Liquidation zones */
   var liqZones=[];if(typeof liqEvents!=='undefined'&&liqEvents&&liqEvents.length){var sL=liqEvents.filter(function(e){return e.s===sym||e.s===sym+'USDT'});
     var longL=sL.filter(function(e){return e.S==='SELL'}).reduce(function(s,e){return s+(e.q||0)*(e.p||0)},0);
@@ -4577,24 +4578,25 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<div style="font-size:12px;font-weight:800;color:var(--dn);margin-bottom:6px">❌ '+(isAr?'ما يُبطل التحليل:':'What invalidates:')+'</div>';
   invalidations.forEach(function(inv,i){h+='<div style="font-size:10px;color:var(--t1);line-height:1.8;padding:3px 0">• '+inv+'</div>';});
   h+='</div>';
-  /* 4. Entry recommendation */
+  /* 4. Technical state — descriptive only.
+     Previously this block rendered an "entry recommendation" with
+     specific entry / TP1 / TP2 / stop / R:R / position size values,
+     which crosses into investment advice. Replace with a short
+     description of the technical state, keyed off the existing
+     trend score. */
+  var stateLabel;
+  if(data.ts>=4)stateLabel=isAr?'زخم صعودي قوي':'Strong bullish momentum';
+  else if(data.ts>=2)stateLabel=isAr?'زخم صعودي متوسط':'Moderate bullish momentum';
+  else if(data.ts>=-1)stateLabel=isAr?'حالة محايدة / إشارات مختلطة':'Neutral / mixed signals';
+  else if(data.ts>=-3)stateLabel=isAr?'زخم هبوطي متوسط':'Moderate bearish momentum';
+  else stateLabel=isAr?'زخم هبوطي قوي':'Strong bearish momentum';
   h+='<div style="padding:10px;background:rgba(91,156,255,.04);border:1px solid rgba(91,156,255,.1);border-radius:10px;margin-bottom:8px">';
-  h+='<div style="font-size:12px;font-weight:800;color:var(--blue);margin-bottom:6px">🎯 '+(isAr?'توصية الدخول:':'Entry recommendation:')+'</div>';
-  var bestEntry=isBull?data.price:isBear?data.resist*0.995:(data.price+data.supp)/2;
-  var bestStop=isBull?data.f618D:isBear?data.resist*1.02:data.supp;
-  var bestT1=isBull?data.f618U:isBear?data.f618D:data.resist;
-  var bestT2=isBull?data.f100U:isBear?data.supp:data.f100U;
-  h+='<div style="font-size:11px;color:var(--t1);line-height:1.9;direction:ltr">';
-  h+=(isAr?'الدخول: ':'Entry: ')+'<span style="color:var(--blue);font-family:var(--fm);font-weight:700">'+rP(bestEntry)+'</span><br>';
-  h+=(isAr?'الهدف 1: ':'TP1: ')+'<span style="color:var(--up);font-family:var(--fm);font-weight:700">'+rP(bestT1)+'</span><br>';
-  h+=(isAr?'الهدف 2: ':'TP2: ')+'<span style="color:var(--up);font-family:var(--fm);font-weight:700">'+rP(bestT2)+'</span><br>';
-  h+=(isAr?'الوقف: ':'Stop Loss: ')+'<span style="color:var(--dn);font-family:var(--fm);font-weight:700">'+rP(bestStop)+'</span><br>';
-  var finalRR=Math.abs(bestEntry-bestStop)>0?((bestT1-bestEntry)/Math.abs(bestEntry-bestStop)):0;
-  h+=(isAr?'R:R: ':'R:R: ')+'<span style="font-weight:700">1:'+Math.abs(finalRR).toFixed(1)+'x</span><br>';
-  h+=(isAr?'حجم المركز المقترح: ':'Position size: ')+'<span style="font-weight:700">'+data.riskPct+'%</span>';
-  h+='</div></div>';
-  /* 5. Warning */
-  h+='<div style="padding:8px;background:rgba(255,184,0,.08);border:1px solid rgba(255,184,0,.2);border-radius:8px;text-align:center;font-size:11px;font-weight:700;color:var(--warn)">⚠️ '+(isAr?'لا تتداول بدون وقف خسارة! إدارة المخاطر أهم من الإشارة.':'Never trade without a stop loss! Risk management matters more than the signal.')+'</div>';
+  h+='<div style="font-size:12px;font-weight:800;color:var(--blue);margin-bottom:6px">📊 '+(isAr?'الحالة الفنية:':'Technical state:')+'</div>';
+  h+='<div style="font-size:12px;font-weight:800;color:'+data.dCol+';margin-bottom:4px">'+stateLabel+'</div>';
+  h+='<div style="font-size:10px;color:var(--t2);line-height:1.6">'+(isAr?'تقييم مجمّع من المؤشرات الفنية أعلاه. مستويات الأسعار الرئيسية معروضة في القسم 14 كمراجع أفقية.':'Composite read of the technical indicators above. Key price levels are shown in section 14 as horizontal references.')+'</div>';
+  h+='</div>';
+  /* 5. Disclaimer — informational platform, no investment advice. */
+  h+='<div style="padding:8px;background:rgba(255,184,0,.08);border:1px solid rgba(255,184,0,.2);border-radius:8px;text-align:center;font-size:11px;font-weight:700;color:var(--warn)">⚠️ '+(isAr?'هذه ملاحظات فنية للاطلاع والتحليل فقط — ليست نصيحة استثمارية.':'Technical observations for informational use only — not investment advice.')+'</div>';
   h+='</div>';
 
   /* Footer */

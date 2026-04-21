@@ -3743,6 +3743,12 @@ var curMktTab=0;
 var btcCache={h:null,t:0};
 var ethCache={h:null,t:0};
 var MKT_TTL=30*60*1000;
+/* Raw daily close arrays per symbol, populated by analyzeCoinRpt each
+   time it runs. Section 12 correlates BTC vs ETH from here — caching
+   the series avoids a duplicate klines fetch. Entries live for the
+   same window as the chart cache (MKT_TTL) since they come from the
+   same underlying request. */
+var mktKlDailyCache={BTC:null,ETH:null};
 var RPT_COINS=[{s:'BTC',ic:'\u20bf',col:'#f7931a'},{s:'ETH',ic:'\u039e',col:'#627eea'},{s:'SOL',ic:'\u25ce',col:'#9945ff'},{s:'BNB',ic:'\u2b21',col:'#f0b90b'},{s:'XRP',ic:'\u2715',col:'#0085c0'}];
 var reportHistory=safeGetJSON('nxRptHist',[]);
 var prevReport=safeGetJSON('nxPrevRpt',null);
@@ -3861,6 +3867,10 @@ async function analyzeCoinRpt(sym){
   var kl1h=res[0],kl4h=res[1],kl1d=res[2];if(!kl4h||kl4h.length<20)return null;
   var c1h=kl1h?kl1h.map(function(k){return+k[4]}):[];var c4=kl4h.map(function(k){return+k[4]});var h4=kl4h.map(function(k){return+k[2]});var l4=kl4h.map(function(k){return+k[3]});var v4=kl4h.map(function(k){return+k[5]});var o4=kl4h.map(function(k){return+k[1]});
   var c1d=kl1d?kl1d.map(function(k){return+k[4]}):[];var h1d=kl1d?kl1d.map(function(k){return+k[2]}):[];var l1d=kl1d?kl1d.map(function(k){return+k[3]}):[];
+  /* Cache the daily closes so section 12 can correlate BTC and ETH
+     without issuing a second klines request. Only the two tabs we
+     render charts for are cached — anything else is ignored. */
+  if(sym==='BTC'||sym==='ETH')mktKlDailyCache[sym]=c1d;
   var price=c4[c4.length-1];var rsi=calcRSI(c4);var rsi1d=calcRSI(c1d);var macd=calcMACD(c4);var macd1d=calcMACD(c1d);var ema20=calcEMA(c4,20);var ema50=calcEMA(c4,50);
   var avgVol=v4.slice(-10,-2).reduce(function(a,b){return a+b},0)/Math.max(1,v4.slice(-10,-2).length);var recVol=(v4[v4.length-1]+(v4[v4.length-2]||0))/2;var volT=avgVol>0?recVol/avgVol:1;
   var resist=Math.max.apply(null,h1d.length>=14?h1d.slice(-14):h4.slice(-20));var supp=Math.min.apply(null,l1d.length>=14?l1d.slice(-14):l4.slice(-20));
@@ -4431,12 +4441,39 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   if(data.btcChange!==null&&data.ethChange!==null){
     h+='<div class="mkt-row"><span class="mkt-row-label">BTC 24h</span><span class="mkt-row-val" style="color:'+(data.btcChange>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.btcChange>=0?'+':'')+data.btcChange.toFixed(2)+'%</span></div>';
     h+='<div class="mkt-row"><span class="mkt-row-label">ETH 24h</span><span class="mkt-row-val" style="color:'+(data.ethChange>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.ethChange>=0?'+':'')+data.ethChange.toFixed(2)+'%</span></div>';
-    /* Simple correlation signal from signs */
-    var bothUp=data.btcChange>0&&data.ethChange>0;
-    var bothDown=data.btcChange<0&&data.ethChange<0;
-    var corrLabel=bothUp||bothDown?(isAr?'قوي (متزامنان)':'Strong (aligned)'):(isAr?'ضعيف (منفصلان)':'Weak (divergent)');
-    var corrVal=bothUp||bothDown?'≈ 0.85':'≈ 0.35';
-    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'الارتباط':'Correlation')+'</span><span class="mkt-row-val" style="font-family:var(--fm)">'+corrVal+' — '+corrLabel+'</span></div>';
+    /* Pearson correlation over daily returns (% change bar-to-bar).
+       Returns-based correlation strips out the shared long-term trend
+       that would pin two rising assets at r ≈ 1 regardless of their
+       actual volatility coupling. We need both BTC and ETH daily
+       closes cached from prior analyzeCoinRpt runs; if the user
+       opened ETH first without loading BTC, the mirror series won't
+       be in cache yet and we render a neutral placeholder. */
+    var btcDaily=mktKlDailyCache.BTC,ethDaily=mktKlDailyCache.ETH;
+    var corrTxt,corrLabel,corrColor='var(--t1)';
+    if(btcDaily&&ethDaily&&btcDaily.length>=2&&ethDaily.length>=2){
+      var n=Math.min(btcDaily.length,ethDaily.length);
+      var btcRet=[],ethRet=[];
+      for(var ri=btcDaily.length-n+1;ri<btcDaily.length;ri++){
+        if(btcDaily[ri-1]>0)btcRet.push((btcDaily[ri]-btcDaily[ri-1])/btcDaily[ri-1]);
+      }
+      for(var rj=ethDaily.length-n+1;rj<ethDaily.length;rj++){
+        if(ethDaily[rj-1]>0)ethRet.push((ethDaily[rj]-ethDaily[rj-1])/ethDaily[rj-1]);
+      }
+      var corr=calcPearson(btcRet,ethRet);
+      if(corr==null){
+        corrTxt='—';corrLabel=isAr?'غير متاح':'Not available';corrColor='var(--t3)';
+      }else{
+        corrTxt=(corr>=0?'+':'')+corr.toFixed(2);
+        if(corr>=0.7){corrLabel=isAr?'قوي موجب':'Strong positive';corrColor='var(--up)';}
+        else if(corr>=0.3){corrLabel=isAr?'متوسط موجب':'Moderate positive';corrColor='var(--up)';}
+        else if(corr>-0.3){corrLabel=isAr?'ضعيف':'Weak';corrColor='var(--warn)';}
+        else if(corr>-0.7){corrLabel=isAr?'متوسط سلبي':'Moderate negative';corrColor='var(--dn)';}
+        else{corrLabel=isAr?'سلبي قوي':'Strong negative';corrColor='var(--dn)';}
+      }
+    }else{
+      corrTxt='—';corrLabel=isAr?'غير متاح':'Not available';corrColor='var(--t3)';
+    }
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'الارتباط (عوائد يومية)':'Correlation (daily returns)')+'</span><span class="mkt-row-val" style="font-family:var(--fm);color:'+corrColor+';direction:ltr">'+corrTxt+' — '+corrLabel+'</span></div>';
   }
   if(btcDom!=null){
     var domTrend=btcDom>55?'↑':btcDom<50?'↓':'→';

@@ -52,6 +52,7 @@ export default [
         calcRSI: 'readonly',
         calcMACD: 'readonly',
         calcEMA: 'readonly',
+        calcPearson: 'readonly',
         /* Declared in src/storage.js */
         safeGetJSON: 'readonly',
         safeGet: 'readonly',
@@ -208,6 +209,7 @@ export default [
         calcRSI: 'readonly',
         calcMACD: 'readonly',
         calcEMA: 'readonly',
+        calcPearson: 'readonly',
         /* From src/storage.js */
         safeGet: 'readonly',
         safeGetJSON: 'readonly',

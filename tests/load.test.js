@@ -44,6 +44,7 @@ const EXPECTS = {
     'calcMACD',
     'calcEMA',
     'emaSeries',
+    'calcPearson',
   ],
   'src/storage.js': [
     'safeGetJSON',

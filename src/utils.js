@@ -158,3 +158,41 @@ function calcEMA(data, period) {
   }
   return ema;
 }
+
+/* Pearson correlation coefficient between two equal-length numeric
+   series. When the inputs differ in length, the shorter tail is
+   taken from each — Binance klines are timestamp-aligned, so the
+   last min(lenA, lenB) bars map to the same calendar bars.
+
+   Returns a value in [-1, 1], or null when:
+     * either series is missing or has fewer than 2 samples
+     * either series is perfectly flat (standard deviation = 0),
+       which leaves the coefficient undefined. */
+function calcPearson(x, y) {
+  if (!x || !y) return null;
+  var n = Math.min(x.length, y.length);
+  if (n < 2) return null;
+  var xs = x.slice(-n),
+    ys = y.slice(-n);
+  var mx = 0,
+    my = 0;
+  for (var i = 0; i < n; i++) {
+    mx += xs[i];
+    my += ys[i];
+  }
+  mx /= n;
+  my /= n;
+  var num = 0,
+    dx2 = 0,
+    dy2 = 0;
+  for (var j = 0; j < n; j++) {
+    var a = xs[j] - mx,
+      b = ys[j] - my;
+    num += a * b;
+    dx2 += a * a;
+    dy2 += b * b;
+  }
+  var denom = Math.sqrt(dx2 * dy2);
+  if (denom === 0) return null;
+  return num / denom;
+}

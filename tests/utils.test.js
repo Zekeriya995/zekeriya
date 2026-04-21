@@ -167,3 +167,47 @@ test('calcMACD — steady uptrend produces positive MACD, no cross', () => {
   assert.ok(r.h > 0, `expected positive MACD, got ${r.h}`);
   assert.equal(r.cross, 'none');
 });
+
+test('calcPearson — identical series → +1', () => {
+  const a = [1, 2, 3, 4, 5, 6];
+  assert.equal(calcPearson(a, a), 1);
+});
+
+test('calcPearson — negated series → -1', () => {
+  const a = [1, 2, 3, 4, 5, 6];
+  const b = a.map((v) => -v);
+  assert.equal(calcPearson(a, b), -1);
+});
+
+test('calcPearson — affine transform preserves +1 correlation', () => {
+  /* y = 3x + 7 is a perfect positive linear relationship. */
+  const a = [1, 2, 3, 4, 5, 6];
+  const b = a.map((v) => 3 * v + 7);
+  assert.ok(Math.abs(calcPearson(a, b) - 1) < 1e-12);
+});
+
+test('calcPearson — missing / too-short / flat input returns null', () => {
+  assert.equal(calcPearson(null, [1, 2, 3]), null);
+  assert.equal(calcPearson([1, 2, 3], undefined), null);
+  assert.equal(calcPearson([1], [1]), null);
+  assert.equal(calcPearson([1, 1, 1, 1], [1, 2, 3, 4]), null);
+  assert.equal(calcPearson([1, 2, 3, 4], [5, 5, 5, 5]), null);
+});
+
+test('calcPearson — uses the tail when lengths differ', () => {
+  /* Last 3 bars of each series are identical → perfect +1. */
+  const a = [999, 777, 1, 2, 3];
+  const b = [1, 2, 3];
+  assert.equal(calcPearson(a, b), 1);
+});
+
+test('calcPearson — known hand-computed value', () => {
+  /* x = [1,2,3,4,5], y = [2,4,5,4,5]:
+       mean_x = 3, mean_y = 4
+       dx = [-2,-1,0,1,2], dy = [-2,0,1,0,1]
+       Σ dx·dy = 4+0+0+0+2 = 6
+       Σ dx² = 10, Σ dy² = 6
+       r = 6 / sqrt(60) ≈ 0.7745966… */
+  const r = calcPearson([1, 2, 3, 4, 5], [2, 4, 5, 4, 5]);
+  assert.ok(Math.abs(r - 6 / Math.sqrt(60)) < 1e-12);
+});

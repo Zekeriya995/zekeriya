@@ -57,12 +57,38 @@ test('safeC — NaN-safe change %', () => {
 test('calcRSI — empty / short series falls back to neutral 50', () => {
   assert.equal(calcRSI([], 14), 50);
   assert.equal(calcRSI([1, 2, 3], 14), 50);
+  assert.equal(calcRSI(null, 14), 50);
+});
+
+test('calcRSI — flat series is undefined-by-zero, returns 100 per Wilder', () => {
+  /* With avgLoss === 0 the RS ratio is infinite. TradingView and the
+     canonical Wilder definition return 100 in this case. */
+  assert.equal(calcRSI(Array(30).fill(50), 14), 100);
 });
 
 test('calcRSI — monotone-up series saturates near 100', () => {
   const closes = Array.from({ length: 30 }, (_, i) => 100 + i);
   const rsi = calcRSI(closes, 14);
   assert.ok(rsi > 95, `expected RSI > 95, got ${rsi}`);
+});
+
+test('calcRSI — monotone-down series collapses near 0', () => {
+  const closes = Array.from({ length: 30 }, (_, i) => 100 - i);
+  const rsi = calcRSI(closes, 14);
+  assert.ok(rsi < 5, `expected RSI < 5, got ${rsi}`);
+});
+
+test('calcRSI — matches hand-computed Wilder value on a small series', () => {
+  /* RSI(2) on [1,2,3,2,1,2,3]:
+       seed after i=1..2: avgG = 1, avgL = 0
+       j=3: avgG = 0.5,   avgL = 0.5
+       j=4: avgG = 0.25,  avgL = 0.75
+       j=5: avgG = 0.625, avgL = 0.375
+       j=6: avgG = 0.8125, avgL = 0.1875
+       RS = 4.333…, RSI = 100 - 100/5.333… = 81.25
+     Hand-verified value — catches any regression in seeding or
+     recurrence direction. */
+  assert.equal(calcRSI([1, 2, 3, 2, 1, 2, 3], 2), 81.25);
 });
 
 test('calcEMA — period larger than data returns null', () => {

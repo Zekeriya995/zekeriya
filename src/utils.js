@@ -57,18 +57,36 @@ function safeC(c) {
   return c && !isNaN(c) ? c : 0;
 }
 
-/* Relative Strength Index over `period` closes (default 14) */
+/* Relative Strength Index over `period` closes (default 14).
+   Wilder smoothing (aka RMA, alpha = 1/period) — matches the RSI
+   that TradingView and Binance display. The earlier implementation
+   used a simple moving sum over the last `period` gains and losses,
+   which approximates RSI only on a short window and diverges by
+   several points from any Wilder-smoothed reference after a few
+   bars of history. */
 function calcRSI(c, p) {
   p = p || 14;
-  if (c.length < p + 1) return 50;
-  var g = 0,
-    l = 0;
-  for (var i = c.length - p; i < c.length; i++) {
-    var d = c[i] - c[i - 1];
-    if (d > 0) g += d;
-    else l += Math.abs(d);
+  if (!c || c.length < p + 1) return 50;
+  var avgG = 0,
+    avgL = 0;
+  /* Seed: SMA of the first `p` gain/loss samples. */
+  for (var i = 1; i <= p; i++) {
+    var d0 = c[i] - c[i - 1];
+    if (d0 >= 0) avgG += d0;
+    else avgL -= d0;
   }
-  return 100 - 100 / (1 + g / Math.max(l, 0.001));
+  avgG /= p;
+  avgL /= p;
+  /* Wilder recurrence for the remaining bars. */
+  for (var j = p + 1; j < c.length; j++) {
+    var d = c[j] - c[j - 1];
+    var g = d > 0 ? d : 0;
+    var l = d < 0 ? -d : 0;
+    avgG = (avgG * (p - 1) + g) / p;
+    avgL = (avgL * (p - 1) + l) / p;
+  }
+  if (avgL === 0) return 100;
+  return 100 - 100 / (1 + avgG / avgL);
 }
 
 /* MACD (12/26/9) — returns { h: macdLine, signal, cross }.

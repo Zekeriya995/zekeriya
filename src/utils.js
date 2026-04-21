@@ -57,43 +57,89 @@ function safeC(c) {
   return c && !isNaN(c) ? c : 0;
 }
 
-/* Relative Strength Index over `period` closes (default 14) */
+/* Relative Strength Index over `period` closes (default 14).
+   Wilder smoothing (aka RMA, alpha = 1/period) — matches the RSI
+   that TradingView and Binance display. The earlier implementation
+   used a simple moving sum over the last `period` gains and losses,
+   which approximates RSI only on a short window and diverges by
+   several points from any Wilder-smoothed reference after a few
+   bars of history. */
 function calcRSI(c, p) {
   p = p || 14;
-  if (c.length < p + 1) return 50;
-  var g = 0,
-    l = 0;
-  for (var i = c.length - p; i < c.length; i++) {
-    var d = c[i] - c[i - 1];
-    if (d > 0) g += d;
-    else l += Math.abs(d);
+  if (!c || c.length < p + 1) return 50;
+  var avgG = 0,
+    avgL = 0;
+  /* Seed: SMA of the first `p` gain/loss samples. */
+  for (var i = 1; i <= p; i++) {
+    var d0 = c[i] - c[i - 1];
+    if (d0 >= 0) avgG += d0;
+    else avgL -= d0;
   }
-  return 100 - 100 / (1 + g / Math.max(l, 0.001));
+  avgG /= p;
+  avgL /= p;
+  /* Wilder recurrence for the remaining bars. */
+  for (var j = p + 1; j < c.length; j++) {
+    var d = c[j] - c[j - 1];
+    var g = d > 0 ? d : 0;
+    var l = d < 0 ? -d : 0;
+    avgG = (avgG * (p - 1) + g) / p;
+    avgL = (avgL * (p - 1) + l) / p;
+  }
+  if (avgL === 0) return 100;
+  return 100 - 100 / (1 + avgG / avgL);
 }
 
-/* MACD (12/26/9) — returns { h: macdLine, signal, cross } */
+/* MACD (12/26/9) — returns { h: macdLine, signal, cross }.
+   Uses emaSeries so the signal line can be compared at both the
+   current and previous bars. The earlier implementation compared
+   the previous MACD value against the *current* signal, which is
+   an off-by-one that produces delayed / missed crosses. */
 function calcMACD(c) {
-  if (c.length < 26) return { h: 0, signal: 0, cross: 'none' };
-  var ema = function (d, p) {
-    var k = 2 / (p + 1),
-      e = d[0];
-    for (var i = 1; i < d.length; i++) e = d[i] * k + e * (1 - k);
-    return e;
-  };
-  var macdLine = ema(c.slice(-12), 12) - ema(c, 26);
-  var macdHist = [];
-  for (var i = 26; i <= c.length; i++) {
-    macdHist.push(ema(c.slice(i - 12, i), 12) - ema(c.slice(0, i), 26));
+  if (!c || c.length < 26) return { h: 0, signal: 0, cross: 'none' };
+  var e12 = emaSeries(c, 12);
+  var e26 = emaSeries(c, 26);
+  /* MACD line: exists from index 25 onward (where both EMAs are seeded). */
+  var macd = [];
+  for (var i = 0; i < c.length; i++) {
+    macd.push(e12[i] != null && e26[i] != null ? e12[i] - e26[i] : null);
   }
-  var signal = macdHist.length >= 9 ? ema(macdHist.slice(-9), 9) : macdLine;
-  var prev = macdHist.length >= 2 ? macdHist[macdHist.length - 2] : 0;
-  var cross =
-    macdLine > signal && prev <= signal
-      ? 'bull'
-      : macdLine < signal && prev >= signal
-        ? 'bear'
-        : 'none';
-  return { h: macdLine, signal: signal, cross: cross };
+  var dense = macd.filter(function (x) {
+    return x != null;
+  });
+  var curMacd = dense.length ? dense[dense.length - 1] : 0;
+  /* Need at least 9 MACD samples to seed the signal EMA, plus one
+     more to read prev/curr signal for cross detection. */
+  if (dense.length < 10) {
+    return { h: curMacd, signal: curMacd, cross: 'none' };
+  }
+  var sig = emaSeries(dense, 9);
+  var curSig = sig[sig.length - 1];
+  var prevSig = sig[sig.length - 2];
+  var prevMacd = dense[dense.length - 2];
+  var cross = 'none';
+  if (curSig != null && prevSig != null) {
+    if (curMacd > curSig && prevMacd <= prevSig) cross = 'bull';
+    else if (curMacd < curSig && prevMacd >= prevSig) cross = 'bear';
+  }
+  return { h: curMacd, signal: curSig, cross: cross };
+}
+
+/* Canonical EMA as a series — one value per input bar once the
+   seed window is full. Seeds with the SMA of the first `period`
+   values (TradingView convention), then applies the EMA recurrence.
+   Entries before the seed are null, so callers can keep the index
+   aligned with the input prices. */
+function emaSeries(data, period) {
+  if (!data || data.length < period) return [];
+  var out = new Array(data.length).fill(null);
+  var sum = 0;
+  for (var i = 0; i < period; i++) sum += data[i];
+  out[period - 1] = sum / period;
+  var k = 2 / (period + 1);
+  for (var j = period; j < data.length; j++) {
+    out[j] = (data[j] - out[j - 1]) * k + out[j - 1];
+  }
+  return out;
 }
 
 /* Exponential moving average over `period` values.
@@ -111,4 +157,42 @@ function calcEMA(data, period) {
     ema = (data[i] - ema) * k + ema;
   }
   return ema;
+}
+
+/* Pearson correlation coefficient between two equal-length numeric
+   series. When the inputs differ in length, the shorter tail is
+   taken from each — Binance klines are timestamp-aligned, so the
+   last min(lenA, lenB) bars map to the same calendar bars.
+
+   Returns a value in [-1, 1], or null when:
+     * either series is missing or has fewer than 2 samples
+     * either series is perfectly flat (standard deviation = 0),
+       which leaves the coefficient undefined. */
+function calcPearson(x, y) {
+  if (!x || !y) return null;
+  var n = Math.min(x.length, y.length);
+  if (n < 2) return null;
+  var xs = x.slice(-n),
+    ys = y.slice(-n);
+  var mx = 0,
+    my = 0;
+  for (var i = 0; i < n; i++) {
+    mx += xs[i];
+    my += ys[i];
+  }
+  mx /= n;
+  my /= n;
+  var num = 0,
+    dx2 = 0,
+    dy2 = 0;
+  for (var j = 0; j < n; j++) {
+    var a = xs[j] - mx,
+      b = ys[j] - my;
+    num += a * b;
+    dx2 += a * a;
+    dy2 += b * b;
+  }
+  var denom = Math.sqrt(dx2 * dy2);
+  if (denom === 0) return null;
+  return num / denom;
 }

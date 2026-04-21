@@ -3073,7 +3073,10 @@ async function loadDash(){
   }catch(e){}
   try{
   /* Only fetch from direct API if proxy didn't provide BTC Dom */
-  if(btcDom===50||!btcDom){var gl=await fj(CG+'/global');if(gl&&gl.data){btcDom=gl.data.market_cap_percentage?gl.data.market_cap_percentage.btc:50;var btcDE=document.getElementById('btcD');if(btcDE)btcDE.textContent=btcDom.toFixed(1)+'%'}}
+  /* Only fetch when we've never received a reading. Do NOT paper over
+     a failed fetch with a fabricated 50% dominance — the UI guards
+     handle null and render em-dash. */
+  if(btcDom==null){var gl=await fj(CG+'/global');if(gl&&gl.data&&gl.data.market_cap_percentage&&gl.data.market_cap_percentage.btc!=null){var bdRaw=+gl.data.market_cap_percentage.btc;if(!isNaN(bdRaw)){btcDom=bdRaw;btcDomTime=Date.now();var btcDE=document.getElementById('btcD');if(btcDE)btcDE.textContent=btcDom.toFixed(1)+'%'}}}
   }catch(e){}
   try{
   var h=calcHealth();var hc=h.score>=70?'up':h.score>=45?'warn':'dn';
@@ -3739,7 +3742,7 @@ var watchlist=safeGetJSON('nxwl10',[]);
 var curMktTab=0;
 var btcCache={h:null,t:0};
 var ethCache={h:null,t:0};
-var MKT_TTL=4*3600000;
+var MKT_TTL=30*60*1000;
 var RPT_COINS=[{s:'BTC',ic:'\u20bf',col:'#f7931a'},{s:'ETH',ic:'\u039e',col:'#627eea'},{s:'SOL',ic:'\u25ce',col:'#9945ff'},{s:'BNB',ic:'\u2b21',col:'#f0b90b'},{s:'XRP',ic:'\u2715',col:'#0085c0'}];
 var reportHistory=safeGetJSON('nxRptHist',[]);
 var prevReport=safeGetJSON('nxPrevRpt',null);
@@ -3753,7 +3756,7 @@ var CANDLE_NAMES={
 };
 var MKT_TPL={
   bull_strong:['{coin} \u064a\u0648\u0627\u0635\u0644 \u0635\u0639\u0648\u062f\u0647 \u0645\u062f\u0639\u0648\u0645\u0627\u0628\u0640{reason1}. \u0627\u0644\u0625\u063a\u0644\u0627\u0642 \u0641\u0648\u0642 {ema} \u064a\u0639\u0632\u0632 \u0627\u0644\u0625\u064a\u062c\u0627\u0628\u064a\u0629. \u0627\u0644\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u062d\u0631\u062c {resistance} \u2014 \u0627\u062e\u062a\u0631\u0627\u0642\u0647 \u064a\u0641\u062a\u062d \u0627\u0644\u0628\u0627\u0628 \u0644\u0640{target}. {warning}','{coin} \u0641\u064a \u0627\u062a\u062c\u0627\u0647 \u0635\u0639\u0648\u062f\u064a \u0642\u0648\u064a \u2014 {reason1}. \u0627\u0644\u0633\u0639\u0631 \u062b\u0627\u0628\u062a \u0641\u0648\u0642 {support} \u0645\u0639 \u062d\u062c\u0645 {volStatus}. \u0627\u0644\u0647\u062f\u0641 {target}. {warning}'],
-  bull_mild:['{coin} \u064a\u0645\u064a\u0644 \u0644\u0644\u0635\u0639\u0648\u062f \u2014 {reason1}. \u0627\u0644\u0633\u0639\u0631 \u0641\u0648\u0642 {ema} \u0644\u0643\u0646 {warning}. \u062f\u062e\u0648\u0644 \u0639\u0646\u062f {entry} \u0648\u0642\u0641 {stop}.','{coin} \u0625\u064a\u062c\u0627\u0628\u064a \u0628\u0634\u0643\u0644 \u0639\u0627\u0645 \u2014 {reason1}. \u0627\u0644\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0645\u0647\u0645 {resistance}. {warning}'],
+  bull_mild:['{coin} \u064a\u0645\u064a\u0644 \u0644\u0644\u0635\u0639\u0648\u062f \u2014 {reason1}. \u0627\u0644\u0633\u0639\u0631 \u0641\u0648\u0642 {ema} \u0644\u0643\u0646 {warning}. \u062f\u0639\u0645 \u0642\u0631\u064a\u0628 {support} \u0648\u0645\u0642\u0627\u0648\u0645\u0629 {resistance}.','{coin} \u0625\u064a\u062c\u0627\u0628\u064a \u0628\u0634\u0643\u0644 \u0639\u0627\u0645 \u2014 {reason1}. \u0627\u0644\u0645\u0633\u062a\u0648\u0649 \u0627\u0644\u0645\u0647\u0645 {resistance}. {warning}'],
   neutral:['{coin} \u064a\u062a\u062f\u0627\u0648\u0644 \u062c\u0627\u0646\u0628\u064a\u0627\u064b \u0628\u064a\u0646 {support} \u0648 {resistance}. {reason1}. \u0627\u0646\u062a\u0638\u0631 \u0627\u062e\u062a\u0631\u0627\u0642 \u0648\u0627\u0636\u062d. {warning}','{coin} \u0641\u064a \u0645\u0646\u0637\u0642\u0629 \u0645\u062d\u0627\u064a\u062f\u0629 \u2014 \u0644\u0627 \u0625\u0634\u0627\u0631\u0627\u062a \u0642\u0648\u064a\u0629. {reason1}. \u0627\u0644\u0623\u0641\u0636\u0644 \u0627\u0644\u0627\u0646\u062a\u0638\u0627\u0631.'],
   bear_mild:['{coin} \u064a\u0645\u064a\u0644 \u0644\u0644\u0647\u0628\u0648\u0637 \u2014 {reason1}. \u062a\u062d\u062a {ema}. \u062f\u0639\u0645 \u0645\u0647\u0645 {support}. \u0643\u0633\u0631\u0647 \u064a\u0641\u062a\u062d \u0647\u0628\u0648\u0637 \u0646\u062d\u0648 {target}. {warning}'],
   bear_strong:['{coin} \u0641\u064a \u0647\u0628\u0648\u0637 \u0642\u0648\u064a \u2014 {reason1}. \u0643\u0633\u0631 {support} \u064a\u0633\u0631\u0651\u0639 \u0627\u0644\u0647\u0628\u0648\u0637. \u062a\u062c\u0646\u0628 \u0627\u0644\u0634\u0631\u0627\u0621 \u062d\u0627\u0644\u064a\u0627\u064b. {warning}']
@@ -3815,11 +3818,10 @@ function rP(p){
 
 function mktSignature(){
   return'<div class="mkt-signature">'
-    +'<div class="mkt-sig-name">'+(lang==='ar'?'تحليل مقدّم من خبير زكريا الأحمد':'Analysis by expert Zakaria Al-Ahmad')+'</div>'
-    +'<div class="mkt-sig-wish">'+(lang==='ar'?'أتمنى لكم النجاح 🎯':'Wishing you success 🎯')+'</div>'
+    +'<div class="mkt-sig-name">'+(lang==='ar'?'تحليل فني من NEXUS PRO':'NEXUS PRO Technical Analysis')+'</div>'
     +'<div class="mkt-sig-note">'+(lang==='ar'
-      ?'⚠️ ملاحظة: هذا تحليل حسب نظرة السوق — احتمال أي خبر كبير يقلب التحليل عكس النتائج'
-      :'⚠️ Note: This analysis is based on market outlook — any major news could reverse the results')+'</div>'
+      ?'⚠️ ملاحظة: هذه مؤشرات فنية للاطلاع فقط — احتمال أي خبر كبير يقلب التحليل عكس النتائج.'
+      :'⚠️ Note: Technical indicators for informational purposes only — major news may reverse the analysis.')+'</div>'
     +'</div>';
 }
 
@@ -3838,8 +3840,6 @@ function buildStory(coin,data){
     '{support}':rP(data.supp),
     '{resistance}':rP(data.resist),
     '{target}':rP(data.f618U),
-    '{entry}':rP(data.price*0.99),
-    '{stop}':rP(data.supp),
     '{volStatus}':data.volT>1.3?(lang==='ar'?'قوي':'strong'):(lang==='ar'?'ضعيف':'weak'),
     '{warning}':data.warning||''
   };
@@ -3861,7 +3861,7 @@ async function analyzeCoinRpt(sym){
   var kl1h=res[0],kl4h=res[1],kl1d=res[2];if(!kl4h||kl4h.length<20)return null;
   var c1h=kl1h?kl1h.map(function(k){return+k[4]}):[];var c4=kl4h.map(function(k){return+k[4]});var h4=kl4h.map(function(k){return+k[2]});var l4=kl4h.map(function(k){return+k[3]});var v4=kl4h.map(function(k){return+k[5]});var o4=kl4h.map(function(k){return+k[1]});
   var c1d=kl1d?kl1d.map(function(k){return+k[4]}):[];var h1d=kl1d?kl1d.map(function(k){return+k[2]}):[];var l1d=kl1d?kl1d.map(function(k){return+k[3]}):[];
-  var price=c4[c4.length-1];var rsi=calcRSI(c4);var rsi1d=calcRSI(c1d);var macd=calcMACD(c4);var macd1d=calcMACD(c1d);var ema20=calcEMA(c4.slice(-20),20);var ema50=calcEMA(c4,50);
+  var price=c4[c4.length-1];var rsi=calcRSI(c4);var rsi1d=calcRSI(c1d);var macd=calcMACD(c4);var macd1d=calcMACD(c1d);var ema20=calcEMA(c4,20);var ema50=calcEMA(c4,50);
   var avgVol=v4.slice(-10,-2).reduce(function(a,b){return a+b},0)/Math.max(1,v4.slice(-10,-2).length);var recVol=(v4[v4.length-1]+(v4[v4.length-2]||0))/2;var volT=avgVol>0?recVol/avgVol:1;
   var resist=Math.max.apply(null,h1d.length>=14?h1d.slice(-14):h4.slice(-20));var supp=Math.min.apply(null,l1d.length>=14?l1d.slice(-14):l4.slice(-20));
   var fRng=resist-supp;if(fRng===0)fRng=price*0.03;var f618U=price+fRng*0.618;var f100U=price+fRng;var f618D=price-fRng*0.618;
@@ -3970,9 +3970,9 @@ async function analyzeCoinRpt(sym){
   try{if(whalePnL){if(whalePnL.pct>1)ts++;else if(whalePnL.pct<-3)ts-=2;}}catch(e){}
   try{if(newsScore){if(newsScore.score>70)ts++;else if(newsScore.score<30)ts--;}}catch(e){}
 
-  var tf1h=c1h.length>=20?(c1h[c1h.length-1]>calcEMA(c1h.slice(-20),20)?'up':'down'):'neutral';
+  var tf1h=c1h.length>=20?(c1h[c1h.length-1]>calcEMA(c1h,20)?'up':'down'):'neutral';
   var tf4h=price>ema20&&macd.h>0?'up':price<ema20&&macd.h<0?'down':'neutral';
-  var tf1d=c1d.length>=20?(c1d[c1d.length-1]>calcEMA(c1d.slice(-20),20)&&macd1d.h>0?'up':'down'):'neutral';
+  var tf1d=c1d.length>=20?(c1d[c1d.length-1]>calcEMA(c1d,20)&&macd1d.h>0?'up':'down'):'neutral';
   var tfW=c1d.length>=7?(c1d[c1d.length-1]>c1d[c1d.length-7]?'up':'down'):'neutral';
   var bullTFs=[tf1h,tf4h,tf1d,tfW].filter(function(t){return t==='up'}).length;
   var ch1h=c1h.length>=2?((price-c1h[c1h.length-2])/c1h[c1h.length-2]*100):0;
@@ -4051,7 +4051,10 @@ async function analyzeCoinRpt(sym){
   if(newsScore&&newsScore.score>55)moodSc+=0.5;
   addSc(lang==='ar'?'مزاج':'Mood',Math.min(1.0,moodSc),'mood');
 
-  var rec,recIc;if(ts>=4){rec=lang==='ar'?'💰 شراء قوي — وقف '+fP(f618D):'💰 Strong Buy — Stop '+fP(f618D);recIc='💰'}else if(ts>=2){rec=lang==='ar'?'📈 شراء — دخول تدريجي':'📈 Buy — Scale in';recIc='📈'}else if(ts<=-4){rec=lang==='ar'?'⛔ تجنب — هبوط قوي':'⛔ Avoid';recIc='⛔'}else if(ts<=-2){rec=lang==='ar'?'⚠️ حذر — انتظر':'⚠️ Caution — Wait';recIc='⚠️'}else{rec=lang==='ar'?'⏳ انتظار — محايد':'⏳ Wait';recIc='⏳'}
+  /* Technical state summary — informational only. No action verbs,
+     no implied entry/exit advice. Mirrors the Arabic-first wording
+     the team agreed on during the audit. */
+  var rec,recIc;if(ts>=4){rec=lang==='ar'?'📊 زخم فني إيجابي قوي':'📊 Strong positive technical momentum';recIc='📊'}else if(ts>=2){rec=lang==='ar'?'📊 زخم فني إيجابي':'📊 Positive technical momentum';recIc='📊'}else if(ts<=-4){rec=lang==='ar'?'⚠️ إشارات متضاربة':'⚠️ Conflicting signals';recIc='⚠️'}else if(ts<=-2){rec=lang==='ar'?'📊 زخم فني سلبي':'📊 Negative technical momentum';recIc='📊'}else{rec=lang==='ar'?'📊 حالة محايدة':'📊 Neutral state';recIc='📊'}
   /* Liquidation zones */
   var liqZones=[];if(typeof liqEvents!=='undefined'&&liqEvents&&liqEvents.length){var sL=liqEvents.filter(function(e){return e.s===sym||e.s===sym+'USDT'});
     var longL=sL.filter(function(e){return e.S==='SELL'}).reduce(function(s,e){return s+(e.q||0)*(e.p||0)},0);
@@ -4435,9 +4438,11 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     var corrVal=bothUp||bothDown?'≈ 0.85':'≈ 0.35';
     h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'الارتباط':'Correlation')+'</span><span class="mkt-row-val" style="font-family:var(--fm)">'+corrVal+' — '+corrLabel+'</span></div>';
   }
-  if(typeof btcDom!=='undefined'){
+  if(btcDom!=null){
     var domTrend=btcDom>55?'↑':btcDom<50?'↓':'→';
     h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'هيمنة BTC':'BTC Dominance')+'</span><span class="mkt-row-val" style="font-family:var(--fm)">'+btcDom.toFixed(1)+'% '+domTrend+'</span></div>';
+  }else{
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'هيمنة BTC':'BTC Dominance')+'</span><span class="mkt-row-val" style="font-family:var(--fm);color:var(--t3)">—</span></div>';
   }
   if(data.ethBtcRatio){
     h+='<div class="mkt-row"><span class="mkt-row-label">ETH/BTC</span><span class="mkt-row-val" style="font-family:var(--fm);direction:ltr">'+data.ethBtcRatio.toFixed(5)+'</span></div>';
@@ -4463,7 +4468,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     ctxChips+='<span style="padding:3px 8px;background:'+fgC+'15;color:'+fgC+';border-radius:8px;font-size:10px;font-weight:700">'+(isAr?'خوف/طمع: ':'F&G: ')+fgValue+' — '+fgL+'</span>';
   }
   /* BTC Dom */
-  if(typeof btcDom!=='undefined'){
+  if(btcDom!=null){
     ctxChips+='<span style="padding:3px 8px;background:rgba(247,147,26,.1);color:#f7931a;border-radius:8px;font-size:10px;font-weight:700">BTC Dom: '+btcDom.toFixed(1)+'%</span>';
   }
   /* News */
@@ -4493,46 +4498,26 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   }
   h+='</div></div>';
 
-  /* ════════ SECTION 14: Multi-Level Entry Zones (Enhanced) ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">🎯 14. '+(isAr?'مناطق الدخول متعددة المستويات':'Multi-Level Entry Zones')+'</div>';
-  var zones=[];
-  /* Zone 1 — aggressive (current price) */
-  var z1Entry=data.price;var z1Stop=data.f618D;var z1Target=data.f618U;
-  var z1RR=Math.abs(z1Entry-z1Stop)>0?((z1Target-z1Entry)/Math.abs(z1Entry-z1Stop)):0;
-  zones.push({n:1,type:isAr?'عدوانية':'Aggressive',col:'var(--up)',bg:'rgba(0,255,136,.06)',range:rP(z1Entry),stop:z1Stop,target:z1Target,rr:z1RR,reason:isAr?'فوق EMA20 + '+(data.macd.h>0?'MACD صعودي':'MACD محايد'):'Above EMA20 + '+(data.macd.h>0?'MACD bull':'MACD flat')});
-  /* Zone 2 — safe (at FVG or EMA50) */
-  var z2Mid=data.ema50?Math.min(data.ema50,data.supp*1.01):data.supp*1.01;
-  var z2Lo=z2Mid*0.995;var z2Hi=z2Mid*1.005;
-  var z2Stop=data.supp*0.98;var z2Target=data.f618U;
-  var z2RR=Math.abs(z2Mid-z2Stop)>0?((z2Target-z2Mid)/Math.abs(z2Mid-z2Stop)):0;
-  var z2Reasons=[];
-  if(data.ema50)z2Reasons.push('EMA50');
-  if(data.fvgs&&data.fvgs.some(function(f){return f.type==='bullish'}))z2Reasons.push(isAr?'فجوة صعودية':'Bullish FVG');
-  z2Reasons.push(isAr?'ارتد مراراً':'Prior bounces');
-  zones.push({n:2,type:isAr?'آمنة':'Safe',col:'var(--blue)',bg:'rgba(91,156,255,.06)',range:rP(z2Lo)+' - '+rP(z2Hi),stop:z2Stop,target:z2Target,rr:z2RR,reason:z2Reasons.join(' + ')});
-  /* Zone 3 — deep (OB + weekly support) */
-  var z3Hi=data.supp;var z3Lo=data.supp*0.97;
-  var z3Stop=data.supp*0.95;var z3Target=data.f100U;
-  var z3Mid=(z3Hi+z3Lo)/2;
-  var z3RR=Math.abs(z3Mid-z3Stop)>0?((z3Target-z3Mid)/Math.abs(z3Mid-z3Stop)):0;
-  var z3Reasons=[];
-  if(data.orderBlocks&&data.orderBlocks.some(function(ob){return ob.type==='bullish'}))z3Reasons.push('Order Block');
-  z3Reasons.push(isAr?'Fib 0.618':'Fib 0.618');
-  z3Reasons.push(isAr?'دعم أسبوعي':'Weekly support');
-  zones.push({n:3,type:isAr?'عميقة':'Deep',col:'var(--purple)',bg:'rgba(176,124,255,.06)',range:rP(z3Lo)+' - '+rP(z3Hi),stop:z3Stop,target:z3Target,rr:z3RR,reason:z3Reasons.join(' + ')});
-  /* Render zones */
-  zones.forEach(function(z){
-    h+='<div style="padding:10px;background:'+z.bg+';border:1px solid '+z.col+'20;border-left:3px solid '+z.col+';border-radius:8px;margin-bottom:6px">';
-    h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><span style="font-weight:800;color:'+z.col+';font-size:12px">'+(isAr?'المنطقة ':'Zone ')+z.n+' — '+z.type+'</span><span style="font-family:var(--fm);font-weight:700;color:'+z.col+';direction:ltr">'+z.range+'</span></div>';
-    h+='<div style="font-size:10px;color:var(--t1);margin-bottom:4px">'+z.reason+'</div>';
-    h+='<div style="display:flex;gap:8px;font-size:10px;direction:ltr">';
-    h+='<span style="color:var(--up)">TP: '+rP(z.target)+'</span>';
-    h+='<span style="color:var(--dn)">SL: '+rP(z.stop)+'</span>';
-    h+='<span style="color:'+z.col+';font-weight:800">R:R 1:'+z.rr.toFixed(1)+'x</span>';
-    h+='</div></div>';
+  /* ════════ SECTION 14: Key Price Levels (informational only) ════════
+     Neutral horizontal R2/R1/price/S1/S2 reference levels derived from
+     recent highs, lows and Fibonacci extensions. No entry, stop, target
+     or R:R — this section used to conflict with the bearish conclusion
+     in section 15 by always presenting "buy zones" regardless of trend. */
+  h+='<div class="mkt-section"><div class="mkt-section-t">📍 14. '+(isAr?'المستويات الرئيسية':'Key Levels')+'</div>';
+  var levels=[
+    {lbl:'R2',price:data.f100U,col:'var(--dn)',bg:'rgba(255,56,96,.06)',note:isAr?'مقاومة قوية':'Strong resistance'},
+    {lbl:'R1',price:data.f618U,col:'var(--dn)',bg:'rgba(255,56,96,.04)',note:isAr?'مقاومة متوسطة':'Medium resistance'},
+    {lbl:isAr?'السعر الحالي':'Current',price:data.price,col:'var(--blue)',bg:'rgba(91,156,255,.08)',note:isAr?'مرجع حالي':'Current reference'},
+    {lbl:'S1',price:data.supp,col:'var(--up)',bg:'rgba(0,255,136,.04)',note:isAr?'دعم':'Support'},
+    {lbl:'S2',price:data.f618D,col:'var(--up)',bg:'rgba(0,255,136,.06)',note:isAr?'دعم قوي':'Strong support'}
+  ];
+  levels.forEach(function(lv){
+    h+='<div style="padding:8px 10px;background:'+lv.bg+';border:1px solid '+lv.col+'20;border-left:3px solid '+lv.col+';border-radius:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">';
+    h+='<div><span style="font-weight:800;color:'+lv.col+';font-size:12px">'+lv.lbl+'</span> <span style="font-size:10px;color:var(--t2);margin-right:6px;margin-left:6px">'+lv.note+'</span></div>';
+    h+='<span style="font-family:var(--fm);font-weight:700;color:'+lv.col+';direction:ltr">'+rP(lv.price)+'</span>';
+    h+='</div>';
   });
-  /* Overall targets */
-  h+='<div style="padding:8px;background:var(--bg2);border-radius:8px;margin-top:4px;text-align:center;font-size:10px;direction:ltr;color:var(--t1)">'+(isAr?'الأهداف: ':'Targets: ')+'<span style="color:var(--up);font-weight:700;font-family:var(--fm)">'+rP(data.f618U)+' → '+rP(data.f100U)+'</span> | '+(isAr?'الوقف الأساسي: ':'Main SL: ')+'<span style="color:var(--dn);font-weight:700;font-family:var(--fm)">'+rP(data.f618D)+'</span></div>';
+  h+='<div style="padding:6px 8px;margin-top:4px;font-size:10px;color:var(--t2);text-align:center;line-height:1.5">'+(isAr?'مستويات أفقية مرجعية — ليست توصيات دخول أو خروج.':'Reference horizontal levels — not entry or exit recommendations.')+'</div>';
   h+='</div>';
 
   /* ════════ SECTION 15: ختام التحليل (CONCLUSION — AT BOTTOM) ════════ */
@@ -4597,24 +4582,25 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<div style="font-size:12px;font-weight:800;color:var(--dn);margin-bottom:6px">❌ '+(isAr?'ما يُبطل التحليل:':'What invalidates:')+'</div>';
   invalidations.forEach(function(inv,i){h+='<div style="font-size:10px;color:var(--t1);line-height:1.8;padding:3px 0">• '+inv+'</div>';});
   h+='</div>';
-  /* 4. Entry recommendation */
+  /* 4. Technical state — descriptive only.
+     Previously this block rendered an "entry recommendation" with
+     specific entry / TP1 / TP2 / stop / R:R / position size values,
+     which crosses into investment advice. Replace with a short
+     description of the technical state, keyed off the existing
+     trend score. */
+  var stateLabel;
+  if(data.ts>=4)stateLabel=isAr?'زخم صعودي قوي':'Strong bullish momentum';
+  else if(data.ts>=2)stateLabel=isAr?'زخم صعودي متوسط':'Moderate bullish momentum';
+  else if(data.ts>=-1)stateLabel=isAr?'حالة محايدة / إشارات مختلطة':'Neutral / mixed signals';
+  else if(data.ts>=-3)stateLabel=isAr?'زخم هبوطي متوسط':'Moderate bearish momentum';
+  else stateLabel=isAr?'زخم هبوطي قوي':'Strong bearish momentum';
   h+='<div style="padding:10px;background:rgba(91,156,255,.04);border:1px solid rgba(91,156,255,.1);border-radius:10px;margin-bottom:8px">';
-  h+='<div style="font-size:12px;font-weight:800;color:var(--blue);margin-bottom:6px">🎯 '+(isAr?'توصية الدخول:':'Entry recommendation:')+'</div>';
-  var bestEntry=isBull?data.price:isBear?data.resist*0.995:(data.price+data.supp)/2;
-  var bestStop=isBull?data.f618D:isBear?data.resist*1.02:data.supp;
-  var bestT1=isBull?data.f618U:isBear?data.f618D:data.resist;
-  var bestT2=isBull?data.f100U:isBear?data.supp:data.f100U;
-  h+='<div style="font-size:11px;color:var(--t1);line-height:1.9;direction:ltr">';
-  h+=(isAr?'الدخول: ':'Entry: ')+'<span style="color:var(--blue);font-family:var(--fm);font-weight:700">'+rP(bestEntry)+'</span><br>';
-  h+=(isAr?'الهدف 1: ':'TP1: ')+'<span style="color:var(--up);font-family:var(--fm);font-weight:700">'+rP(bestT1)+'</span><br>';
-  h+=(isAr?'الهدف 2: ':'TP2: ')+'<span style="color:var(--up);font-family:var(--fm);font-weight:700">'+rP(bestT2)+'</span><br>';
-  h+=(isAr?'الوقف: ':'Stop Loss: ')+'<span style="color:var(--dn);font-family:var(--fm);font-weight:700">'+rP(bestStop)+'</span><br>';
-  var finalRR=Math.abs(bestEntry-bestStop)>0?((bestT1-bestEntry)/Math.abs(bestEntry-bestStop)):0;
-  h+=(isAr?'R:R: ':'R:R: ')+'<span style="font-weight:700">1:'+Math.abs(finalRR).toFixed(1)+'x</span><br>';
-  h+=(isAr?'حجم المركز المقترح: ':'Position size: ')+'<span style="font-weight:700">'+data.riskPct+'%</span>';
-  h+='</div></div>';
-  /* 5. Warning */
-  h+='<div style="padding:8px;background:rgba(255,184,0,.08);border:1px solid rgba(255,184,0,.2);border-radius:8px;text-align:center;font-size:11px;font-weight:700;color:var(--warn)">⚠️ '+(isAr?'لا تتداول بدون وقف خسارة! إدارة المخاطر أهم من الإشارة.':'Never trade without a stop loss! Risk management matters more than the signal.')+'</div>';
+  h+='<div style="font-size:12px;font-weight:800;color:var(--blue);margin-bottom:6px">📊 '+(isAr?'الحالة الفنية:':'Technical state:')+'</div>';
+  h+='<div style="font-size:12px;font-weight:800;color:'+data.dCol+';margin-bottom:4px">'+stateLabel+'</div>';
+  h+='<div style="font-size:10px;color:var(--t2);line-height:1.6">'+(isAr?'تقييم مجمّع من المؤشرات الفنية أعلاه. مستويات الأسعار الرئيسية معروضة في القسم 14 كمراجع أفقية.':'Composite read of the technical indicators above. Key price levels are shown in section 14 as horizontal references.')+'</div>';
+  h+='</div>';
+  /* 5. Disclaimer — informational platform, no investment advice. */
+  h+='<div style="padding:8px;background:rgba(255,184,0,.08);border:1px solid rgba(255,184,0,.2);border-radius:8px;text-align:center;font-size:11px;font-weight:700;color:var(--warn)">⚠️ '+(isAr?'هذه ملاحظات فنية للاطلاع والتحليل فقط — ليست نصيحة استثمارية.':'Technical observations for informational use only — not investment advice.')+'</div>';
   h+='</div>';
 
   /* Footer */
@@ -4624,24 +4610,33 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   return h;
 }
 
+/* Build the freshness banner from the cache timestamp at render time.
+   The previous version baked getMktFresh(Date.now()) into the cached
+   HTML string, so a 4-hour-old cache kept claiming it was "fresh".
+   Now the cached payload contains only the analysis body — the badge
+   is re-rendered against btcCache.t / ethCache.t on every display. */
+function renderMktFresh(cacheTime){
+  var frsh=getMktFresh(cacheTime);
+  var ts=new Date(cacheTime).toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
+  return'<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' \u2014 '+ts+'</div>';
+}
+
 /* ═══ loadBTCChart ═══ */
 async function loadBTCChart(){
   var el=document.getElementById('mktBTC');
   if(btcCache.h&&Date.now()-btcCache.t<MKT_TTL){
-    if(el)el.innerHTML=btcCache.h;
+    if(el)el.innerHTML=renderMktFresh(btcCache.t)+btcCache.h;
     return;
   }
   if(el)el.innerHTML='<div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div><div style="font-size:11px;color:var(--t2);margin-top:10px">'+(lang==='ar'?'\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 12 \u0642\u0633\u0645...':'Analyzing 12 sections...')+'</div></div>';
   try{
     var data=await analyzeCoinRpt('BTC');
     if(!data){if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u0644\u0627 \u0628\u064a\u0627\u0646\u0627\u062a':'No data')+'</div></div>';return}
-    var frsh=getMktFresh(Date.now());
-    var xml='<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' \u2014 '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
-    xml+=buildChartHTML(data,'#f7931a','\u20bf',{ar:'\u0627\u0644\u0628\u064a\u062a\u0643\u0648\u064a\u0646',en:'Bitcoin'});
-    xml+='<button class="rfr" onclick="btcCache.t=0;loadBTCChart()">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
-    btcCache.h=xml;
+    var body=buildChartHTML(data,'#f7931a','\u20bf',{ar:'\u0627\u0644\u0628\u064a\u062a\u0643\u0648\u064a\u0646',en:'Bitcoin'});
+    body+='<button class="rfr" onclick="btcCache.t=0;loadBTCChart()">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
+    btcCache.h=body;
     btcCache.t=Date.now();
-    if(el)el.innerHTML=xml;
+    if(el)el.innerHTML=renderMktFresh(btcCache.t)+body;
   }catch(e){
     if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u062e\u0637\u0623 \u2014 \u062d\u0627\u0648\u0644 \u0644\u0627\u062d\u0642\u0627\u064b':'Error \u2014 try later')+'</div></div><button class="rfr" onclick="btcCache.t=0;loadBTCChart()">\u{1F504}</button>';
   }
@@ -4651,20 +4646,18 @@ async function loadBTCChart(){
 async function loadETHChart(){
   var el=document.getElementById('mktETH');
   if(ethCache.h&&Date.now()-ethCache.t<MKT_TTL){
-    if(el)el.innerHTML=ethCache.h;
+    if(el)el.innerHTML=renderMktFresh(ethCache.t)+ethCache.h;
     return;
   }
   if(el)el.innerHTML='<div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div><div style="font-size:11px;color:var(--t2);margin-top:10px">'+(lang==='ar'?'\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 12 \u0642\u0633\u0645...':'Analyzing 12 sections...')+'</div></div>';
   try{
     var data=await analyzeCoinRpt('ETH');
     if(!data){if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u0644\u0627 \u0628\u064a\u0627\u0646\u0627\u062a':'No data')+'</div></div>';return}
-    var frsh=getMktFresh(Date.now());
-    var xml='<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' \u2014 '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
-    xml+=buildChartHTML(data,'#627eea','\u039e',{ar:'\u0627\u0644\u0625\u064a\u062b\u064a\u0631\u064a\u0648\u0645',en:'Ethereum'});
-    xml+='<button class="rfr" onclick="ethCache.t=0;loadETHChart()">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
-    ethCache.h=xml;
+    var body=buildChartHTML(data,'#627eea','\u039e',{ar:'\u0627\u0644\u0625\u064a\u062b\u064a\u0631\u064a\u0648\u0645',en:'Ethereum'});
+    body+='<button class="rfr" onclick="ethCache.t=0;loadETHChart()">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
+    ethCache.h=body;
     ethCache.t=Date.now();
-    if(el)el.innerHTML=xml;
+    if(el)el.innerHTML=renderMktFresh(ethCache.t)+body;
   }catch(e){
     if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u062e\u0637\u0623 \u2014 \u062d\u0627\u0648\u0644 \u0644\u0627\u062d\u0642\u0627\u064b':'Error \u2014 try later')+'</div></div><button class="rfr" onclick="ethCache.t=0;loadETHChart()">\u{1F504}</button>';
   }
@@ -4814,7 +4807,7 @@ function getSmartSummary(sym){
     else if(ls.ratio<0.6)sigs.push({t:'b',w:2,ar:'Short Squeeze محتمل',en:'Possible short squeeze'})}
   var d=T[sym];if(d){if(d.c>15)sigs.push({t:'s',w:1,ar:'صعد كثير — حذر',en:'Overextended — caution'});
     if(d.c<-10)sigs.push({t:'n',w:1,ar:'هبوط حاد — انتظر',en:'Sharp drop — wait'})}
-  if(sym==='BTC'&&btcDom>55)sigs.push({t:'b',w:1,ar:'هيمنة BTC عالية',en:'High BTC dominance'});
+  if(sym==='BTC'&&btcDom!=null&&btcDom>55)sigs.push({t:'b',w:1,ar:'هيمنة BTC عالية',en:'High BTC dominance'});
   if(fgValue<20)sigs.push({t:'s',w:1,ar:'خوف شديد بالسوق',en:'Extreme fear'});
   else if(fgValue>80)sigs.push({t:'s',w:1,ar:'طمع شديد — حذر',en:'Extreme greed — caution'});
   if(!sigs.length)return{text:lang==='ar'?'⏳ لا إشارات واضحة — انتظر':'⏳ No clear signals — wait',col:'var(--t2)'};
@@ -4874,7 +4867,7 @@ function renderTopCoins(){
     var srH=ext?'<div class="cc-sr"><span style="color:var(--up)">S:'+fP(ext.sup)+'</span><span style="color:var(--t3)">──</span><span style="font-weight:700;color:var(--t0)">'+fP(d.p)+'</span><span style="color:var(--t3)">──</span><span style="color:var(--dn)">R:'+fP(ext.res)+'</span></div>':'';
     /* Liquidation risk */
     var liqH=ext?'<span style="font-size:8px;padding:2px 5px;border-radius:4px;background:'+(ext.liq==='HIGH'?'var(--dd)':ext.liq==='MEDIUM'?'var(--wd)':'var(--ud)')+';color:'+(ext.liq==='HIGH'?'var(--dn)':ext.liq==='MEDIUM'?'var(--warn)':'var(--up)') +'">'+(lang==='ar'?'خطر:':'Risk:')+ext.liq+'</span>':'';
-    var domH=s==='BTC'?'<span style="font-size:8px;color:var(--t2)">Dom:'+btcDom.toFixed(1)+'%</span>':'';
+    var domH=s==='BTC'&&btcDom!=null?'<span style="font-size:8px;color:var(--t2)">Dom:'+btcDom.toFixed(1)+'%</span>':'';
     return'<div class="coin-card '+(up?'up':'dn')+' '+pulse+'" onclick="openCoin(\''+s+'\')">'
       /* Row 1: Icon + Name + Signal + Arrow */
       +'<div class="cc-row1"><div class="coin-card-name"><div class="coin-card-ic" style="background:'+bg+'18;color:'+bg+';border:1px solid '+bg+'30">'+TOP4_ICONS[s]+'</div><span>'+s+'/USDT</span></div>'
@@ -5252,7 +5245,22 @@ function renderTop3(){
   }).join('');
 }
 /* 📈 MARKET MOVEMENT PAGE */
-async function loadMarket(){if(curMktTab===0)loadBTCChart();else loadETHChart()}
+/* Disclaimer modal — shown on the user's first visit to the Market
+   section. The dismiss handler sets a localStorage flag so subsequent
+   visits skip the modal. Kept as a named global so the button's
+   onclick can reference it without inline JS that CSP would flag. */
+function showDisclaimerModalIfNeeded(){
+  try{if(localStorage.getItem('nxDisclaimerShown')==='1')return;}catch(e){return}
+  var m=document.getElementById('disclaimerModal');
+  if(m)m.style.display='flex';
+}
+function dismissDisclaimer(){
+  try{localStorage.setItem('nxDisclaimerShown','1');}catch(e){}
+  var m=document.getElementById('disclaimerModal');
+  if(m)m.style.display='none';
+}
+
+async function loadMarket(){showDisclaimerModalIfNeeded();if(curMktTab===0)loadBTCChart();else loadETHChart()}
 /* Market chart auto-refresh interval moved into init() */
 /* 🤖 DATA VALIDATOR + AUTO-REPAIR + CONNECTION QUALITY */
 var validatorLog=[];var validatorStatus='ok';/* lastDataTime hoisted to module top — connection.js reads it during early init */

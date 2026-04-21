@@ -96,16 +96,19 @@ function calcMACD(c) {
   return { h: macdLine, signal: signal, cross: cross };
 }
 
-/* Exponential moving average over `period` values */
+/* Exponential moving average over `period` values.
+   Seeds with the SMA of the first `period` values, then applies the
+   canonical EMA recurrence. Returns null when data is missing or
+   shorter than `period`. */
 function calcEMA(data, period) {
-  if (!data || data.length < period) return data && data.length ? data[data.length - 1] : 0;
+  if (!data || data.length < period) return null;
   var k = 2 / (period + 1);
   var ema =
     data.slice(0, period).reduce(function (a, b) {
       return a + b;
     }, 0) / period;
   for (var i = period; i < data.length; i++) {
-    ema = data[i] * k + ema * (1 - k);
+    ema = (data[i] - ema) * k + ema;
   }
   return ema;
 }

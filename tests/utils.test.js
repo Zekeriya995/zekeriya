@@ -65,13 +65,41 @@ test('calcRSI — monotone-up series saturates near 100', () => {
   assert.ok(rsi > 95, `expected RSI > 95, got ${rsi}`);
 });
 
-test('calcEMA — period larger than data returns last value', () => {
-  assert.equal(calcEMA([10, 20, 30], 5), 30);
-  assert.equal(calcEMA([], 5), 0);
+test('calcEMA — period larger than data returns null', () => {
+  assert.equal(calcEMA([10, 20, 30], 5), null);
+  assert.equal(calcEMA([], 5), null);
+  assert.equal(calcEMA(null, 5), null);
+  assert.equal(calcEMA(undefined, 5), null);
 });
 
 test('calcEMA — flat series equals the constant', () => {
   assert.equal(calcEMA([5, 5, 5, 5, 5], 3), 5);
+});
+
+test('calcEMA — length === period returns SMA of the seed window', () => {
+  /* When data.length === period there is no recurrence step, so the
+     result is the SMA of the seed window — not an error, not the last
+     value. The old implementation returned SMA by coincidence; the new
+     one returns it by construction. */
+  assert.equal(calcEMA([1, 2, 3, 4, 5], 5), 3);
+  assert.equal(calcEMA([10, 20, 30, 40], 4), 25);
+});
+
+test('calcEMA — recurrence weights recent values more than SMA', () => {
+  /* Rising series: EMA should be higher than SMA of the full window
+     because recent (larger) values dominate the recurrence. */
+  const closes = Array.from({ length: 30 }, (_, i) => 100 + i);
+  const sma = closes.reduce((a, b) => a + b, 0) / closes.length;
+  const ema = calcEMA(closes, 20);
+  assert.ok(ema > sma, `expected EMA (${ema}) > SMA (${sma})`);
+  assert.ok(ema < closes[closes.length - 1], `expected EMA < last`);
+});
+
+test('calcEMA — decaying series gives EMA below SMA', () => {
+  const closes = Array.from({ length: 30 }, (_, i) => 200 - i);
+  const sma = closes.reduce((a, b) => a + b, 0) / closes.length;
+  const ema = calcEMA(closes, 20);
+  assert.ok(ema < sma, `expected EMA (${ema}) < SMA (${sma})`);
 });
 
 test('calcMACD — too-short series returns zeros', () => {

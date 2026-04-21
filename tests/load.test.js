@@ -43,6 +43,7 @@ const EXPECTS = {
     'calcRSI',
     'calcMACD',
     'calcEMA',
+    'emaSeries',
   ],
   'src/storage.js': [
     'safeGetJSON',

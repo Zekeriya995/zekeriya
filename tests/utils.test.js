@@ -106,3 +106,38 @@ test('calcMACD — too-short series returns zeros', () => {
   const r = calcMACD([1, 2, 3]);
   assert.deepEqual(r, { h: 0, signal: 0, cross: 'none' });
 });
+
+test('calcMACD — flat series returns zero MACD + no cross', () => {
+  const flat = Array(40).fill(100);
+  const r = calcMACD(flat);
+  assert.equal(r.h, 0);
+  assert.equal(r.signal, 0);
+  assert.equal(r.cross, 'none');
+});
+
+test('calcMACD — detects a genuine bullish cross', () => {
+  /* 40 declining bars drive MACD well below signal. Two sharp
+     up-bars are just enough to lift the MACD line above signal on
+     the final bar while the prior bar was still below — the exact
+     MACD(t) > Signal(t) && MACD(t-1) <= Signal(t-1) condition. */
+  const down = Array.from({ length: 40 }, (_, i) => 200 - i * 2);
+  const up = [120, 125];
+  const r = calcMACD(down.concat(up));
+  assert.equal(r.cross, 'bull', `expected bull cross, got ${r.cross} (h=${r.h}, sig=${r.signal})`);
+  assert.ok(r.h > r.signal, 'curr MACD should exceed signal after a bull cross');
+});
+
+test('calcMACD — detects a genuine bearish cross', () => {
+  const up = Array.from({ length: 40 }, (_, i) => 100 + i * 2);
+  const down = [180, 175];
+  const r = calcMACD(up.concat(down));
+  assert.equal(r.cross, 'bear', `expected bear cross, got ${r.cross} (h=${r.h}, sig=${r.signal})`);
+  assert.ok(r.h < r.signal, 'curr MACD should trail signal after a bear cross');
+});
+
+test('calcMACD — steady uptrend produces positive MACD, no cross', () => {
+  const closes = Array.from({ length: 60 }, (_, i) => 100 + i);
+  const r = calcMACD(closes);
+  assert.ok(r.h > 0, `expected positive MACD, got ${r.h}`);
+  assert.equal(r.cross, 'none');
+});

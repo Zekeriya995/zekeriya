@@ -71,29 +71,57 @@ function calcRSI(c, p) {
   return 100 - 100 / (1 + g / Math.max(l, 0.001));
 }
 
-/* MACD (12/26/9) — returns { h: macdLine, signal, cross } */
+/* MACD (12/26/9) — returns { h: macdLine, signal, cross }.
+   Uses emaSeries so the signal line can be compared at both the
+   current and previous bars. The earlier implementation compared
+   the previous MACD value against the *current* signal, which is
+   an off-by-one that produces delayed / missed crosses. */
 function calcMACD(c) {
-  if (c.length < 26) return { h: 0, signal: 0, cross: 'none' };
-  var ema = function (d, p) {
-    var k = 2 / (p + 1),
-      e = d[0];
-    for (var i = 1; i < d.length; i++) e = d[i] * k + e * (1 - k);
-    return e;
-  };
-  var macdLine = ema(c.slice(-12), 12) - ema(c, 26);
-  var macdHist = [];
-  for (var i = 26; i <= c.length; i++) {
-    macdHist.push(ema(c.slice(i - 12, i), 12) - ema(c.slice(0, i), 26));
+  if (!c || c.length < 26) return { h: 0, signal: 0, cross: 'none' };
+  var e12 = emaSeries(c, 12);
+  var e26 = emaSeries(c, 26);
+  /* MACD line: exists from index 25 onward (where both EMAs are seeded). */
+  var macd = [];
+  for (var i = 0; i < c.length; i++) {
+    macd.push(e12[i] != null && e26[i] != null ? e12[i] - e26[i] : null);
   }
-  var signal = macdHist.length >= 9 ? ema(macdHist.slice(-9), 9) : macdLine;
-  var prev = macdHist.length >= 2 ? macdHist[macdHist.length - 2] : 0;
-  var cross =
-    macdLine > signal && prev <= signal
-      ? 'bull'
-      : macdLine < signal && prev >= signal
-        ? 'bear'
-        : 'none';
-  return { h: macdLine, signal: signal, cross: cross };
+  var dense = macd.filter(function (x) {
+    return x != null;
+  });
+  var curMacd = dense.length ? dense[dense.length - 1] : 0;
+  /* Need at least 9 MACD samples to seed the signal EMA, plus one
+     more to read prev/curr signal for cross detection. */
+  if (dense.length < 10) {
+    return { h: curMacd, signal: curMacd, cross: 'none' };
+  }
+  var sig = emaSeries(dense, 9);
+  var curSig = sig[sig.length - 1];
+  var prevSig = sig[sig.length - 2];
+  var prevMacd = dense[dense.length - 2];
+  var cross = 'none';
+  if (curSig != null && prevSig != null) {
+    if (curMacd > curSig && prevMacd <= prevSig) cross = 'bull';
+    else if (curMacd < curSig && prevMacd >= prevSig) cross = 'bear';
+  }
+  return { h: curMacd, signal: curSig, cross: cross };
+}
+
+/* Canonical EMA as a series — one value per input bar once the
+   seed window is full. Seeds with the SMA of the first `period`
+   values (TradingView convention), then applies the EMA recurrence.
+   Entries before the seed are null, so callers can keep the index
+   aligned with the input prices. */
+function emaSeries(data, period) {
+  if (!data || data.length < period) return [];
+  var out = new Array(data.length).fill(null);
+  var sum = 0;
+  for (var i = 0; i < period; i++) sum += data[i];
+  out[period - 1] = sum / period;
+  var k = 2 / (period + 1);
+  for (var j = period; j < data.length; j++) {
+    out[j] = (data[j] - out[j - 1]) * k + out[j - 1];
+  }
+  return out;
 }
 
 /* Exponential moving average over `period` values.

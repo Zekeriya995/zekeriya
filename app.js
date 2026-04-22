@@ -3753,8 +3753,27 @@ var RPT_COINS=[{s:'BTC',ic:'\u20bf',col:'#f7931a'},{s:'ETH',ic:'\u039e',col:'#62
 var reportHistory=safeGetJSON('nxRptHist',[]);
 var prevReport=safeGetJSON('nxPrevRpt',null);
 var hourlyLog=safeGetJSON('nxHrLog',[]);
-var FOMC_DATES=['2026-01-28','2026-03-18','2026-05-06','2026-06-17','2026-07-29','2026-09-16','2026-11-04','2026-12-16'];
-var CPI_DATES=['2026-01-14','2026-02-12','2026-03-11','2026-04-10','2026-05-13','2026-06-10','2026-07-15','2026-08-12','2026-09-11','2026-10-14','2026-11-12','2026-12-10'];
+/* Macro calendar — used by getUpcomingEvents() to surface macro
+   catalysts in the 7-day horizon. Hardcoded because the platform
+   has no feed for these; extend through 2028 so Section 6 keeps
+   showing events past Dec 2026. Dates for 2027+ are TENTATIVE —
+   replace with the Fed's and BLS's official calendars when they
+   publish (typically ~6 months ahead). A follow-up PR can move
+   this to a remote feed. */
+var FOMC_DATES=[
+  '2026-01-28','2026-03-18','2026-05-06','2026-06-17','2026-07-29','2026-09-16','2026-11-04','2026-12-16',
+  /* 2027 — TENTATIVE, typical third-Wednesday pattern */
+  '2027-01-27','2027-03-17','2027-05-05','2027-06-16','2027-07-28','2027-09-22','2027-11-03','2027-12-15',
+  /* 2028 — TENTATIVE */
+  '2028-01-26','2028-03-15','2028-05-03','2028-06-14','2028-07-26','2028-09-20','2028-11-08','2028-12-13'
+];
+var CPI_DATES=[
+  '2026-01-14','2026-02-12','2026-03-11','2026-04-10','2026-05-13','2026-06-10','2026-07-15','2026-08-12','2026-09-11','2026-10-14','2026-11-12','2026-12-10',
+  /* 2027 — TENTATIVE, typical second-week release */
+  '2027-01-13','2027-02-10','2027-03-10','2027-04-13','2027-05-12','2027-06-10','2027-07-14','2027-08-11','2027-09-14','2027-10-13','2027-11-10','2027-12-09',
+  /* 2028 — TENTATIVE */
+  '2028-01-12','2028-02-10','2028-03-14','2028-04-12','2028-05-10','2028-06-13','2028-07-12','2028-08-10','2028-09-13','2028-10-12','2028-11-09','2028-12-12'
+];
 var TOKEN_UNLOCKS=[];
 var CANDLE_NAMES={
   ar:{bull_engulf:'\u0627\u0628\u062a\u0644\u0627\u0639 \u0634\u0631\u0627\u0626\u064a',bear_engulf:'\u0627\u0628\u062a\u0644\u0627\u0639 \u0628\u064a\u0639\u064a',hammer:'\u0645\u0637\u0631\u0642\u0629 (Hammer)',shooting:'\u0634\u0647\u0627\u0628 (Shooting Star)',doji:'Doji \u2014 \u062a\u0631\u062f\u062f',marubozu_up:'Marubozu \u0635\u0639\u0648\u062f\u064a',marubozu_dn:'Marubozu \u0647\u0628\u0648\u0637\u064a',normal_up:'\u0634\u0645\u0639\u0629 \u062e\u0636\u0631\u0627\u0621',normal_dn:'\u0634\u0645\u0639\u0629 \u062d\u0645\u0631\u0627\u0621'},

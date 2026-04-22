@@ -4095,7 +4095,11 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<div class="mkt-hero-price" style="direction:ltr">'+rP(data.price)+'</div>';
   h+='<div class="mkt-hero-ch" style="color:'+(data.ch.h24>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.ch.h24>=0?'+':'')+data.ch.h24.toFixed(1)+'% (24h)</div>';
   h+='<div class="mkt-hero-meta">'+(isAr?'الاتجاه: ':'Direction: ')+data.dIc+' '+data.dir+' · '+(isAr?'التقييم: ':'Score: ')+data.sc+'/10</div>';
-  h+='<div class="mkt-hero-meta">'+(isAr?'آخر تحديث: ':'Updated: ')+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'})+'</div>';
+  /* Baked-in "Updated: HH:MM" was removed — the freshness badge
+     rendered by renderMktFresh() above the hero already shows the
+     cache age, using the actual cache timestamp at display time.
+     Keeping a second Date.now() call inside the cached chart body
+     reintroduced the same lie-when-stale bug fixed in PR #5. */
   /* Smart Money mini-bar: count bullish smart signals */
   var smartBull=0,smartTotal=0;
   if(data.topTraders){smartTotal++;if(data.topTraders.long>0.55)smartBull++}

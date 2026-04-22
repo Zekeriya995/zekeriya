@@ -3839,16 +3839,40 @@ function getUpcomingEvents(){var evs=[];var now=new Date();var in7=new Date(now.
 
 function getAccuracy(){var r=reportHistory.slice(-20);if(r.length<5)return null;var c=r.filter(function(x){return x.correct}).length;return{pct:Math.round(c/r.length*100),c:c,t:r.length}}
 
+/* Classify a candle by open/high/low/close using body-to-range and
+   wick-to-range ratios. Thresholds are conservative-classical values
+   that most intro-TA references (Bulkowski, Nison) cluster around;
+   they are not calibrated against historical Bitcoin data and tend
+   to err on the side of reporting 'normal_up/dn' when a pattern is
+   ambiguous rather than mis-classifying. See the inline notes on
+   each branch if you're tempted to tweak.
+
+   Range-based ratios (body / range, wick / range) are scale- and
+   volatility-free so the same thresholds work across BTC at $40k
+   and an altcoin at $0.0001. */
 function detectCandlePattern(o,h,l,c){
   var body=Math.abs(c-o);var range=h-l;
-  if(range===0)return'doji';var bodyPct=body/range;
+  /* Degenerate: open == high == low == close. Report as doji. */
+  if(range===0)return'doji';
+  var bodyPct=body/range;
   var upperWick=c>o?(h-c)/range:(h-o)/range;
   var lowerWick=c>o?(o-l)/range:(c-l)/range;
+  /* Doji — body is less than 10% of the full range. Indecision
+     candle; direction of the tiny body is ignored. */
   if(bodyPct<0.1)return'doji';
+  /* Marubozu — body occupies 80%+ of the range (next to no wicks).
+     Strong momentum candle in the body's direction. */
   if(bodyPct>0.8&&c>o)return'marubozu_up';
   if(bodyPct>0.8&&c<o)return'marubozu_dn';
+  /* Hammer — long lower wick (>60% of range), near-zero upper wick
+     (<10%), and a bullish body. Rejection of lower prices. */
   if(lowerWick>0.6&&upperWick<0.1&&c>o)return'hammer';
+  /* Shooting star — the mirror of hammer: long upper wick, tiny
+     lower wick, bearish body. Rejection of higher prices. */
   if(upperWick>0.6&&lowerWick<0.1&&c<o)return'shooting';
+  /* Anything that didn't match a named pattern falls through as a
+     directional candle — no special significance, just colored by
+     close vs open. */
   return c>o?'normal_up':'normal_dn';
 }
 
@@ -3859,13 +3883,22 @@ function rP(p){
   return'$'+(+p.toFixed(4));
 }
 
+/* Signature block appended at the bottom of every market chart.
+   Output depends only on the current language, so memoize by lang
+   instead of rebuilding the same string on every buildChartHTML
+   call. invalidateMarketCaches() doesn't need to clear this — the
+   memo is keyed by lang itself, so the second language naturally
+   gets its own entry. */
+var _mktSigMemo={};
 function mktSignature(){
-  return'<div class="mkt-signature">'
+  if(_mktSigMemo[lang])return _mktSigMemo[lang];
+  _mktSigMemo[lang]='<div class="mkt-signature">'
     +'<div class="mkt-sig-name">'+(lang==='ar'?'تحليل فني من NEXUS PRO':'NEXUS PRO Technical Analysis')+'</div>'
     +'<div class="mkt-sig-note">'+(lang==='ar'
       ?'⚠️ ملاحظة: هذه مؤشرات فنية للاطلاع فقط — احتمال أي خبر كبير يقلب التحليل عكس النتائج.'
       :'⚠️ Note: Technical indicators for informational purposes only — major news may reverse the analysis.')+'</div>'
     +'</div>';
+  return _mktSigMemo[lang];
 }
 
 function buildStory(coin,data){
@@ -4131,8 +4164,8 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   var heroBdr=data.ts>=2?'rgba(0,255,136,.08)':data.ts<=-2?'rgba(255,56,96,.08)':'rgba(255,184,0,.08)';
   h+='<div class="mkt-hero" style="background:'+heroBg+';border:1px solid '+heroBdr+'">';
   h+='<div style="font-size:32px;color:'+coinColor+'">'+coinIcon+'</div>';
-  h+='<div style="font-size:14px;font-weight:800;color:var(--t0);margin:4px 0">'+cn+' <span style="color:var(--t2);font-size:12px">'+sym+'/USDT</span></div>';
-  h+='<div class="mkt-hero-price" style="direction:ltr">'+rP(data.price)+'</div>';
+  h+='<h2 class="mkt-hero-title" style="font-size:14px;font-weight:800;color:var(--t0);margin:4px 0">'+cn+' <span style="color:var(--t2);font-size:12px">'+sym+'/USDT</span></h2>';
+  h+='<div class="mkt-hero-price" dir="ltr">'+rP(data.price)+'</div>';
   h+='<div class="mkt-hero-ch" style="color:'+(data.ch.h24>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.ch.h24>=0?'+':'')+data.ch.h24.toFixed(1)+'% (24h)</div>';
   h+='<div class="mkt-hero-meta">'+(isAr?'الاتجاه: ':'Direction: ')+data.dIc+' '+data.dir+' · '+(isAr?'التقييم: ':'Score: ')+data.sc+'/10</div>';
   /* Baked-in "Updated: HH:MM" was removed — the freshness badge
@@ -4186,7 +4219,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     });
     svg+='<circle cx="'+(svgW-16)+'" cy="'+yScale(data.price)+'" r="3" fill="'+coinColor+'"/>';
     svg+='</svg>';
-    h+='<div class="mkt-section"><div class="mkt-section-t">📈 2. '+(isAr?'الرسم البياني 4H — آخر 24 شمعة':'Chart 4H — Last 24 candles')+'</div>';
+    h+='<div class="mkt-section"><h3 class="mkt-section-t">📈 2. '+(isAr?'الرسم البياني 4H — آخر 24 شمعة':'Chart 4H — Last 24 candles')+'</h3>';
     h+=svg;
     h+='<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--t3);margin-top:2px;direction:ltr"><span style="color:var(--dn)">▬ R: '+rP(data.resist)+'</span><span style="color:var(--warn)">▬ EMA20</span><span style="color:var(--up)">▬ S: '+rP(data.supp)+'</span>';
     if(data.fvgs&&data.fvgs.length)h+='<span style="color:var(--blue)">░ FVG</span>';
@@ -4194,7 +4227,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   }
 
   /* ════════ SECTION 3: Timeframe Closings (Enhanced) ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">🕐 3. '+(isAr?'إغلاقات الشموع — تفصيل لكل فريم':'Candle Closings — Per-frame detail')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">🕐 3. '+(isAr?'إغلاقات الشموع — تفصيل لكل فريم':'Candle Closings — Per-frame detail')+'</h3>';
   var frames=[];
   if(data.kl1h&&data.kl1h.length>=2){var k1=data.kl1h[data.kl1h.length-1];frames.push({tf:'1H',o:+k1[1],h:+k1[2],l:+k1[3],c:+k1[4],v:+k1[5],rsi:data.rsi,macd:data.macd,tfDir:data.tf.h1});}
   if(data.kl4h&&data.kl4h.length>=2){var k2=data.kl4h[data.kl4h.length-1];frames.push({tf:'4H',o:+k2[1],h:+k2[2],l:+k2[3],c:+k2[4],v:+k2[5],rsi:data.rsi,macd:data.macd,tfDir:data.tf.h4});}
@@ -4227,7 +4260,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     box+='<div style="font-size:10px;color:var(--t1);line-height:1.7;margin:4px 0">'+meaning+'</div>';
     /* Price data */
     box+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'افتتاح':'Open')+' → '+(isAr?'إغلاق':'Close')+'</span><span class="mkt-row-val" style="direction:ltr;color:'+dirCol+'">'+rP(f.o)+' → '+rP(f.c)+'</span></div>';
-    box+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'أعلى':'High')+' / '+(isAr?'أدنى':'Low')+'</span><span class="mkt-row-val" style="direction:ltr">'+rP(f.h)+' / '+rP(f.l)+'</span></div>';
+    box+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'أعلى':'High')+' / '+(isAr?'أدنى':'Low')+'</span><span class="mkt-row-val" dir="ltr">'+rP(f.h)+' / '+rP(f.l)+'</span></div>';
     /* RSI + MACD for this timeframe */
     if(f.rsi){
       var rsiState=f.rsi>70?(isAr?'تشبع شرائي':'overbought'):f.rsi<30?(isAr?'تشبع بيعي':'oversold'):(isAr?'صحي':'healthy');
@@ -4250,7 +4283,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='</div>';
 
   /* ════════ SECTION 4: Market Structure (SMC) ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">🏗️ 4. '+(isAr?'هيكل السوق (SMC)':'Market Structure (SMC)')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">🏗️ 4. '+(isAr?'هيكل السوق (SMC)':'Market Structure (SMC)')+'</h3>';
   var stCol=data.struct==='HH/HL'?'var(--up)':data.struct==='LH/LL'?'var(--dn)':'var(--warn)';
   var stLabel=data.struct==='HH/HL'?(isAr?'قمم أعلى + قيعان أعلى — هيكل صعودي كلاسيكي':'Higher Highs + Higher Lows — classic bullish structure'):data.struct==='LH/LL'?(isAr?'قمم أدنى + قيعان أدنى — هيكل هبوطي':'Lower Highs + Lower Lows — bearish structure'):data.struct==='Range'?(isAr?'نطاق جانبي — تجميع أو توزيع':'Range — accumulation or distribution'):(isAr?'غير واضح':'Unclear');
   h+='<div class="mkt-box">';
@@ -4261,7 +4294,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='</div></div>';
 
   /* ════════ SECTION 5: FVG + Order Blocks (merged) ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">📦 5. '+(isAr?'فجوات القيمة (FVG) + Order Blocks':'Fair Value Gaps + Order Blocks')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">📦 5. '+(isAr?'فجوات القيمة (FVG) + Order Blocks':'Fair Value Gaps + Order Blocks')+'</h3>';
   if(data.orderBlocks&&data.orderBlocks.length){
     h+='<div class="mkt-box"><div class="mkt-box-t">'+(isAr?'Order Blocks — مناطق سيولة مؤسسية':'Order Blocks — institutional liquidity zones')+'</div>';
     data.orderBlocks.forEach(function(ob){
@@ -4288,7 +4321,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='</div>';
 
   /* ════════ SECTION 6: Key Levels Map ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">🗺️ 6. '+(isAr?'المستويات الرئيسية':'Key Levels')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">🗺️ 6. '+(isAr?'المستويات الرئيسية':'Key Levels')+'</h3>';
   h+='<div class="mkt-box">';
   var levels=[];
   levels.push({tag:'R2',label:isAr?'مقاومة رئيسية':'Major Resistance',price:data.f100U,col:'var(--dn)'});
@@ -4307,7 +4340,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='</div></div>';
 
   /* ════════ SECTION 7: Technical Indicators ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">📊 7. '+(isAr?'المؤشرات الفنية':'Technical Indicators')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">📊 7. '+(isAr?'المؤشرات الفنية':'Technical Indicators')+'</h3>';
   h+='<div class="mkt-box"><div class="mkt-box-t">'+(isAr?'فريم 4H':'4H Frame')+'</div>';
   var rsiCol=data.rsi<30?'var(--up)':data.rsi>70?'var(--dn)':'var(--t0)';
   var rsiLabel=data.rsi<30?(isAr?'منطقة شراء':'Oversold'):data.rsi>70?(isAr?'منطقة بيع':'Overbought'):data.rsi>=40&&data.rsi<=60?(isAr?'صحي':'Healthy'):(isAr?'مقبول':'Normal');
@@ -4327,7 +4360,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     var frLabel=data.fr.rate<0?(isAr?'سلبي = فرصة':'Negative = Opportunity'):data.fr.rate>0.05?(isAr?'عالي = خطر':'High = Risk'):(isAr?'طبيعي':'Normal');
     h+='<div class="mkt-row"><span class="mkt-row-label">Funding Rate</span><span class="mkt-row-val" style="direction:ltr;color:'+frCol+'">'+(data.fr.rate>=0?'+':'')+data.fr.rate.toFixed(4)+'% — '+frLabel+'</span></div>';
   }
-  if(data.oi)h+='<div class="mkt-row"><span class="mkt-row-label">Open Interest</span><span class="mkt-row-val" style="direction:ltr">'+fmt(data.oi)+'</span></div>';
+  if(data.oi)h+='<div class="mkt-row"><span class="mkt-row-label">Open Interest</span><span class="mkt-row-val" dir="ltr">'+fmt(data.oi)+'</span></div>';
   if(data.oiHist)h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'تغير OI 24س':'OI 24h change')+'</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.oiHist.growth>0?'var(--up)':'var(--dn)')+'">'+(data.oiHist.growth>=0?'+':'')+data.oiHist.growth.toFixed(1)+'%</span></div>';
   if(data.ls)h+='<div class="mkt-row"><span class="mkt-row-label">Long/Short</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.ls.ratio>1.5?'var(--dn)':data.ls.ratio<0.8?'var(--up)':'var(--t0)')+'">'+data.ls.ratio.toFixed(2)+' (L:'+data.ls.long.toFixed(0)+'% S:'+data.ls.short.toFixed(0)+'%)</span></div>';
   if(typeof bookTickers!=='undefined'&&bookTickers[sym]){var spd=bookTickers[sym];
@@ -4336,7 +4369,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='</div></div>';
 
   /* ════════ SECTION 8: Whale Intelligence (Enhanced) ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">🐋 8. '+(isAr?'استخبارات الحيتان':'Whale Intelligence')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">🐋 8. '+(isAr?'استخبارات الحيتان':'Whale Intelligence')+'</h3>';
   h+='<div class="mkt-box">';
   h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'ثقة الحيتان':'Whale Confidence')+'</span><span class="mkt-row-val" style="color:'+(data.wConf>=50?'var(--up)':data.wConf>=30?'var(--warn)':'var(--t3)')+'">'+data.wConf+'%</span></div>';
   var wwL=typeof whaleWaves!=='undefined'?whaleWaves[sym]:null;
@@ -4376,7 +4409,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='</div></div>';
 
   /* ════════ SECTION 9: Smart Money Dashboard (NEW) ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">🧠 9. '+(isAr?'لوحة ذكاء المال':'Smart Money Dashboard')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">🧠 9. '+(isAr?'لوحة ذكاء المال':'Smart Money Dashboard')+'</h3>';
   h+='<div class="mkt-box">';
   var smartItems=[],smartBullCount=0,smartTotalCount=0;
   if(data.topTraders){smartTotalCount++;var ttBull=data.topTraders.long>0.55;if(ttBull)smartBullCount++;
@@ -4414,7 +4447,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='</div></div>';
 
   /* ════════ SECTION 10: FR Multi-Exchange (NEW) ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">🔮 10. '+(isAr?'معدلات التمويل — مقارنة متعددة المنصات':'FR — Multi-Exchange Comparison')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">🔮 10. '+(isAr?'معدلات التمويل — مقارنة متعددة المنصات':'FR — Multi-Exchange Comparison')+'</h3>';
   h+='<div class="mkt-box">';
   var frSources=[];
   if(data.fr)frSources.push({n:'Binance',r:data.fr.rate});
@@ -4446,7 +4479,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='</div></div>';
 
   /* ════════ SECTION 11: Liquidation Zones (NEW) ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">💥 11. '+(isAr?'مناطق التصفية — مغناطيس السعر':'Liquidation Zones — Price Magnets')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">💥 11. '+(isAr?'مناطق التصفية — مغناطيس السعر':'Liquidation Zones — Price Magnets')+'</h3>';
   h+='<div class="mkt-box">';
   var longLiq=0,shortLiq=0;
   if(data.liqZones&&data.liqZones.length){
@@ -4480,7 +4513,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='</div></div>';
 
   /* ════════ SECTION 12: BTC↔ETH Correlation (NEW) ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">🔗 12. '+(isAr?'العلاقة BTC ↔ ETH':'BTC ↔ ETH Correlation')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">🔗 12. '+(isAr?'العلاقة BTC ↔ ETH':'BTC ↔ ETH Correlation')+'</h3>';
   h+='<div class="mkt-box">';
   if(data.btcChange!==null&&data.ethChange!==null){
     h+='<div class="mkt-row"><span class="mkt-row-label">BTC 24h</span><span class="mkt-row-val" style="color:'+(data.btcChange>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.btcChange>=0?'+':'')+data.btcChange.toFixed(2)+'%</span></div>';
@@ -4536,7 +4569,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'هيمنة BTC':'BTC Dominance')+'</span><span class="mkt-row-val" style="font-family:var(--fm);color:var(--t3)">—</span></div>';
   }
   if(data.ethBtcRatio){
-    h+='<div class="mkt-row"><span class="mkt-row-label">ETH/BTC</span><span class="mkt-row-val" style="font-family:var(--fm);direction:ltr">'+data.ethBtcRatio.toFixed(5)+'</span></div>';
+    h+='<div class="mkt-row"><span class="mkt-row-label">ETH/BTC</span><span class="mkt-row-val mkt-num">'+data.ethBtcRatio.toFixed(5)+'</span></div>';
   }
   /* Altseason signal */
   if(data.ethChange!==null&&data.btcChange!==null){
@@ -4549,7 +4582,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='</div></div>';
 
   /* ════════ SECTION 13: Market Context Bar (NEW) ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t">🌍 13. '+(isAr?'سياق السوق':'Market Context')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">🌍 13. '+(isAr?'سياق السوق':'Market Context')+'</h3>';
   h+='<div class="mkt-box" style="padding:10px">';
   var ctxChips='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px">';
   /* Fear & Greed */
@@ -4594,7 +4627,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
      recent highs, lows and Fibonacci extensions. No entry, stop, target
      or R:R — this section used to conflict with the bearish conclusion
      in section 15 by always presenting "buy zones" regardless of trend. */
-  h+='<div class="mkt-section"><div class="mkt-section-t">📍 14. '+(isAr?'المستويات الرئيسية':'Key Levels')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">📍 14. '+(isAr?'المستويات الرئيسية':'Key Levels')+'</h3>';
   var levels=[
     {lbl:'R2',price:data.f100U,col:'var(--dn)',bg:'rgba(255,56,96,.06)',note:isAr?'مقاومة قوية':'Strong resistance'},
     {lbl:'R1',price:data.f618U,col:'var(--dn)',bg:'rgba(255,56,96,.04)',note:isAr?'مقاومة متوسطة':'Medium resistance'},
@@ -4612,7 +4645,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='</div>';
 
   /* ════════ SECTION 15: ختام التحليل (CONCLUSION — AT BOTTOM) ════════ */
-  h+='<div class="mkt-section"><div class="mkt-section-t" style="font-size:14px;color:'+data.dCol+'">📝 15. '+(isAr?'ختام التحليل':'Analysis Conclusion')+'</div>';
+  h+='<div class="mkt-section"><h3 class="mkt-section-t" style="font-size:14px;color:'+data.dCol+'">📝 15. '+(isAr?'ختام التحليل':'Analysis Conclusion')+'</h3>';
   var isBull=data.ts>=2;var isBear=data.ts<=-2;
   /* 1. Verdict */
   h+='<div style="padding:12px;background:'+(isBull?'rgba(0,255,136,.06)':isBear?'rgba(255,56,96,.06)':'rgba(255,184,0,.06)')+';border:1px solid '+(isBull?'rgba(0,255,136,.15)':isBear?'rgba(255,56,96,.15)':'rgba(255,184,0,.15)')+';border-radius:10px;text-align:center;margin-bottom:8px">';
@@ -5495,8 +5528,20 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   setInterval(function(){notifiedSet={};safeSet('nxnot10','{}');tgSent={}},3600000);
   setTimeout(function(){runValidator()},10000);
   setInterval(function(){runValidator()},90000);
-  /* Market chart auto-refresh (moved from module-level) */
+  /* Market chart auto-refresh (moved from module-level).
+     Cadence reasoning:
+     * Poll interval is 60s — the tick's only real cost is a class
+       check and an age comparison on the cache timestamp.
+     * The actual klines fetch is gated by MKT_TTL (30m), so a long
+       session sees at most one API call per symbol per 30m regardless
+       of how many ticks fire.
+     * Only the currently visible tab is refreshed; the idle one
+       waits until the user switches to it (loadBTCChart / loadETHChart
+       then serves from cache if still warm, or refetches).
+     * The visibilityState guard skips ticks while the browser tab
+       is backgrounded — a hidden chart never needs refreshing. */
   setInterval(function(){
+    if(typeof document.visibilityState==='string'&&document.visibilityState==='hidden')return;
     var pgEl=document.getElementById('pg-market');
     if(pgEl&&pgEl.classList.contains('act')){
       if(curMktTab===0&&Date.now()-btcCache.t>=MKT_TTL)loadBTCChart();

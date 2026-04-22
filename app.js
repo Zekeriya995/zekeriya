@@ -4165,7 +4165,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<div class="mkt-hero" style="background:'+heroBg+';border:1px solid '+heroBdr+'">';
   h+='<div style="font-size:32px;color:'+coinColor+'">'+coinIcon+'</div>';
   h+='<h2 class="mkt-hero-title" style="font-size:14px;font-weight:800;color:var(--t0);margin:4px 0">'+cn+' <span style="color:var(--t2);font-size:12px">'+sym+'/USDT</span></h2>';
-  h+='<div class="mkt-hero-price" style="direction:ltr">'+rP(data.price)+'</div>';
+  h+='<div class="mkt-hero-price" dir="ltr">'+rP(data.price)+'</div>';
   h+='<div class="mkt-hero-ch" style="color:'+(data.ch.h24>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.ch.h24>=0?'+':'')+data.ch.h24.toFixed(1)+'% (24h)</div>';
   h+='<div class="mkt-hero-meta">'+(isAr?'الاتجاه: ':'Direction: ')+data.dIc+' '+data.dir+' · '+(isAr?'التقييم: ':'Score: ')+data.sc+'/10</div>';
   /* Baked-in "Updated: HH:MM" was removed — the freshness badge
@@ -4260,7 +4260,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     box+='<div style="font-size:10px;color:var(--t1);line-height:1.7;margin:4px 0">'+meaning+'</div>';
     /* Price data */
     box+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'افتتاح':'Open')+' → '+(isAr?'إغلاق':'Close')+'</span><span class="mkt-row-val" style="direction:ltr;color:'+dirCol+'">'+rP(f.o)+' → '+rP(f.c)+'</span></div>';
-    box+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'أعلى':'High')+' / '+(isAr?'أدنى':'Low')+'</span><span class="mkt-row-val" style="direction:ltr">'+rP(f.h)+' / '+rP(f.l)+'</span></div>';
+    box+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'أعلى':'High')+' / '+(isAr?'أدنى':'Low')+'</span><span class="mkt-row-val" dir="ltr">'+rP(f.h)+' / '+rP(f.l)+'</span></div>';
     /* RSI + MACD for this timeframe */
     if(f.rsi){
       var rsiState=f.rsi>70?(isAr?'تشبع شرائي':'overbought'):f.rsi<30?(isAr?'تشبع بيعي':'oversold'):(isAr?'صحي':'healthy');
@@ -4360,7 +4360,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     var frLabel=data.fr.rate<0?(isAr?'سلبي = فرصة':'Negative = Opportunity'):data.fr.rate>0.05?(isAr?'عالي = خطر':'High = Risk'):(isAr?'طبيعي':'Normal');
     h+='<div class="mkt-row"><span class="mkt-row-label">Funding Rate</span><span class="mkt-row-val" style="direction:ltr;color:'+frCol+'">'+(data.fr.rate>=0?'+':'')+data.fr.rate.toFixed(4)+'% — '+frLabel+'</span></div>';
   }
-  if(data.oi)h+='<div class="mkt-row"><span class="mkt-row-label">Open Interest</span><span class="mkt-row-val" style="direction:ltr">'+fmt(data.oi)+'</span></div>';
+  if(data.oi)h+='<div class="mkt-row"><span class="mkt-row-label">Open Interest</span><span class="mkt-row-val" dir="ltr">'+fmt(data.oi)+'</span></div>';
   if(data.oiHist)h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'تغير OI 24س':'OI 24h change')+'</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.oiHist.growth>0?'var(--up)':'var(--dn)')+'">'+(data.oiHist.growth>=0?'+':'')+data.oiHist.growth.toFixed(1)+'%</span></div>';
   if(data.ls)h+='<div class="mkt-row"><span class="mkt-row-label">Long/Short</span><span class="mkt-row-val" style="direction:ltr;color:'+(data.ls.ratio>1.5?'var(--dn)':data.ls.ratio<0.8?'var(--up)':'var(--t0)')+'">'+data.ls.ratio.toFixed(2)+' (L:'+data.ls.long.toFixed(0)+'% S:'+data.ls.short.toFixed(0)+'%)</span></div>';
   if(typeof bookTickers!=='undefined'&&bookTickers[sym]){var spd=bookTickers[sym];
@@ -4569,7 +4569,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'هيمنة BTC':'BTC Dominance')+'</span><span class="mkt-row-val" style="font-family:var(--fm);color:var(--t3)">—</span></div>';
   }
   if(data.ethBtcRatio){
-    h+='<div class="mkt-row"><span class="mkt-row-label">ETH/BTC</span><span class="mkt-row-val" style="font-family:var(--fm);direction:ltr">'+data.ethBtcRatio.toFixed(5)+'</span></div>';
+    h+='<div class="mkt-row"><span class="mkt-row-label">ETH/BTC</span><span class="mkt-row-val mkt-num">'+data.ethBtcRatio.toFixed(5)+'</span></div>';
   }
   /* Altseason signal */
   if(data.ethChange!==null&&data.btcChange!==null){

@@ -840,9 +840,9 @@ function timeAgo(ts){var d=Date.now()-ts,m=Math.floor(d/60000),h=Math.floor(d/36
 function timeBadge(ts){var a=timeAgo(ts);return'<span class="time-badge '+a.cls+'">⏱ '+a.text+'</span>'}
 /* NOTIFICATION HISTORY */
 /* LANG/THEME/NAV */
-function togLang(){lang=lang==='ar'?'en':'ar';safeSet('nxlang',lang);document.documentElement.lang=lang;document.documentElement.dir=lang==='ar'?'rtl':'ltr';document.body.dataset.lang=lang;var sI=document.getElementById('sInp');if(sI)sI.placeholder=t('search_ph');document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(TR[k])el.textContent=TR[k][lang]});updateMenuLang()}
+function togLang(){lang=lang==='ar'?'en':'ar';safeSet('nxlang',lang);document.documentElement.lang=lang;document.documentElement.dir=lang==='ar'?'rtl':'ltr';document.body.dataset.lang=lang;var sI=document.getElementById('sInp');if(sI)sI.placeholder=t('search_ph');document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(TR[k])el.textContent=TR[k][lang]});updateMenuLang();if(typeof invalidateMarketCaches==='function')invalidateMarketCaches()}
 function togTh(){var d=document.body.dataset.theme==='dark'?'light':'dark';document.body.dataset.theme=d;if(tg){try{tg.setHeaderColor(d==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(d==='dark'?'#020408':'#f0f4f8')}catch(e){}}safeSet('nxt10',d);updateMenuTheme()}
-function setLang(l){lang=l;safeSet('nxlang',lang);document.documentElement.lang=lang;document.documentElement.dir=lang==='ar'?'rtl':'ltr';document.body.dataset.lang=lang;var sI=document.getElementById('sInp');if(sI)sI.placeholder=t('search_ph');document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(TR[k])el.textContent=TR[k][lang]});updateMenuLang()}
+function setLang(l){lang=l;safeSet('nxlang',lang);document.documentElement.lang=lang;document.documentElement.dir=lang==='ar'?'rtl':'ltr';document.body.dataset.lang=lang;var sI=document.getElementById('sInp');if(sI)sI.placeholder=t('search_ph');document.querySelectorAll('[data-t]').forEach(function(el){var k=el.dataset.t;if(TR[k])el.textContent=TR[k][lang]});updateMenuLang();if(typeof invalidateMarketCaches==='function')invalidateMarketCaches()}
 function setTheme(d){document.body.dataset.theme=d;if(tg){try{tg.setHeaderColor(d==='dark'?'#060b14':'#f7f9fc');tg.setBackgroundColor(d==='dark'?'#020408':'#f0f4f8')}catch(e){}}safeSet('nxt10',d);updateMenuTheme()}
 /* SIDEBAR MENU */
 function toggleMenu(){var sm=document.getElementById('sideMenu');var so=document.getElementById('sideOverlay');if(!sm||!so)return;sm.classList.toggle('open');so.classList.toggle('open')}
@@ -3749,6 +3749,24 @@ var MKT_TTL=30*60*1000;
    same window as the chart cache (MKT_TTL) since they come from the
    same underlying request. */
 var mktKlDailyCache={BTC:null,ETH:null};
+/* Parallel timestamp map so Section 12's correlation can tell the
+   difference between 'cached five minutes ago' and 'cached eight
+   hours ago during a long session'. Consumers treat closes older
+   than MKT_TTL as absent. */
+var mktKlDailyCacheTime={BTC:0,ETH:0};
+
+/* Clear every Market-section cache at once. Used on language switch
+   so the cached (language-specific) chart HTML gets rebuilt, and
+   also available as a single hook for future cache invalidators.
+   Guarded because the function is hoisted but the cache objects
+   are var declarations — the language-boot pass in setLang() runs
+   at startup before those assignments land. */
+function invalidateMarketCaches(){
+  if(typeof btcCache==='object'&&btcCache){btcCache.h=null;btcCache.t=0;}
+  if(typeof ethCache==='object'&&ethCache){ethCache.h=null;ethCache.t=0;}
+  if(typeof mktKlDailyCache==='object'&&mktKlDailyCache){mktKlDailyCache.BTC=null;mktKlDailyCache.ETH=null;}
+  if(typeof mktKlDailyCacheTime==='object'&&mktKlDailyCacheTime){mktKlDailyCacheTime.BTC=0;mktKlDailyCacheTime.ETH=0;}
+}
 var RPT_COINS=[{s:'BTC',ic:'\u20bf',col:'#f7931a'},{s:'ETH',ic:'\u039e',col:'#627eea'},{s:'SOL',ic:'\u25ce',col:'#9945ff'},{s:'BNB',ic:'\u2b21',col:'#f0b90b'},{s:'XRP',ic:'\u2715',col:'#0085c0'}];
 var reportHistory=safeGetJSON('nxRptHist',[]);
 var prevReport=safeGetJSON('nxPrevRpt',null);
@@ -3889,7 +3907,10 @@ async function analyzeCoinRpt(sym){
   /* Cache the daily closes so section 12 can correlate BTC and ETH
      without issuing a second klines request. Only the two tabs we
      render charts for are cached — anything else is ignored. */
-  if(sym==='BTC'||sym==='ETH')mktKlDailyCache[sym]=c1d;
+  if(sym==='BTC'||sym==='ETH'){
+    mktKlDailyCache[sym]=c1d;
+    mktKlDailyCacheTime[sym]=Date.now();
+  }
   var price=c4[c4.length-1];var rsi=calcRSI(c4);var rsi1d=calcRSI(c1d);var macd=calcMACD(c4);var macd1d=calcMACD(c1d);var ema20=calcEMA(c4,20);var ema50=calcEMA(c4,50);
   var avgVol=v4.slice(-10,-2).reduce(function(a,b){return a+b},0)/Math.max(1,v4.slice(-10,-2).length);var recVol=(v4[v4.length-1]+(v4[v4.length-2]||0))/2;var volT=avgVol>0?recVol/avgVol:1;
   var resist=Math.max.apply(null,h1d.length>=14?h1d.slice(-14):h4.slice(-20));var supp=Math.min.apply(null,l1d.length>=14?l1d.slice(-14):l4.slice(-20));
@@ -4471,7 +4492,12 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
        closes cached from prior analyzeCoinRpt runs; if the user
        opened ETH first without loading BTC, the mirror series won't
        be in cache yet and we render a neutral placeholder. */
-    var btcDaily=mktKlDailyCache.BTC,ethDaily=mktKlDailyCache.ETH;
+    /* Honor the same MKT_TTL window as the chart cache — a daily
+       closes series older than that is no longer representative and
+       we'd rather show '—' than a stale coefficient. */
+    var _mktNow=Date.now();
+    var btcDaily=_mktNow-mktKlDailyCacheTime.BTC<MKT_TTL?mktKlDailyCache.BTC:null;
+    var ethDaily=_mktNow-mktKlDailyCacheTime.ETH<MKT_TTL?mktKlDailyCache.ETH:null;
     var corrTxt,corrLabel,corrColor='var(--t1)';
     if(btcDaily&&ethDaily&&btcDaily.length>=2&&ethDaily.length>=2){
       var n=Math.min(btcDaily.length,ethDaily.length);

@@ -4498,7 +4498,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     var _mktNow=Date.now();
     var btcDaily=_mktNow-mktKlDailyCacheTime.BTC<MKT_TTL?mktKlDailyCache.BTC:null;
     var ethDaily=_mktNow-mktKlDailyCacheTime.ETH<MKT_TTL?mktKlDailyCache.ETH:null;
-    var corrTxt,corrLabel,corrColor='var(--t1)';
+    var corrTxt,corrLabel,corrColor='var(--t1)',corrN=0;
     if(btcDaily&&ethDaily&&btcDaily.length>=2&&ethDaily.length>=2){
       var n=Math.min(btcDaily.length,ethDaily.length);
       var btcRet=[],ethRet=[];
@@ -4508,6 +4508,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
       for(var rj=ethDaily.length-n+1;rj<ethDaily.length;rj++){
         if(ethDaily[rj-1]>0)ethRet.push((ethDaily[rj]-ethDaily[rj-1])/ethDaily[rj-1]);
       }
+      corrN=Math.min(btcRet.length,ethRet.length);
       var corr=calcPearson(btcRet,ethRet);
       if(corr==null){
         corrTxt='—';corrLabel=isAr?'غير متاح':'Not available';corrColor='var(--t3)';
@@ -4522,7 +4523,11 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     }else{
       corrTxt='—';corrLabel=isAr?'غير متاح':'Not available';corrColor='var(--t3)';
     }
-    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'الارتباط (عوائد يومية)':'Correlation (daily returns)')+'</span><span class="mkt-row-val" style="font-family:var(--fm);color:'+corrColor+';direction:ltr">'+corrTxt+' — '+corrLabel+'</span></div>';
+    /* Append the sample count so the user can gauge statistical
+       confidence — a correlation over 5 bars is very different from
+       one over 29. Omitted when corrN is 0 (data unavailable). */
+    var corrNStr=corrN>0?' (N='+corrN+')':'';
+    h+='<div class="mkt-row"><span class="mkt-row-label">'+(isAr?'الارتباط (عوائد يومية)':'Correlation (daily returns)')+'</span><span class="mkt-row-val" style="font-family:var(--fm);color:'+corrColor+';direction:ltr">'+corrTxt+' — '+corrLabel+corrNStr+'</span></div>';
   }
   if(btcDom!=null){
     var domTrend=btcDom>55?'↑':btcDom<50?'↓':'→';

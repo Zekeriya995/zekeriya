@@ -4713,6 +4713,15 @@ function renderMktFresh(cacheTime){
    leaving the UI with older data on top of newer data. */
 var btcLoading=false,ethLoading=false;
 
+/* Named refresh handler — reached by delegated click on any
+   .rfr[data-mktrefresh] element rather than an inline onclick.
+   Inline handlers require 'unsafe-inline' in script-src, which
+   we'd like to tighten in a later PR. */
+function refreshMktChart(sym){
+  if(sym==='BTC'){btcCache.t=0;loadBTCChart();}
+  else if(sym==='ETH'){ethCache.t=0;loadETHChart();}
+}
+
 /* ═══ loadBTCChart ═══ */
 async function loadBTCChart(){
   var el=document.getElementById('mktBTC');
@@ -4727,12 +4736,12 @@ async function loadBTCChart(){
     var data=await analyzeCoinRpt('BTC');
     if(!data){if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u0644\u0627 \u0628\u064a\u0627\u0646\u0627\u062a':'No data')+'</div></div>';return}
     var body=buildChartHTML(data,'#f7931a','\u20bf',{ar:'\u0627\u0644\u0628\u064a\u062a\u0643\u0648\u064a\u0646',en:'Bitcoin'});
-    body+='<button class="rfr" onclick="btcCache.t=0;loadBTCChart()">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
+    body+='<button class="rfr" data-mktrefresh="BTC">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
     btcCache.h=body;
     btcCache.t=Date.now();
     if(el)el.innerHTML=renderMktFresh(btcCache.t)+body;
   }catch(e){
-    if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u062e\u0637\u0623 \u2014 \u062d\u0627\u0648\u0644 \u0644\u0627\u062d\u0642\u0627\u064b':'Error \u2014 try later')+'</div></div><button class="rfr" onclick="btcCache.t=0;loadBTCChart()">\u{1F504}</button>';
+    if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u062e\u0637\u0623 \u2014 \u062d\u0627\u0648\u0644 \u0644\u0627\u062d\u0642\u0627\u064b':'Error \u2014 try later')+'</div></div><button class="rfr" data-mktrefresh="BTC">\u{1F504}</button>';
   }finally{
     btcLoading=false;
   }
@@ -4752,12 +4761,12 @@ async function loadETHChart(){
     var data=await analyzeCoinRpt('ETH');
     if(!data){if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u0644\u0627 \u0628\u064a\u0627\u0646\u0627\u062a':'No data')+'</div></div>';return}
     var body=buildChartHTML(data,'#627eea','\u039e',{ar:'\u0627\u0644\u0625\u064a\u062b\u064a\u0631\u064a\u0648\u0645',en:'Ethereum'});
-    body+='<button class="rfr" onclick="ethCache.t=0;loadETHChart()">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
+    body+='<button class="rfr" data-mktrefresh="ETH">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
     ethCache.h=body;
     ethCache.t=Date.now();
     if(el)el.innerHTML=renderMktFresh(ethCache.t)+body;
   }catch(e){
-    if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u062e\u0637\u0623 \u2014 \u062d\u0627\u0648\u0644 \u0644\u0627\u062d\u0642\u0627\u064b':'Error \u2014 try later')+'</div></div><button class="rfr" onclick="ethCache.t=0;loadETHChart()">\u{1F504}</button>';
+    if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u062e\u0637\u0623 \u2014 \u062d\u0627\u0648\u0644 \u0644\u0627\u062d\u0642\u0627\u064b':'Error \u2014 try later')+'</div></div><button class="rfr" data-mktrefresh="ETH">\u{1F504}</button>';
   }finally{
     ethLoading=false;
   }
@@ -5448,6 +5457,19 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
       else if(curMktTab===1&&Date.now()-ethCache.t>=MKT_TTL)loadETHChart();
     }
   },60000);
+  /* Delegated click handler for Market section refresh buttons.
+     The buttons carry data-mktrefresh="BTC"|"ETH" (added as part
+     of the CSP-friendly refactor away from inline onclicks). A
+     single listener on the market page survives every innerHTML
+     re-render of its children. */
+  var mktPgEl=document.getElementById('pg-market');
+  if(mktPgEl){
+    mktPgEl.addEventListener('click',function(ev){
+      var btn=ev.target&&ev.target.closest?ev.target.closest('[data-mktrefresh]'):null;
+      if(!btn)return;
+      refreshMktChart(btn.getAttribute('data-mktrefresh'));
+    });
+  }
   // === MONITOR: Weekly auto-tune / auto-improve check ===
   try {
     var weekMs = 7 * 24 * 3600000;

@@ -3839,16 +3839,40 @@ function getUpcomingEvents(){var evs=[];var now=new Date();var in7=new Date(now.
 
 function getAccuracy(){var r=reportHistory.slice(-20);if(r.length<5)return null;var c=r.filter(function(x){return x.correct}).length;return{pct:Math.round(c/r.length*100),c:c,t:r.length}}
 
+/* Classify a candle by open/high/low/close using body-to-range and
+   wick-to-range ratios. Thresholds are conservative-classical values
+   that most intro-TA references (Bulkowski, Nison) cluster around;
+   they are not calibrated against historical Bitcoin data and tend
+   to err on the side of reporting 'normal_up/dn' when a pattern is
+   ambiguous rather than mis-classifying. See the inline notes on
+   each branch if you're tempted to tweak.
+
+   Range-based ratios (body / range, wick / range) are scale- and
+   volatility-free so the same thresholds work across BTC at $40k
+   and an altcoin at $0.0001. */
 function detectCandlePattern(o,h,l,c){
   var body=Math.abs(c-o);var range=h-l;
-  if(range===0)return'doji';var bodyPct=body/range;
+  /* Degenerate: open == high == low == close. Report as doji. */
+  if(range===0)return'doji';
+  var bodyPct=body/range;
   var upperWick=c>o?(h-c)/range:(h-o)/range;
   var lowerWick=c>o?(o-l)/range:(c-l)/range;
+  /* Doji — body is less than 10% of the full range. Indecision
+     candle; direction of the tiny body is ignored. */
   if(bodyPct<0.1)return'doji';
+  /* Marubozu — body occupies 80%+ of the range (next to no wicks).
+     Strong momentum candle in the body's direction. */
   if(bodyPct>0.8&&c>o)return'marubozu_up';
   if(bodyPct>0.8&&c<o)return'marubozu_dn';
+  /* Hammer — long lower wick (>60% of range), near-zero upper wick
+     (<10%), and a bullish body. Rejection of lower prices. */
   if(lowerWick>0.6&&upperWick<0.1&&c>o)return'hammer';
+  /* Shooting star — the mirror of hammer: long upper wick, tiny
+     lower wick, bearish body. Rejection of higher prices. */
   if(upperWick>0.6&&lowerWick<0.1&&c<o)return'shooting';
+  /* Anything that didn't match a named pattern falls through as a
+     directional candle — no special significance, just colored by
+     close vs open. */
   return c>o?'normal_up':'normal_dn';
 }
 

@@ -4226,13 +4226,24 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
     h+='</div></div>';
   }
 
-  /* ════════ SECTION 3: Timeframe Closings (Enhanced) ════════ */
-  h+='<div class="mkt-section"><h3 class="mkt-section-t">🕐 3. '+(isAr?'إغلاقات الشموع — تفصيل لكل فريم':'Candle Closings — Per-frame detail')+'</h3>';
+  /* ════════ SECTION 3: Timeframe Closings (Enhanced) ════════
+     Reads the last *closed* candle of each timeframe — index length-2
+     rather than length-1 — because Binance returns the in-progress
+     candle as the final kline. For an in-progress candle kline[4]
+     is the current last-traded price, not a true close, so treating
+     it as "Close" misled the UI: the Open→Close row would drift in
+     real time, Hammer / Marubozu / Doji classifications could flip
+     before the candle even finished, and the "confirmation above X"
+     hint referenced a price that was still being printed. */
+  h+='<div class="mkt-section"><h3 class="mkt-section-t">🕐 3. '+(isAr?'آخر إغلاقات الشموع المؤكدة':'Last Confirmed Candle Closes')+'</h3>';
+  h+='<div style="font-size:10px;color:var(--t2);margin-bottom:8px;line-height:1.5">'+(isAr?'الشموع المعروضة أدناه هي آخر شموع أُغلقت فعلاً على كل فريم — ليست الشمعة الحالية قيد التكوين.':'The candles below are the most recent confirmed closes on each timeframe — not the currently-forming candle.')+'</div>';
   var frames=[];
-  if(data.kl1h&&data.kl1h.length>=2){var k1=data.kl1h[data.kl1h.length-1];frames.push({tf:'1H',o:+k1[1],h:+k1[2],l:+k1[3],c:+k1[4],v:+k1[5],rsi:data.rsi,macd:data.macd,tfDir:data.tf.h1});}
-  if(data.kl4h&&data.kl4h.length>=2){var k2=data.kl4h[data.kl4h.length-1];frames.push({tf:'4H',o:+k2[1],h:+k2[2],l:+k2[3],c:+k2[4],v:+k2[5],rsi:data.rsi,macd:data.macd,tfDir:data.tf.h4});}
-  if(data.kl1d&&data.kl1d.length>=2){var k3=data.kl1d[data.kl1d.length-1];frames.push({tf:isAr?'يومي':'D',o:+k3[1],h:+k3[2],l:+k3[3],c:+k3[4],v:+k3[5],rsi:data.rsi1d,macd:data.macd1d,tfDir:data.tf.d});}
-  if(data.kl1d&&data.kl1d.length>=7){var wS=data.kl1d.slice(-7);var wO=+wS[0][1],wH=0,wL=9e12,wC=+wS[wS.length-1][4],wV=0;
+  if(data.kl1h&&data.kl1h.length>=2){var k1=data.kl1h[data.kl1h.length-2];frames.push({tf:'1H',o:+k1[1],h:+k1[2],l:+k1[3],c:+k1[4],v:+k1[5],rsi:data.rsi,macd:data.macd,tfDir:data.tf.h1});}
+  if(data.kl4h&&data.kl4h.length>=2){var k2=data.kl4h[data.kl4h.length-2];frames.push({tf:'4H',o:+k2[1],h:+k2[2],l:+k2[3],c:+k2[4],v:+k2[5],rsi:data.rsi,macd:data.macd,tfDir:data.tf.h4});}
+  if(data.kl1d&&data.kl1d.length>=2){var k3=data.kl1d[data.kl1d.length-2];frames.push({tf:isAr?'يومي':'D',o:+k3[1],h:+k3[2],l:+k3[3],c:+k3[4],v:+k3[5],rsi:data.rsi1d,macd:data.macd1d,tfDir:data.tf.d});}
+  /* Weekly: the last 7 *closed* daily candles, skipping today's
+     in-progress one. Requires >=8 daily bars (7 closed + 1 open). */
+  if(data.kl1d&&data.kl1d.length>=8){var wS=data.kl1d.slice(-8,-1);var wO=+wS[0][1],wH=0,wL=9e12,wC=+wS[wS.length-1][4],wV=0;
     for(var wi=0;wi<wS.length;wi++){if(+wS[wi][2]>wH)wH=+wS[wi][2];if(+wS[wi][3]<wL)wL=+wS[wi][3];wV+=+wS[wi][5]}
     frames.push({tf:isAr?'أسبوعي':'W',o:wO,h:wH,l:wL,c:wC,v:wV,rsi:data.rsi1d,macd:data.macd1d,tfDir:data.tf.w});}
   /* Summary badge */

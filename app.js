@@ -5357,16 +5357,57 @@ function renderTop3(){
 /* Disclaimer modal — shown on the user's first visit to the Market
    section. The dismiss handler sets a localStorage flag so subsequent
    visits skip the modal. Kept as a named global so the button's
-   onclick can reference it without inline JS that CSP would flag. */
+   onclick can reference it without inline JS that CSP would flag.
+
+   Accessibility:
+   * role="dialog" + aria-modal="true" + labelledby/describedby
+     markup live in index.html so screen readers announce it.
+   * Focus moves into the accept button on open and returns to the
+     previously-focused element on close.
+   * Tab is trapped inside the modal while it's open (the only
+     focusable descendant is the accept button, so Tab/Shift+Tab
+     just keeps focus on it).
+   * Escape closes and accepts — a single-button disclaimer has
+     no 'cancel' path, so any dismiss implies acceptance.
+   * Clicking the overlay (outside the card) also dismisses,
+     matching standard modal UX expectations. */
+var _disclaimerPrevFocus=null;
+var _disclaimerKeyHandler=null;
 function showDisclaimerModalIfNeeded(){
   try{if(localStorage.getItem('nxDisclaimerShown')==='1')return;}catch(e){return}
   var m=document.getElementById('disclaimerModal');
-  if(m)m.style.display='flex';
+  if(!m)return;
+  _disclaimerPrevFocus=document.activeElement;
+  m.style.display='flex';
+  var acc=document.getElementById('disclaimerModalAccept');
+  if(acc){
+    acc.focus();
+    acc.onclick=dismissDisclaimer;
+  }
+  m.onclick=function(ev){if(ev.target===m)dismissDisclaimer();};
+  _disclaimerKeyHandler=function(ev){
+    if(ev.key==='Escape'){ev.preventDefault();dismissDisclaimer();}
+    else if(ev.key==='Tab'){ev.preventDefault();if(acc)acc.focus();}
+  };
+  document.addEventListener('keydown',_disclaimerKeyHandler);
 }
 function dismissDisclaimer(){
   try{localStorage.setItem('nxDisclaimerShown','1');}catch(e){}
   var m=document.getElementById('disclaimerModal');
-  if(m)m.style.display='none';
+  if(m){
+    m.style.display='none';
+    m.onclick=null;
+    var acc=document.getElementById('disclaimerModalAccept');
+    if(acc)acc.onclick=null;
+  }
+  if(_disclaimerKeyHandler){
+    document.removeEventListener('keydown',_disclaimerKeyHandler);
+    _disclaimerKeyHandler=null;
+  }
+  if(_disclaimerPrevFocus&&typeof _disclaimerPrevFocus.focus==='function'){
+    try{_disclaimerPrevFocus.focus();}catch(e){}
+  }
+  _disclaimerPrevFocus=null;
 }
 
 async function loadMarket(){showDisclaimerModalIfNeeded();if(curMktTab===0)loadBTCChart();else loadETHChart()}

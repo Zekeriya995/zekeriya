@@ -935,9 +935,10 @@ canvas{width:100%!important;border-radius:4px}
 <script src="src/portfolio.js"></script>
 <script src="src/notifications.js"></script>
 <!-- First-visit disclaimer modal — surfaced by showDisclaimerModalIfNeeded() on first Market navigation. -->
-<div class="disclaimer-modal" id="disclaimerModal" style="display:none">
-<div class="disclaimer-modal-card">
-<h3>تنويه مهم</h3>
+<div class="disclaimer-modal" id="disclaimerModal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="disclaimerModalTitle" aria-describedby="disclaimerModalBody">
+<div class="disclaimer-modal-card" role="document">
+<h3 id="disclaimerModalTitle">تنويه مهم</h3>
+<div id="disclaimerModalBody">
 <p>منصة NEXUS PRO تعرض تحليلات فنية ومؤشرات السوق للاطلاع فقط.</p>
 <ul>
 <li>لا نقدم نصائح استثمارية</li>
@@ -946,7 +947,8 @@ canvas{width:100%!important;border-radius:4px}
 <li>قد تخسر كامل استثمارك</li>
 <li>استشر مستشاراً مالياً مرخّصاً</li>
 </ul>
-<button type="button" onclick="dismissDisclaimer()">فهمت وأوافق</button>
+</div>
+<button type="button" id="disclaimerModalAccept">فهمت وأوافق</button>
 </div>
 </div>
 <script src="app.js"></script>

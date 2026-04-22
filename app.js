@@ -5528,8 +5528,20 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   setInterval(function(){notifiedSet={};safeSet('nxnot10','{}');tgSent={}},3600000);
   setTimeout(function(){runValidator()},10000);
   setInterval(function(){runValidator()},90000);
-  /* Market chart auto-refresh (moved from module-level) */
+  /* Market chart auto-refresh (moved from module-level).
+     Cadence reasoning:
+     * Poll interval is 60s — the tick's only real cost is a class
+       check and an age comparison on the cache timestamp.
+     * The actual klines fetch is gated by MKT_TTL (30m), so a long
+       session sees at most one API call per symbol per 30m regardless
+       of how many ticks fire.
+     * Only the currently visible tab is refreshed; the idle one
+       waits until the user switches to it (loadBTCChart / loadETHChart
+       then serves from cache if still warm, or refetches).
+     * The visibilityState guard skips ticks while the browser tab
+       is backgrounded — a hidden chart never needs refreshing. */
   setInterval(function(){
+    if(typeof document.visibilityState==='string'&&document.visibilityState==='hidden')return;
     var pgEl=document.getElementById('pg-market');
     if(pgEl&&pgEl.classList.contains('act')){
       if(curMktTab===0&&Date.now()-btcCache.t>=MKT_TTL)loadBTCChart();

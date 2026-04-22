@@ -3883,13 +3883,22 @@ function rP(p){
   return'$'+(+p.toFixed(4));
 }
 
+/* Signature block appended at the bottom of every market chart.
+   Output depends only on the current language, so memoize by lang
+   instead of rebuilding the same string on every buildChartHTML
+   call. invalidateMarketCaches() doesn't need to clear this — the
+   memo is keyed by lang itself, so the second language naturally
+   gets its own entry. */
+var _mktSigMemo={};
 function mktSignature(){
-  return'<div class="mkt-signature">'
+  if(_mktSigMemo[lang])return _mktSigMemo[lang];
+  _mktSigMemo[lang]='<div class="mkt-signature">'
     +'<div class="mkt-sig-name">'+(lang==='ar'?'تحليل فني من NEXUS PRO':'NEXUS PRO Technical Analysis')+'</div>'
     +'<div class="mkt-sig-note">'+(lang==='ar'
       ?'⚠️ ملاحظة: هذه مؤشرات فنية للاطلاع فقط — احتمال أي خبر كبير يقلب التحليل عكس النتائج.'
       :'⚠️ Note: Technical indicators for informational purposes only — major news may reverse the analysis.')+'</div>'
     +'</div>';
+  return _mktSigMemo[lang];
 }
 
 function buildStory(coin,data){

@@ -4681,6 +4681,12 @@ function renderMktFresh(cacheTime){
   return'<div class="mkt-fresh '+frsh.cls+'"><span class="mkt-fresh-dot"></span> '+frsh.txt+' \u2014 '+ts+'</div>';
 }
 
+/* In-flight guards — without them, rapid tab switches or clicks on
+   the refresh button fire parallel analyzeCoinRpt() calls whose
+   responses race to write btcCache / ethCache, occasionally
+   leaving the UI with older data on top of newer data. */
+var btcLoading=false,ethLoading=false;
+
 /* ═══ loadBTCChart ═══ */
 async function loadBTCChart(){
   var el=document.getElementById('mktBTC');
@@ -4688,6 +4694,8 @@ async function loadBTCChart(){
     if(el)el.innerHTML=renderMktFresh(btcCache.t)+btcCache.h;
     return;
   }
+  if(btcLoading)return;
+  btcLoading=true;
   if(el)el.innerHTML='<div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div><div style="font-size:11px;color:var(--t2);margin-top:10px">'+(lang==='ar'?'\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 12 \u0642\u0633\u0645...':'Analyzing 12 sections...')+'</div></div>';
   try{
     var data=await analyzeCoinRpt('BTC');
@@ -4699,6 +4707,8 @@ async function loadBTCChart(){
     if(el)el.innerHTML=renderMktFresh(btcCache.t)+body;
   }catch(e){
     if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u062e\u0637\u0623 \u2014 \u062d\u0627\u0648\u0644 \u0644\u0627\u062d\u0642\u0627\u064b':'Error \u2014 try later')+'</div></div><button class="rfr" onclick="btcCache.t=0;loadBTCChart()">\u{1F504}</button>';
+  }finally{
+    btcLoading=false;
   }
 }
 
@@ -4709,6 +4719,8 @@ async function loadETHChart(){
     if(el)el.innerHTML=renderMktFresh(ethCache.t)+ethCache.h;
     return;
   }
+  if(ethLoading)return;
+  ethLoading=true;
   if(el)el.innerHTML='<div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div><div style="font-size:11px;color:var(--t2);margin-top:10px">'+(lang==='ar'?'\u062c\u0627\u0631\u064a \u062a\u062d\u0644\u064a\u0644 12 \u0642\u0633\u0645...':'Analyzing 12 sections...')+'</div></div>';
   try{
     var data=await analyzeCoinRpt('ETH');
@@ -4720,6 +4732,8 @@ async function loadETHChart(){
     if(el)el.innerHTML=renderMktFresh(ethCache.t)+body;
   }catch(e){
     if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u062e\u0637\u0623 \u2014 \u062d\u0627\u0648\u0644 \u0644\u0627\u062d\u0642\u0627\u064b':'Error \u2014 try later')+'</div></div><button class="rfr" onclick="ethCache.t=0;loadETHChart()">\u{1F504}</button>';
+  }finally{
+    ethLoading=false;
   }
 }
 

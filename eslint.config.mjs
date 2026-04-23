@@ -97,6 +97,11 @@ export default [
         tgNotify: 'readonly',
         alertPrefs: 'writable',
         saveAlertPref: 'readonly',
+        /* Declared in src/price-stream.js */
+        priceStreamState: 'writable',
+        startPriceStream: 'readonly',
+        stopPriceStream: 'readonly',
+        applyTicker: 'readonly',
         /* Declared in src/whale-state.js */
         whaleWaves: 'writable',
         calcRealTotalBuy: 'readonly',
@@ -219,6 +224,11 @@ export default [
         makeDebouncedSaver: 'readonly',
         /* From src/notifications.js (loaded in tests/load.test.js) */
         notify: 'readonly',
+        /* From src/price-stream.js (loaded in tests/price-stream.test.js) */
+        applyTicker: 'readonly',
+        startPriceStream: 'readonly',
+        stopPriceStream: 'readonly',
+        priceStreamState: 'writable',
         /* Other globals seeded by tests for the cross-file flow check */
         whaleWaves: 'writable',
         signalQualityGate: 'writable',

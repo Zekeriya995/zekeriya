@@ -26,6 +26,7 @@ const LOAD_ORDER = [
   'src/whale-state.js',
   'src/portfolio.js',
   'src/notifications.js',
+  'src/price-stream.js',
 ];
 
 /* Per-module: identifiers that MUST exist on globalThis after the file
@@ -111,6 +112,7 @@ const EXPECTS = {
     'alertPrefs',
     'saveAlertPref',
   ],
+  'src/price-stream.js': ['priceStreamState', 'startPriceStream', 'stopPriceStream', 'applyTicker'],
 };
 
 /* `lang` is declared in app.js, but several src/ modules (translations,

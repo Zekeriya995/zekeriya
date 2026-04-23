@@ -5539,6 +5539,13 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   setInterval(function(){notifiedSet={};safeSet('nxnot10','{}');tgSent={}},3600000);
   setTimeout(function(){runValidator()},10000);
   setInterval(function(){runValidator()},90000);
+  /* Open the Binance public ticker WebSocket. Once connected, price
+     / 24h change / volume / high / low updates flow into T[sym] at
+     sub-second latency. The 5-second loadTk() polling above keeps
+     running — it still owns FR / OI / LS / whales / depth, none of
+     which have a public WebSocket stream. If the WS fails or flaps
+     the platform silently falls back to the REST-only path. */
+  try{if(typeof startPriceStream==='function')startPriceStream();}catch(e){}
   /* Market chart auto-refresh (moved from module-level).
      Cadence reasoning:
      * Poll interval is 60s — the tick's only real cost is a class

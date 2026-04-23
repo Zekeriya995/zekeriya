@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="NEXUS PRO">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://telegram.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; media-src 'self' data:; connect-src 'self' https://jolly-bush-9254.nexus-proxy.workers.dev https://api.binance.com https://fapi.binance.com https://api.bybit.com https://api.coingecko.com https://api.coinbase.com https://api.alternative.me https://api.llama.fi https://stablecoins.llama.fi https://api.tokenomist.ai https://mempool.space https://api.etherscan.io; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://telegram.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; media-src 'self' data:; connect-src 'self' https://jolly-bush-9254.nexus-proxy.workers.dev https://api.binance.com https://fapi.binance.com wss://stream.binance.com:9443 https://api.bybit.com https://api.coingecko.com https://api.coinbase.com https://api.alternative.me https://api.llama.fi https://stablecoins.llama.fi https://api.tokenomist.ai https://mempool.space https://api.etherscan.io; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%23060b14'/%3E%3Ctext x='96' y='125' font-size='110' text-anchor='middle' fill='%2300ff88' font-family='Arial,sans-serif' font-weight='bold'%3EN%3C/text%3E%3C/svg%3E">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -954,6 +954,7 @@ canvas{width:100%!important;border-radius:4px}
 <button type="button" id="disclaimerModalAccept">فهمت وأوافق</button>
 </div>
 </div>
+<script src="src/price-stream.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

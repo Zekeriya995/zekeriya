@@ -2086,6 +2086,19 @@ function detectWhaleProfitTaking(sym){
   ww.prevConf=ww.engine.confidence; /* kept for backward compat */
   return{taking:isTaking,signals:sigs}}
 
+/* Idea 2 — Exit advisories.
+   Ring-buffered dedup so we don't spam the same advisory more than
+   once every 10 minutes per trade. Not persisted: a reload is fine,
+   the user will see the advisory again if the condition still holds. */
+var _exitAdvised={};
+function advise(tr,kind,ic,title,body){
+  var k=tr.id+':'+kind;
+  if(_exitAdvised[k]&&Date.now()-_exitAdvised[k]<10*60*1000)return;
+  _exitAdvised[k]=Date.now();
+  try{showPopup(ic,tr.sym+' — '+title,body)}catch(e){}
+  try{addNotifHist(ic,tr.sym,title,body)}catch(e){}
+}
+
 function monitorTrades(){
   var open=activeTrades.filter(function(t){return t.status==='OPEN'});
   open.forEach(function(tr){
@@ -2093,6 +2106,24 @@ function monitorTrades(){
     tr.pnl=(d.p-tr.entry)/tr.entry*100;
     if(tr.pnl>tr.maxGain){tr.maxGain=tr.pnl;tr.maxGainPrice=d.p;tr.maxGainTime=Date.now()}
     if(tr.pnl<tr.minPnl)tr.minPnl=tr.pnl;
+    /* Idea 2: advisories that don't auto-close but prompt action.
+       Covers the common cases the hard exits below don't catch early
+       enough: CVD flipping while we're comfortably in profit, funding
+       blowing out, or max drawdown eating into a solid gain. */
+    if(tr.pnl>=3){
+      var _cvd=analyzeCVD(tr.sym);
+      if(_cvd&&_cvd.divergence==='BEARISH'){
+        advise(tr,'cvd_bear','📉',lang==='ar'?'CVD انقلب — فكّر بجني الربح':'CVD flipped — consider taking profit','+'+tr.pnl.toFixed(1)+'%')
+      }
+      var _frNow=FR[tr.sym];
+      if(_frNow&&_frNow.rate>0.1){
+        advise(tr,'fr_extreme','🔥',lang==='ar'?'FR متطرف — جني الربح ممكن':'Funding extreme — lock gains','FR='+_frNow.rate.toFixed(3)+'% | +'+tr.pnl.toFixed(1)+'%')
+      }
+      /* Trend cracks: price dropped 40% of the way from max toward entry */
+      if(tr.maxGain>=4&&tr.pnl<tr.maxGain*0.6){
+        advise(tr,'giveback','⚠️',lang==='ar'?'تراجع من القمة — حماية الربح':'Drawdown from peak — protect gains','max +'+tr.maxGain.toFixed(1)+'% → +'+tr.pnl.toFixed(1)+'%')
+      }
+    }
     /* Snapshot every 5 min */
     var lastSnap=tr.snapshots.length?tr.snapshots[tr.snapshots.length-1].t:0;
     if(Date.now()-lastSnap>=300000){tr.snapshots.push({p:d.p,pnl:tr.pnl,t:Date.now()});if(tr.snapshots.length>200)tr.snapshots=tr.snapshots.slice(-200)}

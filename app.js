@@ -797,16 +797,35 @@ function runAutoImprove() {
   if (addedToBL.length) report.changes.push((lang === 'ar' ? 'حُظرت: ' : 'Blacklisted: ') + addedToBL.join(', '));
   if (removedFromBL.length) report.changes.push((lang === 'ar' ? 'رُفع الحظر: ' : 'Unblocked: ') + removedFromBL.join(', '));
 
+  /* Improvement 7: Adaptive threshold from the last 50 *checked*
+     predictions, not all-time. A model that was 70% last year but is
+     45% this week is losing money today, and the threshold has to rise
+     with recent reality — not drown in historical averages. */
   var oldConf = monitorState.minConf;
-  if (monitorState.perf.overallRate < 50) {
+  var recent = predictions.filter(function(p){return p.checked}).slice(-50);
+  var recentWinRate = null;
+  if (recent.length >= 20) {
+    var wins = 0;
+    for (var _ri = 0; _ri < recent.length; _ri++) {
+      if (recent[_ri].hit) wins += 1;
+      else if (recent[_ri].partial) wins += 0.5;
+    }
+    recentWinRate = Math.round((wins / recent.length) * 100);
+  }
+  /* Fall back to all-time overall rate until we have 20+ checked preds. */
+  var rateForTuning = recentWinRate != null ? recentWinRate : monitorState.perf.overallRate;
+  if (rateForTuning < 55) {
     monitorState.minConf = Math.min(75, monitorState.minConf + 5);
-  } else if (monitorState.perf.overallRate < 60) {
-    monitorState.minConf = Math.min(70, monitorState.minConf + 2);
-  } else if (monitorState.perf.overallRate > 75) {
+  } else if (rateForTuning < 65) {
+    /* In the target band — leave the threshold alone. */
+  } else if (rateForTuning > 70) {
     monitorState.minConf = Math.max(45, monitorState.minConf - 3);
   }
   if (oldConf !== monitorState.minConf) {
-    report.changes.push((lang === 'ar' ? 'حد الثقة: ' : 'Min confidence: ') + oldConf + '% \u2192 ' + monitorState.minConf + '%');
+    var rateLabel = recentWinRate != null
+      ? (lang === 'ar' ? 'آخر 50: ' : 'last 50: ') + rateForTuning + '%'
+      : (lang === 'ar' ? 'تاريخي: ' : 'all-time: ') + rateForTuning + '%';
+    report.changes.push((lang === 'ar' ? 'حد الثقة: ' : 'Min confidence: ') + oldConf + '% \u2192 ' + monitorState.minConf + '% (' + rateLabel + ')');
   }
 
   report.after = {

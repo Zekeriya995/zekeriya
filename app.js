@@ -833,6 +833,33 @@ function openAdminPanel(){try{openQA('monitor')}catch(e){}}
 /* CACHE */
 var cache={scan:null,scanTime:0,whale:null,whaleTime:0,fr:null,frTime:0};
 var CACHE_TTL=60000;
+/* Rolling Order Flow Imbalance history — per-symbol bid/ask ratios sampled
+   on every quickScan pass. Sustained imbalance (avg over 10 min) is far
+   harder to spoof than a single snapshot; the scanner uses this instead
+   of the raw depthSnapshots ratio when enough samples exist. */
+var obiHistory={};
+var OBI_WINDOW_MS=10*60*1000;
+function sampleOBI(sym,ratio){
+  if(!ratio||!isFinite(ratio)||ratio<=0)return;
+  if(!obiHistory[sym])obiHistory[sym]=[];
+  var arr=obiHistory[sym];var now=Date.now();
+  arr.push({t:now,r:ratio});
+  var cutoff=now-OBI_WINDOW_MS;
+  while(arr.length&&arr[0].t<cutoff)arr.shift();
+  if(arr.length>60)obiHistory[sym]=arr.slice(-60);
+}
+function rollingOBI(sym){
+  var arr=obiHistory[sym];if(!arr||arr.length<5)return null;
+  var now=Date.now();var cutoff=now-OBI_WINDOW_MS;
+  var sum=0,n=0,spanMs=0,first=null;
+  for(var i=0;i<arr.length;i++){
+    if(arr[i].t<cutoff)continue;
+    if(first==null)first=arr[i].t;
+    sum+=arr[i].r;n++;spanMs=arr[i].t-first;
+  }
+  if(n<5)return null;
+  return{avg:sum/n,samples:n,spanMs:spanMs};
+}
 /* TR (translations) + t() moved to src/translations.js
    fmt/fP/esc/safeC/calcRSI/calcMACD/calcEMA moved to src/utils.js */
 /* apiCooldown + fj moved to src/connection.js */
@@ -1630,12 +1657,19 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   if(aggCVD[s]&&aggCVD[s].trend==='BUYING'&&aggCVD[s].delta>0&&d.c<3){sc+=20;tags.push('📊CVD_BUY')}
   /* ═══ DATA SOURCE 2: takerData — taker buy/sell ratio ═══ */
   if(takerData[s]&&takerData[s].avg>0&&takerData[s].ratio>takerData[s].avg*1.3){sc+=15;tags.push('💹TAKER')}
-  /* ═══ DATA SOURCE 3: depthSnapshots — order book depth ═══ */
+  /* ═══ DATA SOURCE 3: depthSnapshots — order book depth ═══
+     Snapshot ratio feeds the rolling Order Flow Imbalance history. A
+     single-snapshot wall is easily spoofed, so we only award the WALL
+     tag when the 10-minute rolling average is also elevated. */
   if(depthSnapshots[s]&&depthSnapshots[s].bids&&depthSnapshots[s].asks){
     var _bTotal=0,_aTotal=0;
     for(var _bi=0;_bi<depthSnapshots[s].bids.length;_bi++){_bTotal+=parseFloat(depthSnapshots[s].bids[_bi][0])*parseFloat(depthSnapshots[s].bids[_bi][1])}
     for(var _ai=0;_ai<depthSnapshots[s].asks.length;_ai++){_aTotal+=parseFloat(depthSnapshots[s].asks[_ai][0])*parseFloat(depthSnapshots[s].asks[_ai][1])}
-    if(_aTotal>0&&_bTotal/_aTotal>1.5){sc+=15;tags.push('📗WALL')}
+    var _obSnap=_aTotal>0?_bTotal/_aTotal:0;
+    sampleOBI(s,_obSnap);
+    var _roll=rollingOBI(s);
+    if(_roll&&_roll.avg>1.3){sc+=15;tags.push('📗WALL:'+_roll.avg.toFixed(1)+'x×'+_roll.samples)}
+    else if(_obSnap>1.8){sc+=5;tags.push('📗snap:'+_obSnap.toFixed(1)+'x')}
   }
   /* ═══ DATA SOURCE 4: bookTickers — best bid/ask ═══ */
   if(bookTickers[s]&&bookTickers[s].bidQty>0&&bookTickers[s].askQty>0){
@@ -1738,16 +1772,23 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
       if(recentVol>avgVol*1.8){ds+=18;checks.vol=true;dt.push('VOL:'+Math.round(recentVol/avgVol*10)/10+'x')}
       else if(recentVol>avgVol*1.3){ds+=10;checks.vol=true;dt.push('VOL↑')}
     }
-    /* ═══ CHECK 2: OB Pressure — depthSnapshots (NO API call!) ═══ */
+    /* ═══ CHECK 2: OB Pressure — prefer rolling 10-min OFI over snapshot.
+       Sustained bid imbalance is much harder to fake than a flashed wall.
+       Snapshot ratio is still used as a fallback and fed to the history. */
     var ob=depthSnapshots[c.s];
+    var obRatio=0;
     if(ob&&ob.bids&&ob.bids.length&&ob.asks&&ob.asks.length){
       var bv=0,av=0;
       for(var _obi=0;_obi<ob.bids.length;_obi++){bv+=parseFloat(ob.bids[_obi][0])*parseFloat(ob.bids[_obi][1])}
       for(var _oai=0;_oai<ob.asks.length;_oai++){av+=parseFloat(ob.asks[_oai][0])*parseFloat(ob.asks[_oai][1])}
-      var obRatio=bv/Math.max(av,1);
-      if(obRatio>1.5){ds+=18;checks.ob=true;dt.push('OB:'+obRatio.toFixed(1)+'x')}
-      else if(obRatio>1.2){ds+=10;checks.ob=true;dt.push('OB:'+obRatio.toFixed(1)+'x')}
+      obRatio=bv/Math.max(av,1);
+      sampleOBI(c.s,obRatio);
     }
+    var _roll=rollingOBI(c.s);
+    if(_roll&&_roll.avg>1.5){ds+=18;checks.ob=true;dt.push('OBI:'+_roll.avg.toFixed(1)+'x×'+_roll.samples)}
+    else if(_roll&&_roll.avg>1.3){ds+=12;checks.ob=true;dt.push('OBI:'+_roll.avg.toFixed(1)+'x')}
+    else if(obRatio>1.8){ds+=6;dt.push('OB_snap:'+obRatio.toFixed(1)+'x')}
+    else if(obRatio>1.3){ds+=3;dt.push('OB_snap:'+obRatio.toFixed(1)+'x')}
     /* ═══ CHECK 3: RSI Sweet Spot (15m klines preferred, fallback 1h) ═══ */
     var rsiCloses=null;
     var kl15=kl15Data[c.s];

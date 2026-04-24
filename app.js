@@ -885,18 +885,9 @@ function sampleOBI(sym,ratio){
   saveOBI();
   if(arr.length>60)obiHistory[sym]=arr.slice(-60);
 }
-function rollingOBI(sym){
-  var arr=obiHistory[sym];if(!arr||arr.length<5)return null;
-  var now=Date.now();var cutoff=now-OBI_WINDOW_MS;
-  var sum=0,n=0,spanMs=0,first=null;
-  for(var i=0;i<arr.length;i++){
-    if(arr[i].t<cutoff)continue;
-    if(first==null)first=arr[i].t;
-    sum+=arr[i].r;n++;spanMs=arr[i].t-first;
-  }
-  if(n<5)return null;
-  return{avg:sum/n,samples:n,spanMs:spanMs};
-}
+/* Thin wrapper — the pure implementation lives in src/scanner-helpers.js
+   so it can be unit-tested without the app's global obiHistory. */
+function rollingOBI(sym){return rollingOBIFromArr(obiHistory[sym],OBI_WINDOW_MS)}
 /* TR (translations) + t() moved to src/translations.js
    fmt/fP/esc/safeC/calcRSI/calcMACD/calcEMA moved to src/utils.js */
 /* apiCooldown + fj moved to src/connection.js */
@@ -1081,6 +1072,26 @@ async function loadTrading(){var trLoadEl=document.getElementById('tradeList');i
     sigs.push({s:x.s,p:d.p,c:d.c,v:d.v,type:type,conf:conf,entry:entry,target:target,stop:stop,rr:rr,dur:dur,reasons:reasons,score:x.score,checks:x.checks,passed:x.passed,total:x.total,ultra:x.ultra,confirmed:x.confirmed,tags:x.tags,sec:sec,detectedAt:x.detectedAt,priceAtDetection:x.priceAtDetection,ageMinutes:x.ageMinutes,changeFromDetection:x.changeFromDetection,freshness:x.freshness})}
   sigs.sort(function(a,b){return b.conf-a.conf});renderTrading(sigs)}
 function filterTrade(f,btn){curTradeFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadTrading()}
+/* Idea 3 — Recent win rate per signal tier.
+   Buckets checked predictions by the same score thresholds the acc
+   panel uses, then exposes a rate (0-100) + sample count. Returns null
+   when the bucket has too few samples to say anything honest (< 5). */
+function recentTierRates(limit){
+  limit=limit||50;
+  var recent=predictions.filter(function(p){return p.checked}).slice(-limit);
+  var buckets={ultra:{h:0,p:0,t:0},whale:{h:0,p:0,t:0},brk:{h:0,p:0,t:0}};
+  for(var i=0;i<recent.length;i++){
+    var pr=recent[i];var b=pr.score>=60?buckets.ultra:pr.score>=40?buckets.whale:buckets.brk;
+    b.t++;if(pr.hit)b.h++;else if(pr.partial)b.p++;
+  }
+  function rate(b){if(b.t<5)return null;return Math.round(((b.h+b.p*0.5)/b.t)*100)}
+  return{
+    ultra:{rate:rate(buckets.ultra),samples:buckets.ultra.t},
+    whale:{rate:rate(buckets.whale),samples:buckets.whale.t},
+    brk:{rate:rate(buckets.brk),samples:buckets.brk.t},
+  };
+}
+
 function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter(function(x){return x.type==='fast'});else if(curTradeFilter==='daily')f=sigs.filter(function(x){return x.type==='daily'});else if(curTradeFilter!=='all'){f=sigs.filter(function(x){return x.sec===curTradeFilter})}
   /* Part B: Quality filter — min 40% confidence, max 7 — adaptive */
   var minConf=monitorState&&monitorState.minConf?Math.max(35,monitorState.minConf-10):40;
@@ -1105,9 +1116,23 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
   /* ═══ Update summary bar ═══ */
   updateScanSummary(f.length,tkCount);
   if(!f.length){var trEl=document.getElementById('tradeList');if(trEl)trEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">'+(tkCount<5?'⚠️':'📡')+'</div><div class="sc-empty-title">'+(tkCount<5?(lang==='ar'?'لم يتم تحميل البيانات بعد':'Data not loaded yet'):(lang==='ar'?'السوق هادئ — لا فرص قوية':'Market quiet — No strong signals'))+'</div><div class="sc-empty-sub">'+(tkCount<5?(lang==='ar'?'تحقق من اتصال الإنترنت أو اضغط تحديث':'Check internet or tap refresh'):(lang==='ar'?'البوابة الذكية ترفض الإشارات الضعيفة — الانتظار أفضل':'Smart gate blocks weak signals — Waiting is better'))+'</div>'+(tkCount<5?'<div class="sc-empty-retry"><button class="rfr" onclick="loadTk().then(function(){loadTrading()})">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div>':'')+'<div class="sc-empty-stats"><span>📊 '+tkCount+' '+(lang==='ar'?'عملة محملة':'coins loaded')+'</span><span>'+srcLabel+'</span></div></div>';return}
+  /* Idea 3: precompute per-tier win rates once per render — every card
+     in the same tier shows the same rate, so there's no reason to
+     recompute it per signal. */
+  var _tierRates=recentTierRates(50);
   var h='';f.forEach(function(s,i){
     var tCol=s.type==='fast'?'var(--blue)':'var(--up)';var tLbl=s.type==='fast'?t('scan_fast'):t('scan_daily');
     var tb=getTierBadge(s.s);var ta=timeAgo(s.detectedAt||Date.now());
+    /* Win-rate badge: pick the bucket that matches this signal's score
+       tier (same thresholds the accuracy panel uses). Hidden when the
+       bucket has fewer than 5 samples — a 2/3 win streak isn't data. */
+    var _wrBucket=s.score>=60?_tierRates.ultra:s.score>=40?_tierRates.whale:_tierRates.brk;
+    var _wrHTML='';
+    if(_wrBucket&&_wrBucket.rate!=null){
+      var _wrCol=_wrBucket.rate>=60?'var(--up)':_wrBucket.rate>=45?'var(--warn)':'var(--dn)';
+      var _wrTxt=(lang==='ar'?'نجاح سابق ':'Past win rate ')+_wrBucket.rate+'% ('+_wrBucket.samples+')';
+      _wrHTML='<div style="font-size:9px;color:'+_wrCol+';font-weight:700;margin-top:4px;text-align:center">🏆 '+_wrTxt+'</div>';
+    }
     /* Verdict (Part B) */
     var verdict,vCol,vBg;
     if(s.conf>=85&&s.ultra){verdict=lang==='ar'?'🟢 إشارة ممتازة — ادخل بثقة':'🟢 Excellent — Enter Now';vCol='var(--up)';vBg='rgba(0,255,136,.08)'}
@@ -1149,7 +1174,7 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
       /* Price */
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-family:var(--fm);font-size:18px;font-weight:800;color:var(--t0)">'+fP(s.p)+'</span><span style="font-family:var(--fm);font-size:14px;font-weight:800;color:'+(s.c>=0?'var(--up)':'var(--dn)')+'">'+(s.c>=0?'+':'')+s.c.toFixed(1)+'%</span></div>'
       /* Verdict */
-      +'<div class="sc-verdict" style="background:'+vBg+';border:1px solid '+vCol+'20"><div class="sc-verdict-t" style="color:'+vCol+'">'+verdict+'</div><div class="sc-verdict-s">'+s.passed+'/6 '+(lang==='ar'?'فحوصات':'checks')+' · 🐋 '+wConf+'% · BTC '+(btcChg>=0?'+':'')+btcChg.toFixed(1)+'%</div></div>'
+      +'<div class="sc-verdict" style="background:'+vBg+';border:1px solid '+vCol+'20"><div class="sc-verdict-t" style="color:'+vCol+'">'+verdict+'</div><div class="sc-verdict-s">'+s.passed+'/6 '+(lang==='ar'?'فحوصات':'checks')+' · 🐋 '+wConf+'% · BTC '+(btcChg>=0?'+':'')+btcChg.toFixed(1)+'%</div>'+_wrHTML+'</div>'
       /* 6 Checks Grid */
       +chkHTML
       /* Quick 3 */
@@ -1579,114 +1604,14 @@ function buildUnlocksCard(){
 }
 
 
-/* ═══ SCANNER STRENGTH HELPERS v1 ═══
-   Pure functions over Binance-shaped klines ([t,o,h,l,c,v,…]). Each takes
-   whatever klines it has and returns null/false when data is missing so
-   callers can degrade gracefully. Kept near quickScan so the scoring
-   engine is readable top-to-bottom. */
-
-/* Improvement 1 — Confirmed Breakout Gate.
-   A *real* breakout needs (a) the most recent closed 15m candle's close
-   above the highest high of the previous `lookback` (default 20) bars,
-   and (b) the breakout bar's volume at least `volMult` × the average of
-   the prior bars. Without both, a candle that merely tags the prior high
-   is a wick — not a breakout. */
-function isConfirmedBreakout(kl15, lookback, volMult) {
-  lookback = lookback || 20;
-  volMult = volMult || 1.5;
-  if (!kl15 || kl15.length < lookback + 1) return { confirmed: false };
-  var last = kl15[kl15.length - 1];
-  var lastClose = +last[4];
-  var lastVol = +last[5];
-  var priorHigh = 0;
-  var volSum = 0;
-  for (var i = kl15.length - 1 - lookback; i < kl15.length - 1; i++) {
-    var h = +kl15[i][2];
-    if (h > priorHigh) priorHigh = h;
-    volSum += +kl15[i][5];
-  }
-  var avgVol = volSum / lookback;
-  var vRatio = avgVol > 0 ? lastVol / avgVol : 0;
-  return {
-    confirmed: lastClose > priorHigh && vRatio >= volMult,
-    priorHigh: priorHigh,
-    volRatio: vRatio,
-  };
-}
-
-/* Improvement 2 — Multi-Timeframe EMA Alignment.
-   Bullish alignment on 15m AND 1h is a meaningful confluence; a bearish
-   4h backdrop is a strong headwind that deserves a penalty regardless of
-   how pretty the lower timeframes look. Returns:
-     - aligned15m1h: both LTFs bullish (EMA20 > EMA50)
-     - bearish4h:    HTF bearish (EMA20 <= EMA50 on 4h)
-     - score:        additive score contribution */
-function tfAlignment(kl15, kl1h, kl4h) {
-  function bullish(kl) {
-    if (!kl || kl.length < 50) return null;
-    var closes = kl.map(function (k) { return +k[4]; });
-    var e20 = calcEMA(closes, 20);
-    var e50 = calcEMA(closes, 50);
-    if (e20 == null || e50 == null) return null;
-    return e20 > e50;
-  }
-  var b15 = bullish(kl15);
-  var b1h = bullish(kl1h);
-  var b4h = bullish(kl4h);
-  var aligned = b15 === true && b1h === true;
-  var bear4h = b4h === false;
-  var score = 0;
-  if (aligned) score += 15;
-  if (bear4h) score -= 25;
-  return { aligned15m1h: aligned, bearish4h: bear4h, bull4h: b4h === true, score: score };
-}
-
-/* Improvement 5 — Whale wave consensus.
-   Counts how many whale waves fired for this symbol inside the given
-   window (default 30 min). A single wave is a hint; three independent
-   waves in thirty minutes is a consensus signal that survives noise
-   from a one-off large trade. */
+/* ═══ SCANNER STRENGTH HELPERS ═══
+   The pure implementations live in src/scanner-helpers.js so they can be
+   unit-tested without booting app.js. Only the thin wrapper that reads
+   app-level globals stays here. */
 function whaleWaveConsensus(sym, windowMs) {
   windowMs = windowMs || 30 * 60 * 1000;
   var ww = whaleWaves[sym];
-  if (!ww || !ww.waves || !ww.waves.length) return 0;
-  var cutoff = Date.now() - windowMs;
-  var n = 0;
-  for (var i = 0; i < ww.waves.length; i++) {
-    if (ww.waves[i].time >= cutoff) n++;
-  }
-  return n;
-}
-
-/* Improvement 3 — ATR-based entry/stop/target zones.
-   Replaces fixed-percent multipliers with volatility-aware bounds. Price
-   below stopMult × ATR is the minimum risk; price above targetMult × ATR
-   is the minimum reward. When classic support/resistance is tighter we
-   use those — ATR is the floor, not a ceiling. */
-function atrZones(price, atr, support, resistance) {
-  if (!atr || atr <= 0 || !price) return null;
-  var stopMult = 1.5;
-  var t1Mult = 3.0;
-  var t2Mult = 5.0;
-  var stop = price - stopMult * atr;
-  if (support && support > 0 && support < price) {
-    stop = Math.max(stop, support * 0.985);
-  }
-  var target1 = price + t1Mult * atr;
-  if (resistance && resistance > price) {
-    target1 = Math.min(target1, resistance);
-  }
-  var target2 = price + t2Mult * atr;
-  var risk = price - stop;
-  var rr = risk > 0 ? +((target1 - price) / risk).toFixed(2) : 0;
-  return {
-    entry: price,
-    stop: stop,
-    target1: target1,
-    target2: target2,
-    rr: rr,
-    atr: atr,
-  };
+  return countWavesInWindow(ww && ww.waves, windowMs);
 }
 
 
@@ -1806,7 +1731,25 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   else{sc-=10}
   /* ═══ Negative change + high volume = reversal ═══ */
   if(d.c<=-3&&d.c>=-10&&d.v>5e7){sc+=12;tags.push('🔄REVERSAL')}
-  if(sc>=15)cands.push({s:s,p:d.p,c:d.c,v:d.v,score:sc,tags:tags,fr:fr?fr.rate:null,by:d.by,cb:CBP[s]})});
+  /* ═══ Idea 1 — Pump & Dump risk detector ═══
+     Count how many late-cycle warning signs are firing at once. Any
+     single one is normal market noise; three together is the classic
+     "retail FOMO peak" pattern that precedes distribution. A P&D
+     detection zeroes the score so qualityFilter drops the coin before
+     the user sees it. */
+  var pdFlags=0;var pdReasons=[];
+  if(d.c>=15){pdFlags++;pdReasons.push('VERTICAL:+'+d.c.toFixed(0)+'%')}
+  if(fr&&fr.rate>0.1){pdFlags++;pdReasons.push('FR_EXTREME:'+fr.rate.toFixed(3))}
+  if(LS[s]&&LS[s].ratio>3){pdFlags++;pdReasons.push('LS_RETAIL_LONG:'+LS[s].ratio.toFixed(1))}
+  if(topTradersLS[s]&&topTradersLS[s].positions&&topTradersLS[s].positions.length>0){
+    var _tp=topTradersLS[s].positions[topTradersLS[s].positions.length-1];
+    if(_tp&&_tp.long<0.4&&LS[s]&&LS[s].ratio>2){pdFlags++;pdReasons.push('SMART_VS_RETAIL')}
+  }
+  /* Volume declining while price still pushing — exhaustion */
+  if(d.c>=8&&d.v<3e7){pdFlags++;pdReasons.push('THIN_PUMP')}
+  if(pdFlags>=3){sc=Math.min(sc,-100);tags.push('🚨P&D_RISK:'+pdFlags+'/5')}
+  else if(pdFlags===2){sc-=25;tags.push('⚠️P&D_WARN:'+pdFlags+'/5')}
+  if(sc>=15)cands.push({s:s,p:d.p,c:d.c,v:d.v,score:sc,tags:tags,fr:fr?fr.rate:null,by:d.by,cb:CBP[s],pdFlags:pdFlags})});
   return cands.sort(function(a,b){return b.score-a.score})}
 /* DEEP ANALYZE — tier-aware: T1=6 checks, T2=4 checks, T3=volume only */
 async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
@@ -2000,7 +1943,7 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
     var _freshness='fresh';
     if(_ageMins>60||Math.abs(_changeDet)>5)_freshness='old';
     else if(_ageMins>15||Math.abs(_changeDet)>2)_freshness='warm';
-    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
+    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,pdFlags:c.pdFlags||0,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
   return results.sort(function(a,b){return b.score-a.score})}
 /* ═══ QUALITY FILTER v3 — strict gate before rendering ═══ */
 function qualityFilter(results){
@@ -2018,6 +1961,11 @@ function qualityFilter(results){
     if(r.c>=3&&r.kl15Available&&r.confirmedBreakout===false)return false;
     /* Improvement 2: HTF headwind — 4h bearish kills any multi-hour trade. */
     if(r.tfAlign&&r.tfAlign.bearish4h)return false;
+    /* Idea 1: reject Pump & Dump setups (3+ retail-FOMO warnings firing
+       at once). The quickScan score penalty already pushes these below
+       threshold, but we defend in depth in case a noisy bonus pushes
+       the score back up. */
+    if(r.pdFlags>=3)return false;
     /* Timing filter: drift too far from detection */
     var sig=sigHist[r.s+'_trade'];
     if(sig&&typeof sig==='object'&&sig.priceAtDetection>0){
@@ -2138,6 +2086,19 @@ function detectWhaleProfitTaking(sym){
   ww.prevConf=ww.engine.confidence; /* kept for backward compat */
   return{taking:isTaking,signals:sigs}}
 
+/* Idea 2 — Exit advisories.
+   Ring-buffered dedup so we don't spam the same advisory more than
+   once every 10 minutes per trade. Not persisted: a reload is fine,
+   the user will see the advisory again if the condition still holds. */
+var _exitAdvised={};
+function advise(tr,kind,ic,title,body){
+  var k=tr.id+':'+kind;
+  if(_exitAdvised[k]&&Date.now()-_exitAdvised[k]<10*60*1000)return;
+  _exitAdvised[k]=Date.now();
+  try{showPopup(ic,tr.sym+' — '+title,body)}catch(e){}
+  try{addNotifHist(ic,tr.sym,title,body)}catch(e){}
+}
+
 function monitorTrades(){
   var open=activeTrades.filter(function(t){return t.status==='OPEN'});
   open.forEach(function(tr){
@@ -2145,6 +2106,24 @@ function monitorTrades(){
     tr.pnl=(d.p-tr.entry)/tr.entry*100;
     if(tr.pnl>tr.maxGain){tr.maxGain=tr.pnl;tr.maxGainPrice=d.p;tr.maxGainTime=Date.now()}
     if(tr.pnl<tr.minPnl)tr.minPnl=tr.pnl;
+    /* Idea 2: advisories that don't auto-close but prompt action.
+       Covers the common cases the hard exits below don't catch early
+       enough: CVD flipping while we're comfortably in profit, funding
+       blowing out, or max drawdown eating into a solid gain. */
+    if(tr.pnl>=3){
+      var _cvd=analyzeCVD(tr.sym);
+      if(_cvd&&_cvd.divergence==='BEARISH'){
+        advise(tr,'cvd_bear','📉',lang==='ar'?'CVD انقلب — فكّر بجني الربح':'CVD flipped — consider taking profit','+'+tr.pnl.toFixed(1)+'%')
+      }
+      var _frNow=FR[tr.sym];
+      if(_frNow&&_frNow.rate>0.1){
+        advise(tr,'fr_extreme','🔥',lang==='ar'?'FR متطرف — جني الربح ممكن':'Funding extreme — lock gains','FR='+_frNow.rate.toFixed(3)+'% | +'+tr.pnl.toFixed(1)+'%')
+      }
+      /* Trend cracks: price dropped 40% of the way from max toward entry */
+      if(tr.maxGain>=4&&tr.pnl<tr.maxGain*0.6){
+        advise(tr,'giveback','⚠️',lang==='ar'?'تراجع من القمة — حماية الربح':'Drawdown from peak — protect gains','max +'+tr.maxGain.toFixed(1)+'% → +'+tr.pnl.toFixed(1)+'%')
+      }
+    }
     /* Snapshot every 5 min */
     var lastSnap=tr.snapshots.length?tr.snapshots[tr.snapshots.length-1].t:0;
     if(Date.now()-lastSnap>=300000){tr.snapshots.push({p:d.p,pnl:tr.pnl,t:Date.now()});if(tr.snapshots.length>200)tr.snapshots=tr.snapshots.slice(-200)}
@@ -5786,6 +5765,21 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   /* ═══ MAIN POLLING: fetch /api/all every 5 seconds ═══ */
   setInterval(async function(){try{await loadTk();checkWatchlistAlerts();updateConnStatus()}catch(e){connMetrics.apiFail++;updateConnStatus()}},5000);
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))try{await loadDash()}catch(e){}},120000);
+  /* Idea 4 — Scanner tab auto-refresh. While the user is on the
+     Scanner tab and its Trading sub-tab is active, re-run loadTrading
+     every 2 minutes so the signal list stays fresh without manual
+     taps. Respects the same visibility + tab-active pattern used by
+     the Dashboard refresher above, so backgrounded tabs stay quiet. */
+  setInterval(async function(){
+    if(typeof document.visibilityState==='string'&&document.visibilityState==='hidden')return;
+    var pgScan=document.getElementById('pg-scan');
+    if(!pgScan||!pgScan.classList.contains('act'))return;
+    /* Only auto-refresh the Trading sub-tab (idx=0) — sectors and
+       small-caps have their own cadences and would churn UI for no
+       benefit. */
+    if(curScanTab!==0)return;
+    try{await loadTrading()}catch(e){}
+  },120000);
   setInterval(monitorTrades,10000);
   setInterval(function(){try{renderTop3()}catch(e){}},60000); /* Auto-update VIP trades every minute */
   setInterval(function(){notifiedSet={};safeSet('nxnot10','{}');tgSent={}},3600000);

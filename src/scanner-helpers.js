@@ -1,0 +1,228 @@
+/* NEXUS PRO — pure scanner helpers.
+   Extracted from app.js so they can be unit-tested without having to
+   boot the whole application. None of these touch app-level globals:
+   callers pass in klines / arrays / numbers and receive a plain
+   object or scalar back.
+
+   Depends on src/utils.js for calcEMA (Multi-TF alignment uses it).
+   Loaded via <script> in index.html *after* src/utils.js. */
+
+/* Confirmed Breakout Gate.
+   A real breakout needs (a) the most recent closed 15m candle's close
+   above the highest high of the previous `lookback` (default 20) bars,
+   and (b) the breakout bar's volume at least `volMult` × the average
+   of the prior bars. Without both, a candle that merely tags the
+   prior high is a wick — not a breakout. */
+function isConfirmedBreakout(kl15, lookback, volMult) {
+  lookback = lookback || 20;
+  volMult = volMult || 1.5;
+  if (!kl15 || kl15.length < lookback + 1) return { confirmed: false };
+  var last = kl15[kl15.length - 1];
+  var lastClose = +last[4];
+  var lastVol = +last[5];
+  var priorHigh = 0;
+  var volSum = 0;
+  for (var i = kl15.length - 1 - lookback; i < kl15.length - 1; i++) {
+    var h = +kl15[i][2];
+    if (h > priorHigh) priorHigh = h;
+    volSum += +kl15[i][5];
+  }
+  var avgVol = volSum / lookback;
+  var vRatio = avgVol > 0 ? lastVol / avgVol : 0;
+  return {
+    confirmed: lastClose > priorHigh && vRatio >= volMult,
+    priorHigh: priorHigh,
+    volRatio: vRatio,
+  };
+}
+
+/* Multi-Timeframe EMA Alignment.
+   Bullish alignment on 15m AND 1h is meaningful confluence; a bearish
+   4h backdrop is a strong headwind regardless of LTF momentum. Returns
+     - aligned15m1h: both LTFs bullish (EMA20 > EMA50)
+     - bearish4h:    HTF bearish (EMA20 <= EMA50 on 4h)
+     - bull4h:       HTF bullish (positive confirmation, not just absent negative)
+     - score:        additive score contribution (+15 / -25 / 0) */
+function tfAlignment(kl15, kl1h, kl4h) {
+  function bullish(kl) {
+    if (!kl || kl.length < 50) return null;
+    var closes = kl.map(function (k) { return +k[4]; });
+    var e20 = calcEMA(closes, 20);
+    var e50 = calcEMA(closes, 50);
+    if (e20 == null || e50 == null) return null;
+    return e20 > e50;
+  }
+  var b15 = bullish(kl15);
+  var b1h = bullish(kl1h);
+  var b4h = bullish(kl4h);
+  var aligned = b15 === true && b1h === true;
+  var bear4h = b4h === false;
+  var score = 0;
+  if (aligned) score += 15;
+  if (bear4h) score -= 25;
+  return { aligned15m1h: aligned, bearish4h: bear4h, bull4h: b4h === true, score: score };
+}
+
+/* ATR-based entry / stop / target zones.
+   Replaces fixed-percent multipliers with volatility-aware bounds.
+   price - stopMult × ATR is the minimum risk; price + targetMult × ATR
+   is the minimum reward. When classic support/resistance is tighter we
+   use those — ATR is the floor, not a ceiling. Returns null if price
+   or ATR is missing. */
+function atrZones(price, atr, support, resistance) {
+  if (!atr || atr <= 0 || !price) return null;
+  var stopMult = 1.5;
+  var t1Mult = 3.0;
+  var t2Mult = 5.0;
+  var stop = price - stopMult * atr;
+  if (support && support > 0 && support < price) {
+    stop = Math.max(stop, support * 0.985);
+  }
+  var target1 = price + t1Mult * atr;
+  if (resistance && resistance > price) {
+    target1 = Math.min(target1, resistance);
+  }
+  var target2 = price + t2Mult * atr;
+  var risk = price - stop;
+  var rr = risk > 0 ? +((target1 - price) / risk).toFixed(2) : 0;
+  return {
+    entry: price,
+    stop: stop,
+    target1: target1,
+    target2: target2,
+    rr: rr,
+    atr: atr,
+  };
+}
+
+/* Count how many entries in `waves` have a timestamp within the last
+   `windowMs`. Pure version of whaleWaveConsensus — takes the waves
+   array directly so tests don't need the app's global whaleWaves. */
+function countWavesInWindow(waves, windowMs) {
+  if (!waves || !waves.length) return 0;
+  var cutoff = Date.now() - windowMs;
+  var n = 0;
+  for (var i = 0; i < waves.length; i++) {
+    if (waves[i] && waves[i].time >= cutoff) n++;
+  }
+  return n;
+}
+
+/* Signal Performance Report — honest backtest over persisted history.
+   Buckets the *checked* predictions and closed trades to answer one
+   question: which signal types are actually making money?
+
+   Why this isn't a true backtest: quickScan/deepAnalyze depend on live
+   global state (T, FR, LS, depthSnapshots, …) we don't preserve per
+   historical snapshot. We can't replay the engine on old market data.
+   What we CAN do is measure which signals did and didn't work in the
+   past — that's useful, if less glamorous than "backtest".
+
+   Input:
+     - preds = predictions[] (hit? partial? score, time, pnl)
+     - trades = activeTrades[] (status, finalPnl, type, score, duration, exitReason)
+   Output:
+     {
+       totalChecked, totalClosed,
+       byTier: { ultra, whale, breakout } each { rate, wins, partials,
+                                                  losses, samples, avgPnl, profitFactor },
+       byExitReason: { '<reason>': count },
+       recentTrend: [ { bucket, rate } ]   // win rate in rolling 25-pred windows
+     }
+   Buckets with fewer than 3 samples report rate = null so the caller
+   can hide noisy cells instead of showing a misleading 100%. */
+function computePerformanceReport(preds, trades) {
+  var out = {
+    totalChecked: 0,
+    totalClosed: 0,
+    byTier: { ultra: null, whale: null, breakout: null },
+    byExitReason: {},
+    recentTrend: [],
+  };
+  var checked = (preds || []).filter(function (p) { return p && p.checked; });
+  out.totalChecked = checked.length;
+  /* Tier buckets from predictions. Score thresholds mirror the ones
+     used elsewhere in the app (acc panel, win-rate badge). */
+  var buckets = {
+    ultra: { wins: 0, partials: 0, losses: 0, samples: 0, pnlSum: 0, gains: 0, losses_abs: 0 },
+    whale: { wins: 0, partials: 0, losses: 0, samples: 0, pnlSum: 0, gains: 0, losses_abs: 0 },
+    breakout: { wins: 0, partials: 0, losses: 0, samples: 0, pnlSum: 0, gains: 0, losses_abs: 0 },
+  };
+  for (var i = 0; i < checked.length; i++) {
+    var p = checked[i];
+    var b = p.score >= 60 ? buckets.ultra : p.score >= 40 ? buckets.whale : buckets.breakout;
+    b.samples++;
+    if (p.hit) b.wins++;
+    else if (p.partial) b.partials++;
+    else b.losses++;
+    var pnl = +p.pnl || 0;
+    b.pnlSum += pnl;
+    if (pnl > 0) b.gains += pnl;
+    else b.losses_abs += Math.abs(pnl);
+  }
+  function finalize(b) {
+    if (b.samples < 3) return null;
+    var rate = Math.round(((b.wins + b.partials * 0.5) / b.samples) * 100);
+    var avgPnl = +(b.pnlSum / b.samples).toFixed(2);
+    var pf = b.losses_abs > 0 ? +(b.gains / b.losses_abs).toFixed(2) : (b.gains > 0 ? Infinity : 0);
+    return {
+      rate: rate,
+      wins: b.wins,
+      partials: b.partials,
+      losses: b.losses,
+      samples: b.samples,
+      avgPnl: avgPnl,
+      profitFactor: pf,
+    };
+  }
+  out.byTier.ultra = finalize(buckets.ultra);
+  out.byTier.whale = finalize(buckets.whale);
+  out.byTier.breakout = finalize(buckets.breakout);
+  /* Closed-trade breakdown by exit reason. Useful for answering "am I
+     mostly getting stopped out, or hitting targets?" */
+  var closed = (trades || []).filter(function (t) { return t && t.status === 'CLOSED'; });
+  out.totalClosed = closed.length;
+  for (var j = 0; j < closed.length; j++) {
+    var reason = closed[j].exitReason || 'unknown';
+    out.byExitReason[reason] = (out.byExitReason[reason] || 0) + 1;
+  }
+  /* Rolling 25-prediction win-rate series — shows whether recent
+     performance is trending up or down. Only emitted when we have at
+     least 50 checked predictions. */
+  if (checked.length >= 50) {
+    var windowSize = 25;
+    for (var k = windowSize; k <= checked.length; k += windowSize) {
+      var slice = checked.slice(k - windowSize, k);
+      var wins = 0;
+      for (var m = 0; m < slice.length; m++) {
+        if (slice[m].hit) wins += 1;
+        else if (slice[m].partial) wins += 0.5;
+      }
+      out.recentTrend.push({
+        bucket: k,
+        rate: Math.round((wins / slice.length) * 100),
+      });
+    }
+  }
+  return out;
+}
+
+/* Average rolling Order Flow Imbalance over the samples in `arr` that
+   fall within `windowMs` of now. Needs at least 5 samples in the
+   window to return a number — otherwise returns null so callers can
+   fall back to a snapshot. */
+function rollingOBIFromArr(arr, windowMs) {
+  if (!arr || arr.length < 5) return null;
+  var now = Date.now();
+  var cutoff = now - windowMs;
+  var sum = 0, n = 0, spanMs = 0, first = null;
+  for (var i = 0; i < arr.length; i++) {
+    if (arr[i].t < cutoff) continue;
+    if (first == null) first = arr[i].t;
+    sum += arr[i].r;
+    n++;
+    spanMs = arr[i].t - first;
+  }
+  if (n < 5) return null;
+  return { avg: sum / n, samples: n, spanMs: spanMs };
+}

@@ -108,6 +108,105 @@ function countWavesInWindow(waves, windowMs) {
   return n;
 }
 
+/* Signal Performance Report — honest backtest over persisted history.
+   Buckets the *checked* predictions and closed trades to answer one
+   question: which signal types are actually making money?
+
+   Why this isn't a true backtest: quickScan/deepAnalyze depend on live
+   global state (T, FR, LS, depthSnapshots, …) we don't preserve per
+   historical snapshot. We can't replay the engine on old market data.
+   What we CAN do is measure which signals did and didn't work in the
+   past — that's useful, if less glamorous than "backtest".
+
+   Input:
+     - preds = predictions[] (hit? partial? score, time, pnl)
+     - trades = activeTrades[] (status, finalPnl, type, score, duration, exitReason)
+   Output:
+     {
+       totalChecked, totalClosed,
+       byTier: { ultra, whale, breakout } each { rate, wins, partials,
+                                                  losses, samples, avgPnl, profitFactor },
+       byExitReason: { '<reason>': count },
+       recentTrend: [ { bucket, rate } ]   // win rate in rolling 25-pred windows
+     }
+   Buckets with fewer than 3 samples report rate = null so the caller
+   can hide noisy cells instead of showing a misleading 100%. */
+function computePerformanceReport(preds, trades) {
+  var out = {
+    totalChecked: 0,
+    totalClosed: 0,
+    byTier: { ultra: null, whale: null, breakout: null },
+    byExitReason: {},
+    recentTrend: [],
+  };
+  var checked = (preds || []).filter(function (p) { return p && p.checked; });
+  out.totalChecked = checked.length;
+  /* Tier buckets from predictions. Score thresholds mirror the ones
+     used elsewhere in the app (acc panel, win-rate badge). */
+  var buckets = {
+    ultra: { wins: 0, partials: 0, losses: 0, samples: 0, pnlSum: 0, gains: 0, losses_abs: 0 },
+    whale: { wins: 0, partials: 0, losses: 0, samples: 0, pnlSum: 0, gains: 0, losses_abs: 0 },
+    breakout: { wins: 0, partials: 0, losses: 0, samples: 0, pnlSum: 0, gains: 0, losses_abs: 0 },
+  };
+  for (var i = 0; i < checked.length; i++) {
+    var p = checked[i];
+    var b = p.score >= 60 ? buckets.ultra : p.score >= 40 ? buckets.whale : buckets.breakout;
+    b.samples++;
+    if (p.hit) b.wins++;
+    else if (p.partial) b.partials++;
+    else b.losses++;
+    var pnl = +p.pnl || 0;
+    b.pnlSum += pnl;
+    if (pnl > 0) b.gains += pnl;
+    else b.losses_abs += Math.abs(pnl);
+  }
+  function finalize(b) {
+    if (b.samples < 3) return null;
+    var rate = Math.round(((b.wins + b.partials * 0.5) / b.samples) * 100);
+    var avgPnl = +(b.pnlSum / b.samples).toFixed(2);
+    var pf = b.losses_abs > 0 ? +(b.gains / b.losses_abs).toFixed(2) : (b.gains > 0 ? Infinity : 0);
+    return {
+      rate: rate,
+      wins: b.wins,
+      partials: b.partials,
+      losses: b.losses,
+      samples: b.samples,
+      avgPnl: avgPnl,
+      profitFactor: pf,
+    };
+  }
+  out.byTier.ultra = finalize(buckets.ultra);
+  out.byTier.whale = finalize(buckets.whale);
+  out.byTier.breakout = finalize(buckets.breakout);
+  /* Closed-trade breakdown by exit reason. Useful for answering "am I
+     mostly getting stopped out, or hitting targets?" */
+  var closed = (trades || []).filter(function (t) { return t && t.status === 'CLOSED'; });
+  out.totalClosed = closed.length;
+  for (var j = 0; j < closed.length; j++) {
+    var reason = closed[j].exitReason || 'unknown';
+    out.byExitReason[reason] = (out.byExitReason[reason] || 0) + 1;
+  }
+  /* Rolling 25-prediction win-rate series — shows whether recent
+     performance is trending up or down. Only emitted when we have at
+     least 50 checked predictions. */
+  if (checked.length >= 50) {
+    var windowSize = 25;
+    for (var k = windowSize; k <= checked.length; k += windowSize) {
+      var slice = checked.slice(k - windowSize, k);
+      var wins = 0;
+      for (var m = 0; m < slice.length; m++) {
+        if (slice[m].hit) wins += 1;
+        else if (slice[m].partial) wins += 0.5;
+      }
+      out.recentTrend.push({
+        bucket: k,
+        rate: Math.round((wins / slice.length) * 100),
+      });
+    }
+  }
+  return out;
+}
+
 /* Average rolling Order Flow Imbalance over the samples in `arr` that
    fall within `windowMs` of now. Needs at least 5 samples in the
    window to return a number — otherwise returns null so callers can

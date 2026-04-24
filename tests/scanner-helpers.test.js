@@ -207,6 +207,99 @@ test('rollingOBIFromArr — averages samples inside the window', () => {
   assert.equal(r.avg, 2);
 });
 
+/* ─── computePerformanceReport ────────────────────────────────────── */
+
+test('computePerformanceReport — empty history returns a zeroed skeleton', () => {
+  const r = computePerformanceReport([], []);
+  assert.equal(r.totalChecked, 0);
+  assert.equal(r.totalClosed, 0);
+  assert.equal(r.byTier.ultra, null);
+  assert.equal(r.byTier.whale, null);
+  assert.equal(r.byTier.breakout, null);
+  assert.deepEqual(r.byExitReason, {});
+  assert.deepEqual(r.recentTrend, []);
+});
+
+test('computePerformanceReport — tier buckets with <3 samples report null', () => {
+  const preds = [
+    { checked: true, hit: true, score: 65, pnl: 3 },
+    { checked: true, hit: false, score: 65, pnl: -2 },
+  ];
+  const r = computePerformanceReport(preds, []);
+  assert.equal(r.byTier.ultra, null, '2 samples < 3 threshold → null');
+});
+
+test('computePerformanceReport — 3-sample bucket computes rate + PF', () => {
+  const preds = [
+    { checked: true, hit: true, score: 65, pnl: 4 },
+    { checked: true, hit: false, score: 65, pnl: -2 },
+    { checked: true, partial: true, score: 65, pnl: 1 },
+  ];
+  const r = computePerformanceReport(preds, []);
+  const u = r.byTier.ultra;
+  assert.ok(u, 'ultra bucket should materialize at 3 samples');
+  assert.equal(u.samples, 3);
+  assert.equal(u.wins, 1);
+  assert.equal(u.partials, 1);
+  assert.equal(u.losses, 1);
+  /* (1 win + 1 partial * 0.5) / 3 = 50% */
+  assert.equal(u.rate, 50);
+  /* Gains = 4+1 = 5; losses_abs = 2; PF = 5/2 = 2.5 */
+  assert.equal(u.profitFactor, 2.5);
+  /* avgPnl = (4 - 2 + 1) / 3 = 1 */
+  assert.equal(u.avgPnl, 1);
+});
+
+test('computePerformanceReport — score thresholds match tier buckets', () => {
+  /* 3 ultra (score >=60), 3 whale (40-59), 3 breakout (<40) */
+  const preds = [
+    { checked: true, hit: true, score: 75, pnl: 5 },
+    { checked: true, hit: true, score: 65, pnl: 5 },
+    { checked: true, hit: true, score: 60, pnl: 5 },
+    { checked: true, hit: true, score: 50, pnl: 3 },
+    { checked: true, hit: true, score: 45, pnl: 3 },
+    { checked: true, hit: true, score: 40, pnl: 3 },
+    { checked: true, hit: true, score: 30, pnl: 2 },
+    { checked: true, hit: true, score: 20, pnl: 2 },
+    { checked: true, hit: true, score: 10, pnl: 2 },
+  ];
+  const r = computePerformanceReport(preds, []);
+  assert.equal(r.byTier.ultra.samples, 3);
+  assert.equal(r.byTier.whale.samples, 3);
+  assert.equal(r.byTier.breakout.samples, 3);
+  assert.equal(r.byTier.ultra.rate, 100);
+});
+
+test('computePerformanceReport — groups closed trades by exit reason', () => {
+  const trades = [
+    { status: 'CLOSED', exitReason: '🎯 Full target' },
+    { status: 'CLOSED', exitReason: '🎯 Full target' },
+    { status: 'CLOSED', exitReason: '🛑 Stop loss' },
+    { status: 'OPEN', exitReason: 'n/a' },
+    { status: 'CLOSED' }, // no reason
+  ];
+  const r = computePerformanceReport([], trades);
+  assert.equal(r.totalClosed, 4, '4 CLOSED + 1 OPEN in input, only CLOSED counts');
+  assert.equal(r.byExitReason['🎯 Full target'], 2);
+  assert.equal(r.byExitReason['🛑 Stop loss'], 1);
+  assert.equal(r.byExitReason['unknown'], 1);
+});
+
+test('computePerformanceReport — recent trend emitted only at 50+ samples', () => {
+  const few = Array.from({ length: 40 }, (_, i) => ({
+    checked: true, hit: i % 2 === 0, score: 50, pnl: i % 2 === 0 ? 2 : -1,
+  }));
+  assert.equal(computePerformanceReport(few, []).recentTrend.length, 0);
+  const plenty = Array.from({ length: 75 }, (_, i) => ({
+    checked: true, hit: i % 2 === 0, score: 50, pnl: i % 2 === 0 ? 2 : -1,
+  }));
+  const r = computePerformanceReport(plenty, []);
+  /* 75 predictions, window=25 → buckets at 25, 50, 75 */
+  assert.equal(r.recentTrend.length, 3);
+  assert.equal(r.recentTrend[0].bucket, 25);
+  assert.equal(r.recentTrend[2].bucket, 75);
+});
+
 test('rollingOBIFromArr — stale samples outside the window are dropped', () => {
   const now = Date.now();
   const arr = [

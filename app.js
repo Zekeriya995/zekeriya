@@ -1072,6 +1072,26 @@ async function loadTrading(){var trLoadEl=document.getElementById('tradeList');i
     sigs.push({s:x.s,p:d.p,c:d.c,v:d.v,type:type,conf:conf,entry:entry,target:target,stop:stop,rr:rr,dur:dur,reasons:reasons,score:x.score,checks:x.checks,passed:x.passed,total:x.total,ultra:x.ultra,confirmed:x.confirmed,tags:x.tags,sec:sec,detectedAt:x.detectedAt,priceAtDetection:x.priceAtDetection,ageMinutes:x.ageMinutes,changeFromDetection:x.changeFromDetection,freshness:x.freshness})}
   sigs.sort(function(a,b){return b.conf-a.conf});renderTrading(sigs)}
 function filterTrade(f,btn){curTradeFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadTrading()}
+/* Idea 3 — Recent win rate per signal tier.
+   Buckets checked predictions by the same score thresholds the acc
+   panel uses, then exposes a rate (0-100) + sample count. Returns null
+   when the bucket has too few samples to say anything honest (< 5). */
+function recentTierRates(limit){
+  limit=limit||50;
+  var recent=predictions.filter(function(p){return p.checked}).slice(-limit);
+  var buckets={ultra:{h:0,p:0,t:0},whale:{h:0,p:0,t:0},brk:{h:0,p:0,t:0}};
+  for(var i=0;i<recent.length;i++){
+    var pr=recent[i];var b=pr.score>=60?buckets.ultra:pr.score>=40?buckets.whale:buckets.brk;
+    b.t++;if(pr.hit)b.h++;else if(pr.partial)b.p++;
+  }
+  function rate(b){if(b.t<5)return null;return Math.round(((b.h+b.p*0.5)/b.t)*100)}
+  return{
+    ultra:{rate:rate(buckets.ultra),samples:buckets.ultra.t},
+    whale:{rate:rate(buckets.whale),samples:buckets.whale.t},
+    brk:{rate:rate(buckets.brk),samples:buckets.brk.t},
+  };
+}
+
 function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter(function(x){return x.type==='fast'});else if(curTradeFilter==='daily')f=sigs.filter(function(x){return x.type==='daily'});else if(curTradeFilter!=='all'){f=sigs.filter(function(x){return x.sec===curTradeFilter})}
   /* Part B: Quality filter — min 40% confidence, max 7 — adaptive */
   var minConf=monitorState&&monitorState.minConf?Math.max(35,monitorState.minConf-10):40;
@@ -1096,9 +1116,23 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
   /* ═══ Update summary bar ═══ */
   updateScanSummary(f.length,tkCount);
   if(!f.length){var trEl=document.getElementById('tradeList');if(trEl)trEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">'+(tkCount<5?'⚠️':'📡')+'</div><div class="sc-empty-title">'+(tkCount<5?(lang==='ar'?'لم يتم تحميل البيانات بعد':'Data not loaded yet'):(lang==='ar'?'السوق هادئ — لا فرص قوية':'Market quiet — No strong signals'))+'</div><div class="sc-empty-sub">'+(tkCount<5?(lang==='ar'?'تحقق من اتصال الإنترنت أو اضغط تحديث':'Check internet or tap refresh'):(lang==='ar'?'البوابة الذكية ترفض الإشارات الضعيفة — الانتظار أفضل':'Smart gate blocks weak signals — Waiting is better'))+'</div>'+(tkCount<5?'<div class="sc-empty-retry"><button class="rfr" onclick="loadTk().then(function(){loadTrading()})">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div>':'')+'<div class="sc-empty-stats"><span>📊 '+tkCount+' '+(lang==='ar'?'عملة محملة':'coins loaded')+'</span><span>'+srcLabel+'</span></div></div>';return}
+  /* Idea 3: precompute per-tier win rates once per render — every card
+     in the same tier shows the same rate, so there's no reason to
+     recompute it per signal. */
+  var _tierRates=recentTierRates(50);
   var h='';f.forEach(function(s,i){
     var tCol=s.type==='fast'?'var(--blue)':'var(--up)';var tLbl=s.type==='fast'?t('scan_fast'):t('scan_daily');
     var tb=getTierBadge(s.s);var ta=timeAgo(s.detectedAt||Date.now());
+    /* Win-rate badge: pick the bucket that matches this signal's score
+       tier (same thresholds the accuracy panel uses). Hidden when the
+       bucket has fewer than 5 samples — a 2/3 win streak isn't data. */
+    var _wrBucket=s.score>=60?_tierRates.ultra:s.score>=40?_tierRates.whale:_tierRates.brk;
+    var _wrHTML='';
+    if(_wrBucket&&_wrBucket.rate!=null){
+      var _wrCol=_wrBucket.rate>=60?'var(--up)':_wrBucket.rate>=45?'var(--warn)':'var(--dn)';
+      var _wrTxt=(lang==='ar'?'نجاح سابق ':'Past win rate ')+_wrBucket.rate+'% ('+_wrBucket.samples+')';
+      _wrHTML='<div style="font-size:9px;color:'+_wrCol+';font-weight:700;margin-top:4px;text-align:center">🏆 '+_wrTxt+'</div>';
+    }
     /* Verdict (Part B) */
     var verdict,vCol,vBg;
     if(s.conf>=85&&s.ultra){verdict=lang==='ar'?'🟢 إشارة ممتازة — ادخل بثقة':'🟢 Excellent — Enter Now';vCol='var(--up)';vBg='rgba(0,255,136,.08)'}
@@ -1140,7 +1174,7 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
       /* Price */
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="font-family:var(--fm);font-size:18px;font-weight:800;color:var(--t0)">'+fP(s.p)+'</span><span style="font-family:var(--fm);font-size:14px;font-weight:800;color:'+(s.c>=0?'var(--up)':'var(--dn)')+'">'+(s.c>=0?'+':'')+s.c.toFixed(1)+'%</span></div>'
       /* Verdict */
-      +'<div class="sc-verdict" style="background:'+vBg+';border:1px solid '+vCol+'20"><div class="sc-verdict-t" style="color:'+vCol+'">'+verdict+'</div><div class="sc-verdict-s">'+s.passed+'/6 '+(lang==='ar'?'فحوصات':'checks')+' · 🐋 '+wConf+'% · BTC '+(btcChg>=0?'+':'')+btcChg.toFixed(1)+'%</div></div>'
+      +'<div class="sc-verdict" style="background:'+vBg+';border:1px solid '+vCol+'20"><div class="sc-verdict-t" style="color:'+vCol+'">'+verdict+'</div><div class="sc-verdict-s">'+s.passed+'/6 '+(lang==='ar'?'فحوصات':'checks')+' · 🐋 '+wConf+'% · BTC '+(btcChg>=0?'+':'')+btcChg.toFixed(1)+'%</div>'+_wrHTML+'</div>'
       /* 6 Checks Grid */
       +chkHTML
       /* Quick 3 */

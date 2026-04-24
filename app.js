@@ -1731,7 +1731,25 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   else{sc-=10}
   /* ═══ Negative change + high volume = reversal ═══ */
   if(d.c<=-3&&d.c>=-10&&d.v>5e7){sc+=12;tags.push('🔄REVERSAL')}
-  if(sc>=15)cands.push({s:s,p:d.p,c:d.c,v:d.v,score:sc,tags:tags,fr:fr?fr.rate:null,by:d.by,cb:CBP[s]})});
+  /* ═══ Idea 1 — Pump & Dump risk detector ═══
+     Count how many late-cycle warning signs are firing at once. Any
+     single one is normal market noise; three together is the classic
+     "retail FOMO peak" pattern that precedes distribution. A P&D
+     detection zeroes the score so qualityFilter drops the coin before
+     the user sees it. */
+  var pdFlags=0;var pdReasons=[];
+  if(d.c>=15){pdFlags++;pdReasons.push('VERTICAL:+'+d.c.toFixed(0)+'%')}
+  if(fr&&fr.rate>0.1){pdFlags++;pdReasons.push('FR_EXTREME:'+fr.rate.toFixed(3))}
+  if(LS[s]&&LS[s].ratio>3){pdFlags++;pdReasons.push('LS_RETAIL_LONG:'+LS[s].ratio.toFixed(1))}
+  if(topTradersLS[s]&&topTradersLS[s].positions&&topTradersLS[s].positions.length>0){
+    var _tp=topTradersLS[s].positions[topTradersLS[s].positions.length-1];
+    if(_tp&&_tp.long<0.4&&LS[s]&&LS[s].ratio>2){pdFlags++;pdReasons.push('SMART_VS_RETAIL')}
+  }
+  /* Volume declining while price still pushing — exhaustion */
+  if(d.c>=8&&d.v<3e7){pdFlags++;pdReasons.push('THIN_PUMP')}
+  if(pdFlags>=3){sc=Math.min(sc,-100);tags.push('🚨P&D_RISK:'+pdFlags+'/5')}
+  else if(pdFlags===2){sc-=25;tags.push('⚠️P&D_WARN:'+pdFlags+'/5')}
+  if(sc>=15)cands.push({s:s,p:d.p,c:d.c,v:d.v,score:sc,tags:tags,fr:fr?fr.rate:null,by:d.by,cb:CBP[s],pdFlags:pdFlags})});
   return cands.sort(function(a,b){return b.score-a.score})}
 /* DEEP ANALYZE — tier-aware: T1=6 checks, T2=4 checks, T3=volume only */
 async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
@@ -1925,7 +1943,7 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
     var _freshness='fresh';
     if(_ageMins>60||Math.abs(_changeDet)>5)_freshness='old';
     else if(_ageMins>15||Math.abs(_changeDet)>2)_freshness='warm';
-    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
+    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,pdFlags:c.pdFlags||0,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
   return results.sort(function(a,b){return b.score-a.score})}
 /* ═══ QUALITY FILTER v3 — strict gate before rendering ═══ */
 function qualityFilter(results){
@@ -1943,6 +1961,11 @@ function qualityFilter(results){
     if(r.c>=3&&r.kl15Available&&r.confirmedBreakout===false)return false;
     /* Improvement 2: HTF headwind — 4h bearish kills any multi-hour trade. */
     if(r.tfAlign&&r.tfAlign.bearish4h)return false;
+    /* Idea 1: reject Pump & Dump setups (3+ retail-FOMO warnings firing
+       at once). The quickScan score penalty already pushes these below
+       threshold, but we defend in depth in case a noisy bonus pushes
+       the score back up. */
+    if(r.pdFlags>=3)return false;
     /* Timing filter: drift too far from detection */
     var sig=sigHist[r.s+'_trade'];
     if(sig&&typeof sig==='object'&&sig.priceAtDetection>0){

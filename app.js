@@ -1040,7 +1040,20 @@ function filterTrade(f,btn){curTradeFilter=f;btn.parentElement.querySelectorAll(
 function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter(function(x){return x.type==='fast'});else if(curTradeFilter==='daily')f=sigs.filter(function(x){return x.type==='daily'});else if(curTradeFilter!=='all'){f=sigs.filter(function(x){return x.sec===curTradeFilter})}
   /* Part B: Quality filter — min 40% confidence, max 7 — adaptive */
   var minConf=monitorState&&monitorState.minConf?Math.max(35,monitorState.minConf-10):40;
-  f=f.filter(function(s){return s.conf>=minConf}).slice(0,7);
+  f=f.filter(function(s){return s.conf>=minConf});
+  /* Improvement 6: Correlation Deduplication — at most 2 signals per
+     classified sector. If DeFi tanks, three DeFi longs all lose
+     together; capping sector exposure is real diversification. Coins
+     without a known sector (sec === null) are passed through untouched. */
+  var _secCounts={};var _deduped=[];
+  for(var _si=0;_si<f.length;_si++){
+    var _sig=f[_si];var _sk=_sig.sec||null;
+    if(_sk==null){_deduped.push(_sig);continue}
+    if((_secCounts[_sk]||0)>=2)continue;
+    _secCounts[_sk]=(_secCounts[_sk]||0)+1;
+    _deduped.push(_sig);
+  }
+  f=_deduped.slice(0,7);
   var scanIEl=document.getElementById('scanI');
   var tkCount=Object.keys(T).length;
   var srcLabel=_proxyAlive?(lang==='ar'?'🟢 PROXY':'🟢 PROXY'):(lang==='ar'?'⚡ مباشر':'⚡ Direct');

@@ -159,6 +159,37 @@ function calcEMA(data, period) {
   return ema;
 }
 
+/* Average True Range (Wilder, default 14) over kline bars in
+   Binance's `[openTime, open, high, low, close, volume, ...]` shape.
+   Returns null when there aren't at least `period + 1` bars — ATR
+   needs one prior close to compute the first True Range.
+
+   TR(i) = max( high - low,
+                | high - prevClose |,
+                | low  - prevClose | )
+   ATR is the Wilder-smoothed TR (same RMA used by calcRSI). */
+function calcATR(klines, period) {
+  period = period || 14;
+  if (!klines || klines.length < period + 1) return null;
+  var trs = [];
+  for (var i = 1; i < klines.length; i++) {
+    var h = +klines[i][2];
+    var l = +klines[i][3];
+    var pc = +klines[i - 1][4];
+    var tr = Math.max(h - l, Math.abs(h - pc), Math.abs(l - pc));
+    trs.push(tr);
+  }
+  if (trs.length < period) return null;
+  /* Seed: SMA of the first `period` TRs, then Wilder recurrence. */
+  var atr = 0;
+  for (var j = 0; j < period; j++) atr += trs[j];
+  atr /= period;
+  for (var k = period; k < trs.length; k++) {
+    atr = (atr * (period - 1) + trs[k]) / period;
+  }
+  return atr;
+}
+
 /* Pearson correlation coefficient between two equal-length numeric
    series. When the inputs differ in length, the shorter tail is
    taken from each — Binance klines are timestamp-aligned, so the

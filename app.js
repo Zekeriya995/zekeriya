@@ -1495,6 +1495,100 @@ function buildUnlocksCard(){
 }
 
 
+/* ═══ SCANNER STRENGTH HELPERS v1 ═══
+   Pure functions over Binance-shaped klines ([t,o,h,l,c,v,…]). Each takes
+   whatever klines it has and returns null/false when data is missing so
+   callers can degrade gracefully. Kept near quickScan so the scoring
+   engine is readable top-to-bottom. */
+
+/* Improvement 1 — Confirmed Breakout Gate.
+   A *real* breakout needs (a) the most recent closed 15m candle's close
+   above the highest high of the previous `lookback` (default 20) bars,
+   and (b) the breakout bar's volume at least `volMult` × the average of
+   the prior bars. Without both, a candle that merely tags the prior high
+   is a wick — not a breakout. */
+function isConfirmedBreakout(kl15, lookback, volMult) {
+  lookback = lookback || 20;
+  volMult = volMult || 1.5;
+  if (!kl15 || kl15.length < lookback + 1) return { confirmed: false };
+  var last = kl15[kl15.length - 1];
+  var lastClose = +last[4];
+  var lastVol = +last[5];
+  var priorHigh = 0;
+  var volSum = 0;
+  for (var i = kl15.length - 1 - lookback; i < kl15.length - 1; i++) {
+    var h = +kl15[i][2];
+    if (h > priorHigh) priorHigh = h;
+    volSum += +kl15[i][5];
+  }
+  var avgVol = volSum / lookback;
+  var vRatio = avgVol > 0 ? lastVol / avgVol : 0;
+  return {
+    confirmed: lastClose > priorHigh && vRatio >= volMult,
+    priorHigh: priorHigh,
+    volRatio: vRatio,
+  };
+}
+
+/* Improvement 2 — Multi-Timeframe EMA Alignment.
+   Bullish alignment on 15m AND 1h is a meaningful confluence; a bearish
+   4h backdrop is a strong headwind that deserves a penalty regardless of
+   how pretty the lower timeframes look. Returns:
+     - aligned15m1h: both LTFs bullish (EMA20 > EMA50)
+     - bearish4h:    HTF bearish (EMA20 <= EMA50 on 4h)
+     - score:        additive score contribution */
+function tfAlignment(kl15, kl1h, kl4h) {
+  function bullish(kl) {
+    if (!kl || kl.length < 50) return null;
+    var closes = kl.map(function (k) { return +k[4]; });
+    var e20 = calcEMA(closes, 20);
+    var e50 = calcEMA(closes, 50);
+    if (e20 == null || e50 == null) return null;
+    return e20 > e50;
+  }
+  var b15 = bullish(kl15);
+  var b1h = bullish(kl1h);
+  var b4h = bullish(kl4h);
+  var aligned = b15 === true && b1h === true;
+  var bear4h = b4h === false;
+  var score = 0;
+  if (aligned) score += 15;
+  if (bear4h) score -= 25;
+  return { aligned15m1h: aligned, bearish4h: bear4h, bull4h: b4h === true, score: score };
+}
+
+/* Improvement 3 — ATR-based entry/stop/target zones.
+   Replaces fixed-percent multipliers with volatility-aware bounds. Price
+   below stopMult × ATR is the minimum risk; price above targetMult × ATR
+   is the minimum reward. When classic support/resistance is tighter we
+   use those — ATR is the floor, not a ceiling. */
+function atrZones(price, atr, support, resistance) {
+  if (!atr || atr <= 0 || !price) return null;
+  var stopMult = 1.5;
+  var t1Mult = 3.0;
+  var t2Mult = 5.0;
+  var stop = price - stopMult * atr;
+  if (support && support > 0 && support < price) {
+    stop = Math.max(stop, support * 0.985);
+  }
+  var target1 = price + t1Mult * atr;
+  if (resistance && resistance > price) {
+    target1 = Math.min(target1, resistance);
+  }
+  var target2 = price + t2Mult * atr;
+  var risk = price - stop;
+  var rr = risk > 0 ? +((target1 - price) / risk).toFixed(2) : 0;
+  return {
+    entry: price,
+    stop: stop,
+    target1: target1,
+    target2: target2,
+    rr: rr,
+    atr: atr,
+  };
+}
+
+
 function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD'];var cands=[];
   var tkCount=Object.keys(T).length;
   var btcOk=T.BTC?T.BTC.c>-2:true;
@@ -1608,18 +1702,20 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   return cands.sort(function(a,b){return b.score-a.score})}
 /* DEEP ANALYZE — tier-aware: T1=6 checks, T2=4 checks, T3=volume only */
 async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
-  var klData={},obData={},kl5Data={},kl15Data={};
-  /* Rate-limit aware: top10 get 5m+15m, top15 get 1h */
+  var klData={},obData={},kl5Data={},kl15Data={},kl4hData={};
+  /* Rate-limit aware: top10 get 5m+15m+4h, top15 get 1h */
   var t1t2=top.filter(function(c){return getCoinTier(c.s)<=2||c.score>=30});
   var top10=t1t2.slice(0,10);
   var top15=t1t2.slice(0,15);
   /* Fetch 1h klines for top 15 */
-  var klProms=top15.map(function(c){return fj(BN+'/klines?symbol='+c.s+'USDT&interval=1h&limit=30').then(function(d){klData[c.s]=d}).catch(function(){})});
+  var klProms=top15.map(function(c){return fj(BN+'/klines?symbol='+c.s+'USDT&interval=1h&limit=60').then(function(d){klData[c.s]=d}).catch(function(){})});
   /* Fetch 15m klines for top 10 */
-  var kl15Proms=top10.map(function(c){return fj(BN+'/klines?symbol='+c.s+'USDT&interval=15m&limit=40').then(function(d){kl15Data[c.s]=d}).catch(function(){})});
+  var kl15Proms=top10.map(function(c){return fj(BN+'/klines?symbol='+c.s+'USDT&interval=15m&limit=60').then(function(d){kl15Data[c.s]=d}).catch(function(){})});
   /* Fetch 5m klines for top 10 */
   var kl5Proms=top10.map(function(c){return fj(BN+'/klines?symbol='+c.s+'USDT&interval=5m&limit=24').then(function(d){kl5Data[c.s]=d}).catch(function(){})});
-  await Promise.all(klProms.concat(kl15Proms).concat(kl5Proms));
+  /* Fetch 4h klines for top 10 — powers Multi-TF alignment HTF check */
+  var kl4hProms=top10.map(function(c){return fj(BN+'/klines?symbol='+c.s+'USDT&interval=4h&limit=60').then(function(d){kl4hData[c.s]=d}).catch(function(){})});
+  await Promise.all(klProms.concat(kl15Proms).concat(kl5Proms).concat(kl4hProms));
   /* Bybit fallback for coins without Binance klines */
   var byMissing=top.filter(function(c){return!klData[c.s]&&T[c.s]&&T[c.s].src==='BY'}).slice(0,10);
   if(byMissing.length){var byProms=byMissing.map(function(c){return fj('https://api.bybit.com/v5/market/kline?category=spot&symbol='+c.s+'USDT&interval=60&limit=30').then(function(d){if(d&&d.result&&d.result.list){klData[c.s]=d.result.list.reverse().map(function(k){return[+k[0],+k[1],+k[2],+k[3],+k[4],+k[5]]})}}).catch(function(){})});
@@ -1703,7 +1799,24 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
     if(_exPrem)_ifCount++;
     if(_ifCount>=2){ds+=15;checks.oi=true;dt.push('📡INFORMED:'+_ifCount+'/4')}
     else if(_ifCount===1){ds+=5;checks.oi=true;dt.push('📡FLOW')}
+    /* ═══ Improvement 1: Confirmed Breakout Gate ═══
+       Breakout-style signals (c >= 2%) must show a closed 15m bar above
+       the prior 20-bar high on >=1.5× avg volume. Real breakout = +20;
+       a claimed breakout without confirmation = −20 (catches wick traps). */
+    var brk=isConfirmedBreakout(kl15,20,1.5);
+    var isBreakoutType=c.c>=2;
+    if(brk.confirmed){ds+=20;dt.push('💥CONFIRM_BRK×'+brk.volRatio.toFixed(1))}
+    else if(isBreakoutType&&kl15&&kl15.length>=21){ds-=20;dt.push('⚠️UNCONFIRMED_BRK')}
+    /* ═══ Improvement 2: Multi-TF EMA Alignment ═══
+       Bullish 15m + 1h = +15. Bearish 4h = −25 (HTF headwind). */
+    var tfAlign=tfAlignment(kl15,kl,kl4hData[c.s]);
+    ds+=tfAlign.score;
+    if(tfAlign.aligned15m1h)dt.push('📐TF_ALIGN');
+    if(tfAlign.bearish4h)dt.push('🚫4H_BEAR');
+    if(tfAlign.bull4h)dt.push('📐4H_BULL');
     passed=Object.values(checks).filter(Boolean).length;
+    /* ATR14 on 15m drives volatility-aware entry zones (Improvement 3). */
+    var atr15=calcATR(kl15,14);
     /* ═══ ULTRA v3.0 — Maximum Accuracy ═══ */
     var isUltra=false;var isConf=false;var whaleConf=0;var smartEntry=null;
     var basicPass=ds>=70&&passed>=5;var confPass=ds>=50&&passed>=4;
@@ -1720,25 +1833,32 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
         if(fomo)whaleConf=Math.min(whaleConf,60);
         isUltra=whaleConf>=50&&basicPass;
         isConf=whaleConf>=30&&confPass&&!tooLate;
-        /* Smart Entry — from real levels */
-        smartEntry={entry:c.p*0.985,stop:c.p*0.93,target1:c.p*1.05,target2:c.p*1.10,rr:((c.p*1.05-c.p*0.985)/(c.p*0.985-c.p*0.93)).toFixed(1)};
-        /* Use 15m klines for precise support/resistance */
+        /* Smart Entry — Improvement 3: ATR-aware zones with S/R refinement.
+           Default: stop = price − 1.5×ATR, target = price + 3×ATR.
+           Support tightens the stop (higher floor); resistance caps target. */
         var _entryKl=kl15Data[c.s]||klData[c.s];
+        var _sup=0,_res=0;
         if(_entryKl&&_entryKl.length>=10){
           var lows=_entryKl.map(function(k){return+k[3]});var highs=_entryKl.map(function(k){return+k[2]});
-          var sup=Math.min.apply(null,lows.slice(-8));
-          var res=Math.max.apply(null,highs.slice(-20));
-          smartEntry.entry=c.c<1?c.p:Math.max(c.p*0.985,sup*1.005);
-          smartEntry.stop=sup*0.985;
-          smartEntry.target1=res;
-          smartEntry.target2=res*1.05;
-          var risk=smartEntry.entry-smartEntry.stop;
-          smartEntry.rr=risk>0?((smartEntry.target1-smartEntry.entry)/risk).toFixed(1):'0';
-          smartEntry.support=sup;smartEntry.resistance=res;
-          /* Filter: profit not worth risk */
-          if(smartEntry.entry>0&&((smartEntry.target1-smartEntry.entry)/smartEntry.entry)<0.03){
-            isUltra=false;isConf=false;
-          }
+          _sup=Math.min.apply(null,lows.slice(-8));
+          _res=Math.max.apply(null,highs.slice(-20));
+        }
+        /* Derive an ATR estimate when 15m bars are missing: use the tighter
+           of 2% or max(|c|, 1)% of price so the zone stays sane. */
+        var _atrUsed=atr15;
+        if(!_atrUsed||_atrUsed<=0){_atrUsed=c.p*Math.min(0.02,Math.max(0.005,Math.abs(c.c)/100))}
+        var _zones=atrZones(c.p,_atrUsed,_sup,_res);
+        if(_zones){
+          smartEntry={entry:_zones.entry,stop:_zones.stop,target1:_zones.target1,target2:_zones.target2,rr:_zones.rr.toFixed(1),atr:_zones.atr};
+          if(_sup>0)smartEntry.support=_sup;
+          if(_res>0)smartEntry.resistance=_res;
+        } else {
+          /* Last-resort fallback (shouldn't happen with the derived ATR above) */
+          smartEntry={entry:c.p,stop:c.p*0.97,target1:c.p*1.06,target2:c.p*1.10,rr:'2.0'};
+        }
+        /* Reject setups where the target is <3% away — noise eats the move. */
+        if(smartEntry.entry>0&&((smartEntry.target1-smartEntry.entry)/smartEntry.entry)<0.03){
+          isUltra=false;isConf=false;
         }
         if(+smartEntry.rr<2.0){isUltra=false;if(+smartEntry.rr>=1.5)isConf=true;else isConf=false}
       }catch(e){isUltra=ds>=80&&passed>=5&&!tooLate&&marketSafe;isConf=ds>=60&&passed>=4&&!tooLate}}
@@ -1756,7 +1876,7 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
     var _freshness='fresh';
     if(_ageMins>60||Math.abs(_changeDet)>5)_freshness='old';
     else if(_ageMins>15||Math.abs(_changeDet)>2)_freshness='warm';
-    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,smartEntry:smartEntry,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
+    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,atr15m:atr15,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
   return results.sort(function(a,b){return b.score-a.score})}
 /* ═══ QUALITY FILTER v3 — strict gate before rendering ═══ */
 function qualityFilter(results){
@@ -1766,6 +1886,11 @@ function qualityFilter(results){
     if(r.smartEntry&&+r.smartEntry.rr<2.0)return false;
     if(FR[r.s]&&FR[r.s].rate>0.05)return false;
     if(T.BTC&&T.BTC.c<-3)return false;
+    /* Improvement 1: reject breakout-style signals without a confirmed
+       15m close above the prior high on volume. */
+    if(r.c>=3&&r.confirmedBreakout===false)return false;
+    /* Improvement 2: HTF headwind — 4h bearish kills any multi-hour trade. */
+    if(r.tfAlign&&r.tfAlign.bearish4h)return false;
     /* Timing filter: drift too far from detection */
     var sig=sigHist[r.s+'_trade'];
     if(sig&&typeof sig==='object'&&sig.priceAtDetection>0){

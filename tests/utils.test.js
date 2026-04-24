@@ -168,6 +168,35 @@ test('calcMACD — steady uptrend produces positive MACD, no cross', () => {
   assert.equal(r.cross, 'none');
 });
 
+test('calcATR — too-short / missing input returns null', () => {
+  assert.equal(calcATR(null, 14), null);
+  assert.equal(calcATR([], 14), null);
+  /* period + 1 bars are required (one prior close needed for TR) */
+  assert.equal(calcATR([[0, 1, 2, 0.5, 1.5, 10]], 14), null);
+});
+
+test('calcATR — flat OHLC series returns 0', () => {
+  const bars = Array.from({ length: 30 }, (_, i) => [i, 10, 10, 10, 10, 1]);
+  assert.equal(calcATR(bars, 14), 0);
+});
+
+test('calcATR — constant TR of 1 collapses to ATR = 1', () => {
+  /* Every bar: high=11, low=10, close=10.5, so TR = max(1, 0.5, 0.5) = 1. */
+  const bars = Array.from({ length: 30 }, (_, i) => [i, 10, 11, 10, 10.5, 1]);
+  const atr = calcATR(bars, 14);
+  assert.ok(Math.abs(atr - 1) < 1e-9, `expected ATR ≈ 1, got ${atr}`);
+});
+
+test('calcATR — responds to a spike via Wilder smoothing', () => {
+  /* 20 calm bars (TR ≈ 1) then 5 volatile bars (TR ≈ 5). Wilder smoothing
+     lifts ATR above the calm baseline but not all the way to the spike. */
+  const calm = Array.from({ length: 20 }, (_, i) => [i, 10, 11, 10, 10.5, 1]);
+  const spike = Array.from({ length: 5 }, (_, i) => [20 + i, 10, 15, 10, 12, 1]);
+  const atr = calcATR(calm.concat(spike), 14);
+  assert.ok(atr > 1, `expected ATR > 1 after spike, got ${atr}`);
+  assert.ok(atr < 5, `expected ATR < 5 (Wilder smoothing), got ${atr}`);
+});
+
 test('calcPearson — identical series → +1', () => {
   const a = [1, 2, 3, 4, 5, 6];
   assert.equal(calcPearson(a, a), 1);

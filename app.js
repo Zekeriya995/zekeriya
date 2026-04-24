@@ -1584,6 +1584,23 @@ function tfAlignment(kl15, kl1h, kl4h) {
   return { aligned15m1h: aligned, bearish4h: bear4h, bull4h: b4h === true, score: score };
 }
 
+/* Improvement 5 — Whale wave consensus.
+   Counts how many whale waves fired for this symbol inside the given
+   window (default 30 min). A single wave is a hint; three independent
+   waves in thirty minutes is a consensus signal that survives noise
+   from a one-off large trade. */
+function whaleWaveConsensus(sym, windowMs) {
+  windowMs = windowMs || 30 * 60 * 1000;
+  var ww = whaleWaves[sym];
+  if (!ww || !ww.waves || !ww.waves.length) return 0;
+  var cutoff = Date.now() - windowMs;
+  var n = 0;
+  for (var i = 0; i < ww.waves.length; i++) {
+    if (ww.waves[i].time >= cutoff) n++;
+  }
+  return n;
+}
+
 /* Improvement 3 — ATR-based entry/stop/target zones.
    Replaces fixed-percent multipliers with volatility-aware bounds. Price
    below stopMult × ATR is the minimum risk; price above targetMult × ATR
@@ -1867,13 +1884,19 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
     var allUp=Object.values(T).filter(function(x){return x.c>0}).length;var breadthPct=Object.keys(T).length>0?allUp/Object.keys(T).length*100:50;
     var fomo=breadthPct>80;var crash=breadthPct<20;
     if(crash){ds=Math.max(ds-20,Math.round(ds*0.6));dt.push('⚠️CRASH_MKT');basicPass=ds>=70&&passed>=5;confPass=ds>=50&&passed>=4}
+    var waveCount=0;
     if(basicPass&&!tooLate&&marketSafe){
       try{var wEng=await whaleEngine(c.s);whaleConf=wEng?wEng.confidence:0;
         var cvdChk=analyzeCVD(c.s);var btcDivChk=detectBTCDivergence(c.s);
         if(cvdChk.divergence==='BEARISH'||btcDivChk.signal==='WHALE_DISTRIBUTING')whaleConf=Math.max(0,whaleConf-30);
         if(fomo)whaleConf=Math.min(whaleConf,60);
-        isUltra=whaleConf>=50&&basicPass;
-        isConf=whaleConf>=30&&confPass&&!tooLate;
+        /* Improvement 5: ULTRA requires whaleConf >= 60 AND >= 3 wave
+           confirmations in the last 30 minutes. Confirmed stays at 30
+           whaleConf but also wants at least one wave to count. */
+        waveCount=whaleWaveConsensus(c.s,30*60*1000);
+        if(waveCount>=3)dt.push('🐋×'+waveCount+' consensus');
+        isUltra=whaleConf>=60&&waveCount>=3&&basicPass;
+        isConf=whaleConf>=30&&waveCount>=1&&confPass&&!tooLate;
         /* Smart Entry — Improvement 3: ATR-aware zones with S/R refinement.
            Default: stop = price − 1.5×ATR, target = price + 3×ATR.
            Support tightens the stop (higher floor); resistance caps target. */
@@ -1917,7 +1940,7 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
     var _freshness='fresh';
     if(_ageMins>60||Math.abs(_changeDet)>5)_freshness='old';
     else if(_ageMins>15||Math.abs(_changeDet)>2)_freshness='warm';
-    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,atr15m:atr15,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
+    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,atr15m:atr15,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
   return results.sort(function(a,b){return b.score-a.score})}
 /* ═══ QUALITY FILTER v3 — strict gate before rendering ═══ */
 function qualityFilter(results){

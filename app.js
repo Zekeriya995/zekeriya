@@ -5677,6 +5677,21 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   /* ═══ MAIN POLLING: fetch /api/all every 5 seconds ═══ */
   setInterval(async function(){try{await loadTk();checkWatchlistAlerts();updateConnStatus()}catch(e){connMetrics.apiFail++;updateConnStatus()}},5000);
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))try{await loadDash()}catch(e){}},120000);
+  /* Idea 4 — Scanner tab auto-refresh. While the user is on the
+     Scanner tab and its Trading sub-tab is active, re-run loadTrading
+     every 2 minutes so the signal list stays fresh without manual
+     taps. Respects the same visibility + tab-active pattern used by
+     the Dashboard refresher above, so backgrounded tabs stay quiet. */
+  setInterval(async function(){
+    if(typeof document.visibilityState==='string'&&document.visibilityState==='hidden')return;
+    var pgScan=document.getElementById('pg-scan');
+    if(!pgScan||!pgScan.classList.contains('act'))return;
+    /* Only auto-refresh the Trading sub-tab (idx=0) — sectors and
+       small-caps have their own cadences and would churn UI for no
+       benefit. */
+    if(curScanTab!==0)return;
+    try{await loadTrading()}catch(e){}
+  },120000);
   setInterval(monitorTrades,10000);
   setInterval(function(){try{renderTop3()}catch(e){}},60000); /* Auto-update VIP trades every minute */
   setInterval(function(){notifiedSet={};safeSet('nxnot10','{}');tgSent={}},3600000);

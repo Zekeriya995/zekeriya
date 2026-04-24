@@ -885,18 +885,9 @@ function sampleOBI(sym,ratio){
   saveOBI();
   if(arr.length>60)obiHistory[sym]=arr.slice(-60);
 }
-function rollingOBI(sym){
-  var arr=obiHistory[sym];if(!arr||arr.length<5)return null;
-  var now=Date.now();var cutoff=now-OBI_WINDOW_MS;
-  var sum=0,n=0,spanMs=0,first=null;
-  for(var i=0;i<arr.length;i++){
-    if(arr[i].t<cutoff)continue;
-    if(first==null)first=arr[i].t;
-    sum+=arr[i].r;n++;spanMs=arr[i].t-first;
-  }
-  if(n<5)return null;
-  return{avg:sum/n,samples:n,spanMs:spanMs};
-}
+/* Thin wrapper — the pure implementation lives in src/scanner-helpers.js
+   so it can be unit-tested without the app's global obiHistory. */
+function rollingOBI(sym){return rollingOBIFromArr(obiHistory[sym],OBI_WINDOW_MS)}
 /* TR (translations) + t() moved to src/translations.js
    fmt/fP/esc/safeC/calcRSI/calcMACD/calcEMA moved to src/utils.js */
 /* apiCooldown + fj moved to src/connection.js */
@@ -1579,114 +1570,14 @@ function buildUnlocksCard(){
 }
 
 
-/* ═══ SCANNER STRENGTH HELPERS v1 ═══
-   Pure functions over Binance-shaped klines ([t,o,h,l,c,v,…]). Each takes
-   whatever klines it has and returns null/false when data is missing so
-   callers can degrade gracefully. Kept near quickScan so the scoring
-   engine is readable top-to-bottom. */
-
-/* Improvement 1 — Confirmed Breakout Gate.
-   A *real* breakout needs (a) the most recent closed 15m candle's close
-   above the highest high of the previous `lookback` (default 20) bars,
-   and (b) the breakout bar's volume at least `volMult` × the average of
-   the prior bars. Without both, a candle that merely tags the prior high
-   is a wick — not a breakout. */
-function isConfirmedBreakout(kl15, lookback, volMult) {
-  lookback = lookback || 20;
-  volMult = volMult || 1.5;
-  if (!kl15 || kl15.length < lookback + 1) return { confirmed: false };
-  var last = kl15[kl15.length - 1];
-  var lastClose = +last[4];
-  var lastVol = +last[5];
-  var priorHigh = 0;
-  var volSum = 0;
-  for (var i = kl15.length - 1 - lookback; i < kl15.length - 1; i++) {
-    var h = +kl15[i][2];
-    if (h > priorHigh) priorHigh = h;
-    volSum += +kl15[i][5];
-  }
-  var avgVol = volSum / lookback;
-  var vRatio = avgVol > 0 ? lastVol / avgVol : 0;
-  return {
-    confirmed: lastClose > priorHigh && vRatio >= volMult,
-    priorHigh: priorHigh,
-    volRatio: vRatio,
-  };
-}
-
-/* Improvement 2 — Multi-Timeframe EMA Alignment.
-   Bullish alignment on 15m AND 1h is a meaningful confluence; a bearish
-   4h backdrop is a strong headwind that deserves a penalty regardless of
-   how pretty the lower timeframes look. Returns:
-     - aligned15m1h: both LTFs bullish (EMA20 > EMA50)
-     - bearish4h:    HTF bearish (EMA20 <= EMA50 on 4h)
-     - score:        additive score contribution */
-function tfAlignment(kl15, kl1h, kl4h) {
-  function bullish(kl) {
-    if (!kl || kl.length < 50) return null;
-    var closes = kl.map(function (k) { return +k[4]; });
-    var e20 = calcEMA(closes, 20);
-    var e50 = calcEMA(closes, 50);
-    if (e20 == null || e50 == null) return null;
-    return e20 > e50;
-  }
-  var b15 = bullish(kl15);
-  var b1h = bullish(kl1h);
-  var b4h = bullish(kl4h);
-  var aligned = b15 === true && b1h === true;
-  var bear4h = b4h === false;
-  var score = 0;
-  if (aligned) score += 15;
-  if (bear4h) score -= 25;
-  return { aligned15m1h: aligned, bearish4h: bear4h, bull4h: b4h === true, score: score };
-}
-
-/* Improvement 5 — Whale wave consensus.
-   Counts how many whale waves fired for this symbol inside the given
-   window (default 30 min). A single wave is a hint; three independent
-   waves in thirty minutes is a consensus signal that survives noise
-   from a one-off large trade. */
+/* ═══ SCANNER STRENGTH HELPERS ═══
+   The pure implementations live in src/scanner-helpers.js so they can be
+   unit-tested without booting app.js. Only the thin wrapper that reads
+   app-level globals stays here. */
 function whaleWaveConsensus(sym, windowMs) {
   windowMs = windowMs || 30 * 60 * 1000;
   var ww = whaleWaves[sym];
-  if (!ww || !ww.waves || !ww.waves.length) return 0;
-  var cutoff = Date.now() - windowMs;
-  var n = 0;
-  for (var i = 0; i < ww.waves.length; i++) {
-    if (ww.waves[i].time >= cutoff) n++;
-  }
-  return n;
-}
-
-/* Improvement 3 — ATR-based entry/stop/target zones.
-   Replaces fixed-percent multipliers with volatility-aware bounds. Price
-   below stopMult × ATR is the minimum risk; price above targetMult × ATR
-   is the minimum reward. When classic support/resistance is tighter we
-   use those — ATR is the floor, not a ceiling. */
-function atrZones(price, atr, support, resistance) {
-  if (!atr || atr <= 0 || !price) return null;
-  var stopMult = 1.5;
-  var t1Mult = 3.0;
-  var t2Mult = 5.0;
-  var stop = price - stopMult * atr;
-  if (support && support > 0 && support < price) {
-    stop = Math.max(stop, support * 0.985);
-  }
-  var target1 = price + t1Mult * atr;
-  if (resistance && resistance > price) {
-    target1 = Math.min(target1, resistance);
-  }
-  var target2 = price + t2Mult * atr;
-  var risk = price - stop;
-  var rr = risk > 0 ? +((target1 - price) / risk).toFixed(2) : 0;
-  return {
-    entry: price,
-    stop: stop,
-    target1: target1,
-    target2: target2,
-    rr: rr,
-    atr: atr,
-  };
+  return countWavesInWindow(ww && ww.waves, windowMs);
 }
 
 

@@ -68,5 +68,6 @@ function loadScript(rel) {
 
 loadScript('src/utils.js');
 loadScript('src/storage.js');
+loadScript('src/scanner-helpers.js');
 
 module.exports = { MemStorage, loadScript };

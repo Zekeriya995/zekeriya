@@ -855,9 +855,26 @@ var CACHE_TTL=60000;
 /* Rolling Order Flow Imbalance history — per-symbol bid/ask ratios sampled
    on every quickScan pass. Sustained imbalance (avg over 10 min) is far
    harder to spoof than a single snapshot; the scanner uses this instead
-   of the raw depthSnapshots ratio when enough samples exist. */
-var obiHistory={};
+   of the raw depthSnapshots ratio when enough samples exist.
+   Persisted to localStorage so a page reload doesn't wipe the rolling
+   window and force 10 minutes of degraded OB scoring. */
+var obiHistory=safeGetJSON('nxObi',{})||{};
 var OBI_WINDOW_MS=10*60*1000;
+/* Prune anything older than the window on load so stale data from an
+   old session doesn't pollute the current average. */
+(function(){var _now=Date.now();var _cut=_now-OBI_WINDOW_MS;
+  Object.keys(obiHistory).forEach(function(s){
+    var a=obiHistory[s];
+    if(!Array.isArray(a)){delete obiHistory[s];return}
+    obiHistory[s]=a.filter(function(x){return x&&x.t>=_cut});
+    if(!obiHistory[s].length)delete obiHistory[s];
+  });
+})();
+var _saveOBITimer=null;
+function saveOBI(){
+  if(_saveOBITimer)clearTimeout(_saveOBITimer);
+  _saveOBITimer=setTimeout(function(){safeSetJSON('nxObi',obiHistory)},2000);
+}
 function sampleOBI(sym,ratio){
   if(!ratio||!isFinite(ratio)||ratio<=0)return;
   if(!obiHistory[sym])obiHistory[sym]=[];
@@ -865,6 +882,7 @@ function sampleOBI(sym,ratio){
   arr.push({t:now,r:ratio});
   var cutoff=now-OBI_WINDOW_MS;
   while(arr.length&&arr[0].t<cutoff)arr.shift();
+  saveOBI();
   if(arr.length>60)obiHistory[sym]=arr.slice(-60);
 }
 function rollingOBI(sym){
@@ -1004,6 +1022,13 @@ async function loadTrading(){var trLoadEl=document.getElementById('tradeList');i
   var c=quickScan();var r=await deepAnalyze(c);
   /* ═══ NEW: Apply qualityFilter before rendering ═══ */
   r=qualityFilter(r);
+  /* Fix A: populate whaleWaves for the Scanner tab too.
+     detectWhaleWaves used to run only inside loadDash / loadWhales, so
+     a user who stayed on the Scanner tab never accumulated any wave
+     history — which broke the 3-waves-in-30-min consensus that ULTRA
+     and Confirmed depend on. Fire-and-forget so the first render isn't
+     delayed; the results feed into the *next* scan (cache TTL = 60s). */
+  try{detectWhaleWaves(r)}catch(e){}
   cache.scan=r;cache.scanTime=Date.now();var sigs=[];
   for(var i=0;i<Math.min(r.length,7);i++){var x=r[i];var d=T[x.s];if(!d)continue;
     var type=(d.c>=-3&&d.c<=0&&d.v>1e8)?'fast':'daily';var entry,target,stop,dur;
@@ -1892,11 +1917,14 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
     /* ═══ Improvement 1: Confirmed Breakout Gate ═══
        Breakout-style signals (c >= 2%) must show a closed 15m bar above
        the prior 20-bar high on >=1.5× avg volume. Real breakout = +20;
-       a claimed breakout without confirmation = −20 (catches wick traps). */
+       a claimed breakout without confirmation = −20 (catches wick traps).
+       kl15Available distinguishes "we looked and it failed" (penalize +
+       qualityFilter reject) from "we didn't have data" (don't penalize). */
+    var kl15Available=!!(kl15&&kl15.length>=21);
     var brk=isConfirmedBreakout(kl15,20,1.5);
     var isBreakoutType=c.c>=2;
     if(brk.confirmed){ds+=20;dt.push('💥CONFIRM_BRK×'+brk.volRatio.toFixed(1))}
-    else if(isBreakoutType&&kl15&&kl15.length>=21){ds-=20;dt.push('⚠️UNCONFIRMED_BRK')}
+    else if(isBreakoutType&&kl15Available){ds-=20;dt.push('⚠️UNCONFIRMED_BRK')}
     /* ═══ Improvement 2: Multi-TF EMA Alignment ═══
        Bullish 15m + 1h = +15. Bearish 4h = −25 (HTF headwind). */
     var tfAlign=tfAlignment(kl15,kl,kl4hData[c.s]);
@@ -1972,7 +2000,7 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
     var _freshness='fresh';
     if(_ageMins>60||Math.abs(_changeDet)>5)_freshness='old';
     else if(_ageMins>15||Math.abs(_changeDet)>2)_freshness='warm';
-    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,atr15m:atr15,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
+    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
   return results.sort(function(a,b){return b.score-a.score})}
 /* ═══ QUALITY FILTER v3 — strict gate before rendering ═══ */
 function qualityFilter(results){
@@ -1983,8 +2011,11 @@ function qualityFilter(results){
     if(FR[r.s]&&FR[r.s].rate>0.05)return false;
     if(T.BTC&&T.BTC.c<-3)return false;
     /* Improvement 1: reject breakout-style signals without a confirmed
-       15m close above the prior high on volume. */
-    if(r.c>=3&&r.confirmedBreakout===false)return false;
+       15m close above the prior high on volume — but only when we
+       actually had 15m data to check. Coins outside the top 10 in
+       deepAnalyze don't get their 15m bars fetched, and rejecting them
+       for a check we never ran would silently hide legitimate signals. */
+    if(r.c>=3&&r.kl15Available&&r.confirmedBreakout===false)return false;
     /* Improvement 2: HTF headwind — 4h bearish kills any multi-hour trade. */
     if(r.tfAlign&&r.tfAlign.bearish4h)return false;
     /* Timing filter: drift too far from detection */

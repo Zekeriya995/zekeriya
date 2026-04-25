@@ -1857,17 +1857,15 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
     if(_exPrem)_ifCount++;
     if(_ifCount>=2){ds+=15;checks.oi=true;dt.push('📡INFORMED:'+_ifCount+'/4')}
     else if(_ifCount===1){ds+=5;checks.oi=true;dt.push('📡FLOW')}
-    /* ═══ Improvement 1: Confirmed Breakout Gate ═══
-       Breakout-style signals (c >= 2%) must show a closed 15m bar above
-       the prior 20-bar high on >=1.5× avg volume. Real breakout = +20;
-       a claimed breakout without confirmation = −20 (catches wick traps).
-       kl15Available distinguishes "we looked and it failed" (penalize +
-       qualityFilter reject) from "we didn't have data" (don't penalize). */
+    /* ═══ Confirmed Breakout — bonus only, never a penalty ═══
+       A closed 15m bar above the prior 20-bar high on >=1.5× volume
+       gets +20. Its absence used to mean -20 (and rejection in
+       qualityFilter), but that fights the platform's pre-pump
+       hunting goal — by the time the breakout candle prints,
+       whales are exiting. The bonus alone is enough. */
     var kl15Available=!!(kl15&&kl15.length>=21);
     var brk=isConfirmedBreakout(kl15,20,1.5);
-    var isBreakoutType=c.c>=2;
     if(brk.confirmed){ds+=20;dt.push('💥CONFIRM_BRK×'+brk.volRatio.toFixed(1))}
-    else if(isBreakoutType&&kl15Available){ds-=20;dt.push('⚠️UNCONFIRMED_BRK')}
     /* ═══ Improvement 2: Multi-TF EMA Alignment ═══
        Bullish 15m + 1h = +15. Bearish 4h = −25 (HTF headwind). */
     var tfAlign=tfAlignment(kl15,kl,kl4hData[c.s]);
@@ -1953,12 +1951,13 @@ function qualityFilter(results){
     if(r.smartEntry&&+r.smartEntry.rr<2.0)return false;
     if(FR[r.s]&&FR[r.s].rate>0.05)return false;
     if(T.BTC&&T.BTC.c<-3)return false;
-    /* Improvement 1: reject breakout-style signals without a confirmed
-       15m close above the prior high on volume — but only when we
-       actually had 15m data to check. Coins outside the top 10 in
-       deepAnalyze don't get their 15m bars fetched, and rejecting them
-       for a check we never ran would silently hide legitimate signals. */
-    if(r.c>=3&&r.kl15Available&&r.confirmedBreakout===false)return false;
+    /* Pre-pump alignment: the platform's stated goal is "enter before
+       the explosion" — so we DO NOT reject pre-breakouts. A confirmed
+       15m close above the prior high gives the score a +20 bonus
+       (still applied in deepAnalyze), but its absence is not a reason
+       to drop the candidate — that would put us in the position of
+       only ever entering AFTER the breakout candle prints, which is
+       exactly when the whales are unloading. */
     /* Improvement 2: HTF headwind — 4h bearish kills any multi-hour trade. */
     if(r.tfAlign&&r.tfAlign.bearish4h)return false;
     /* Idea 1: reject Pump & Dump setups (3+ retail-FOMO warnings firing

@@ -1912,7 +1912,18 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
            of 2% or max(|c|, 1)% of price so the zone stays sane. */
         var _atrUsed=atr15;
         if(!_atrUsed||_atrUsed<=0){_atrUsed=c.p*Math.min(0.02,Math.max(0.005,Math.abs(c.c)/100))}
-        var _zones=atrZones(c.p,_atrUsed,_sup,_res);
+        /* Pre-pump targeting: when the candidate carries accumulation tags
+           (silent accumulation / early / stealth / CVD buying), the
+           expected move is a full launch — minutes-to-hours of price
+           expansion, not a swing. Widen targets to 5×/10× ATR so we
+           don't bail at +6% on a move that runs +30%. Stop multiplier
+           stays the same — we don't want to enlarge risk. */
+        var _isAccumulation=(c.tags||[]).some(function(t){
+          return t.indexOf('ACC')>=0||t.indexOf('EARLY')>=0||
+                 t.indexOf('STEALTH')>=0||t.indexOf('CVD_BUY')>=0;
+        });
+        var _zoneMults=_isAccumulation?{stop:1.5,t1:5,t2:10}:null;
+        var _zones=atrZones(c.p,_atrUsed,_sup,_res,_zoneMults);
         if(_zones){
           smartEntry={entry:_zones.entry,stop:_zones.stop,target1:_zones.target1,target2:_zones.target2,rr:_zones.rr.toFixed(1),atr:_zones.atr};
           if(_sup>0)smartEntry.support=_sup;

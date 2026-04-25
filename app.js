@@ -1958,8 +1958,13 @@ function qualityFilter(results){
        to drop the candidate — that would put us in the position of
        only ever entering AFTER the breakout candle prints, which is
        exactly when the whales are unloading. */
-    /* Improvement 2: HTF headwind — 4h bearish kills any multi-hour trade. */
-    if(r.tfAlign&&r.tfAlign.bearish4h)return false;
+    /* HTF headwind — 4h bearish + already-moving (c >= 2) is a real
+       red flag (price has lifted off in the wrong macro direction).
+       But during silent accumulation, 4h often looks flat or weakly
+       bearish while whales build positions; rejecting all 4h-bearish
+       candidates would kill the very pre-pump setups we're hunting.
+       The score still takes a -25 from tfAlign.score either way. */
+    if(r.tfAlign&&r.tfAlign.bearish4h&&r.c>=2)return false;
     /* Idea 1: reject Pump & Dump setups (3+ retail-FOMO warnings firing
        at once). The quickScan score penalty already pushes these below
        threshold, but we defend in depth in case a noisy bonus pushes

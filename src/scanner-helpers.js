@@ -68,12 +68,16 @@ function tfAlignment(kl15, kl1h, kl4h) {
    price - stopMult × ATR is the minimum risk; price + targetMult × ATR
    is the minimum reward. When classic support/resistance is tighter we
    use those — ATR is the floor, not a ceiling. Returns null if price
-   or ATR is missing. */
-function atrZones(price, atr, support, resistance) {
+   or ATR is missing.
+
+   Optional 5th parameter `mults` overrides the defaults — used by the
+   scanner to widen targets for accumulation candidates whose expected
+   move is a full launch, not a swing. Pass { stop, t1, t2 }. */
+function atrZones(price, atr, support, resistance, mults) {
   if (!atr || atr <= 0 || !price) return null;
-  var stopMult = 1.5;
-  var t1Mult = 3.0;
-  var t2Mult = 5.0;
+  var stopMult = (mults && mults.stop) || 1.5;
+  var t1Mult = (mults && mults.t1) || 3.0;
+  var t2Mult = (mults && mults.t2) || 5.0;
   var stop = price - stopMult * atr;
   if (support && support > 0 && support < price) {
     stop = Math.max(stop, support * 0.985);

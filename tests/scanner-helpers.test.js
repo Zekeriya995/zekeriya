@@ -152,6 +152,26 @@ test('atrZones — resistance below price is ignored (bogus input)', () => {
   assert.equal(z.target1, 106, 'resistance at 90 < price 100, should be ignored');
 });
 
+test('atrZones — accumulation multipliers widen targets but keep stop', () => {
+  /* Pre-pump candidates expect a full-launch move, not a swing.
+     Pass {stop:1.5, t1:5, t2:10} and verify the targets expand
+     while the stop stays at the same risk distance. */
+  const wide = atrZones(100, 2, null, null, { stop: 1.5, t1: 5, t2: 10 });
+  assert.equal(wide.stop, 100 - 3, 'stop unchanged: 100 - 1.5*2');
+  assert.equal(wide.target1, 100 + 10, 'target1 widened: 100 + 5*2');
+  assert.equal(wide.target2, 100 + 20, 'target2 widened: 100 + 10*2');
+  /* Reward / risk = (10 - 0) / 3 ≈ 3.33 */
+  assert.ok(Math.abs(wide.rr - 3.33) < 0.01, `expected RR ≈ 3.33, got ${wide.rr}`);
+});
+
+test('atrZones — partial mults object falls back to defaults for missing keys', () => {
+  /* Caller overrides only t1 — stop and t2 should keep the defaults. */
+  const z = atrZones(100, 2, null, null, { t1: 7 });
+  assert.equal(z.stop, 100 - 3, 'stop default 1.5x');
+  assert.equal(z.target1, 100 + 14, 'target1 from override: 100 + 7*2');
+  assert.equal(z.target2, 100 + 10, 'target2 default 5x');
+});
+
 /* ─── countWavesInWindow ──────────────────────────────────────────── */
 
 test('countWavesInWindow — empty / missing waves returns 0', () => {

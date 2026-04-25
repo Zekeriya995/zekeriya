@@ -1166,9 +1166,17 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
       +'<span style="color:var(--t3)">'+(lang==='ar'?'سعر الاكتشاف: ':'Detection: ')+fP(sigPriceDet)+' <span style="color:'+driftCol+';font-weight:700">'+(sigDrift>=0?'+':'')+sigDrift.toFixed(1)+'%</span></span>'
       +'</div>'
       +'<span class="timing-badge '+timingBadgeCls+'">'+timingLabel+'</span></div>';
-    h+='<div class="scan-card"><div class="scan-card-bar" style="background:'+(s.ultra?'var(--ultra)':s.type==='fast'?'var(--blue)':'var(--up)')+'"></div><div class="scan-card-body">'
+    /* Whales-meet-Scanner golden badge: when the candidate carries the
+       WHALE_TARGET tag (whale engine confidence >= 60), paint the card
+       bar gold and prepend a 🐋✨ marker to the symbol. This is the
+       killer combo — accumulation already detected by the Whales
+       section AND a pre-pump setup forming on the Scanner. */
+    var _isWhaleTarget=(s.tags||[]).some(function(t){return t.indexOf('WHALE_TARGET')>=0});
+    var _barColor=_isWhaleTarget?'linear-gradient(90deg,#ffd700,#ff8c00)':(s.ultra?'var(--ultra)':s.type==='fast'?'var(--blue)':'var(--up)');
+    var _whaleMarker=_isWhaleTarget?'🐋✨ ':(s.ultra?'⭐ ':s.confirmed?'🟢 ':'');
+    h+='<div class="scan-card"'+(_isWhaleTarget?' style="border:2px solid #ffd700;box-shadow:0 0 12px rgba(255,215,0,.3)"':'')+'><div class="scan-card-bar" style="background:'+_barColor+'"></div><div class="scan-card-body">'
       /* Header: rank + name + type + time + confidence */
-      +'<div class="sc-head"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--t3);font-weight:800">#'+(i+1)+'</span><div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">'+(s.ultra?'⭐ ':s.confirmed?'🟢 ':'')+s.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+'</div><span class="sc-time '+(ta.cls==='fresh'?'fresh':'')+'">'+(ta.cls==='fresh'?'🆕 ':'⏱ ')+ta.text+'</span></div></div><div style="text-align:right"><div class="sc-badge" style="background:'+(s.conf>=70?'var(--ud)':s.conf>=55?'var(--bd)':'var(--wd)')+';color:'+(s.conf>=70?'var(--up)':s.conf>=55?'var(--blue)':'var(--warn)')+'">'+s.conf+'%</div><div style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+tCol+';font-weight:700;margin-top:3px">'+tLbl+'</div></div></div>'
+      +'<div class="sc-head"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--t3);font-weight:800">#'+(i+1)+'</span><div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">'+_whaleMarker+s.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+'</div><span class="sc-time '+(ta.cls==='fresh'?'fresh':'')+'">'+(ta.cls==='fresh'?'🆕 ':'⏱ ')+ta.text+'</span></div></div><div style="text-align:right"><div class="sc-badge" style="background:'+(s.conf>=70?'var(--ud)':s.conf>=55?'var(--bd)':'var(--wd)')+';color:'+(s.conf>=70?'var(--up)':s.conf>=55?'var(--blue)':'var(--warn)')+'">'+s.conf+'%</div><div style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+tCol+';font-weight:700;margin-top:3px">'+tLbl+'</div></div></div>'
       /* ═══ NEW: Signal Timing Bar ═══ */
       +timingHTML
       /* Price */
@@ -1749,6 +1757,21 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   if(d.c>=8&&d.v<3e7){pdFlags++;pdReasons.push('THIN_PUMP')}
   if(pdFlags>=3){sc=Math.min(sc,-100);tags.push('🚨P&D_RISK:'+pdFlags+'/5')}
   else if(pdFlags===2){sc-=25;tags.push('⚠️P&D_WARN:'+pdFlags+'/5')}
+  /* ═══ Whales → Scanner bridge ═══
+     The Whales section's job is to find coins where whales are
+     accumulating (the "what"). The Scanner's job is to catch the
+     pre-explosion moment (the "when"). The strongest signal is when
+     both fire on the same coin — accumulation already in progress AND
+     the early-move setup forming. We surface that by adding a strong
+     bonus and a unique tag the renderer paints in gold. */
+  var _ww=whaleWaves[s];
+  if(_ww&&_ww.engine&&_ww.engine.confidence>=60){
+    sc+=30;
+    tags.push('🐋✨WHALE_TARGET:'+_ww.engine.confidence);
+  }else if(_ww&&_ww.engine&&_ww.engine.confidence>=40){
+    sc+=15;
+    tags.push('🐋WHALE_ACTIVE:'+_ww.engine.confidence);
+  }
   if(sc>=15)cands.push({s:s,p:d.p,c:d.c,v:d.v,score:sc,tags:tags,fr:fr?fr.rate:null,by:d.by,cb:CBP[s],pdFlags:pdFlags})});
   return cands.sort(function(a,b){return b.score-a.score})}
 /* DEEP ANALYZE — tier-aware: T1=6 checks, T2=4 checks, T3=volume only */
@@ -1857,17 +1880,15 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
     if(_exPrem)_ifCount++;
     if(_ifCount>=2){ds+=15;checks.oi=true;dt.push('📡INFORMED:'+_ifCount+'/4')}
     else if(_ifCount===1){ds+=5;checks.oi=true;dt.push('📡FLOW')}
-    /* ═══ Improvement 1: Confirmed Breakout Gate ═══
-       Breakout-style signals (c >= 2%) must show a closed 15m bar above
-       the prior 20-bar high on >=1.5× avg volume. Real breakout = +20;
-       a claimed breakout without confirmation = −20 (catches wick traps).
-       kl15Available distinguishes "we looked and it failed" (penalize +
-       qualityFilter reject) from "we didn't have data" (don't penalize). */
+    /* ═══ Confirmed Breakout — bonus only, never a penalty ═══
+       A closed 15m bar above the prior 20-bar high on >=1.5× volume
+       gets +20. Its absence used to mean -20 (and rejection in
+       qualityFilter), but that fights the platform's pre-pump
+       hunting goal — by the time the breakout candle prints,
+       whales are exiting. The bonus alone is enough. */
     var kl15Available=!!(kl15&&kl15.length>=21);
     var brk=isConfirmedBreakout(kl15,20,1.5);
-    var isBreakoutType=c.c>=2;
     if(brk.confirmed){ds+=20;dt.push('💥CONFIRM_BRK×'+brk.volRatio.toFixed(1))}
-    else if(isBreakoutType&&kl15Available){ds-=20;dt.push('⚠️UNCONFIRMED_BRK')}
     /* ═══ Improvement 2: Multi-TF EMA Alignment ═══
        Bullish 15m + 1h = +15. Bearish 4h = −25 (HTF headwind). */
     var tfAlign=tfAlignment(kl15,kl,kl4hData[c.s]);
@@ -1914,7 +1935,18 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
            of 2% or max(|c|, 1)% of price so the zone stays sane. */
         var _atrUsed=atr15;
         if(!_atrUsed||_atrUsed<=0){_atrUsed=c.p*Math.min(0.02,Math.max(0.005,Math.abs(c.c)/100))}
-        var _zones=atrZones(c.p,_atrUsed,_sup,_res);
+        /* Pre-pump targeting: when the candidate carries accumulation tags
+           (silent accumulation / early / stealth / CVD buying), the
+           expected move is a full launch — minutes-to-hours of price
+           expansion, not a swing. Widen targets to 5×/10× ATR so we
+           don't bail at +6% on a move that runs +30%. Stop multiplier
+           stays the same — we don't want to enlarge risk. */
+        var _isAccumulation=(c.tags||[]).some(function(t){
+          return t.indexOf('ACC')>=0||t.indexOf('EARLY')>=0||
+                 t.indexOf('STEALTH')>=0||t.indexOf('CVD_BUY')>=0;
+        });
+        var _zoneMults=_isAccumulation?{stop:1.5,t1:5,t2:10}:null;
+        var _zones=atrZones(c.p,_atrUsed,_sup,_res,_zoneMults);
         if(_zones){
           smartEntry={entry:_zones.entry,stop:_zones.stop,target1:_zones.target1,target2:_zones.target2,rr:_zones.rr.toFixed(1),atr:_zones.atr};
           if(_sup>0)smartEntry.support=_sup;
@@ -1953,14 +1985,20 @@ function qualityFilter(results){
     if(r.smartEntry&&+r.smartEntry.rr<2.0)return false;
     if(FR[r.s]&&FR[r.s].rate>0.05)return false;
     if(T.BTC&&T.BTC.c<-3)return false;
-    /* Improvement 1: reject breakout-style signals without a confirmed
-       15m close above the prior high on volume — but only when we
-       actually had 15m data to check. Coins outside the top 10 in
-       deepAnalyze don't get their 15m bars fetched, and rejecting them
-       for a check we never ran would silently hide legitimate signals. */
-    if(r.c>=3&&r.kl15Available&&r.confirmedBreakout===false)return false;
-    /* Improvement 2: HTF headwind — 4h bearish kills any multi-hour trade. */
-    if(r.tfAlign&&r.tfAlign.bearish4h)return false;
+    /* Pre-pump alignment: the platform's stated goal is "enter before
+       the explosion" — so we DO NOT reject pre-breakouts. A confirmed
+       15m close above the prior high gives the score a +20 bonus
+       (still applied in deepAnalyze), but its absence is not a reason
+       to drop the candidate — that would put us in the position of
+       only ever entering AFTER the breakout candle prints, which is
+       exactly when the whales are unloading. */
+    /* HTF headwind — 4h bearish + already-moving (c >= 2) is a real
+       red flag (price has lifted off in the wrong macro direction).
+       But during silent accumulation, 4h often looks flat or weakly
+       bearish while whales build positions; rejecting all 4h-bearish
+       candidates would kill the very pre-pump setups we're hunting.
+       The score still takes a -25 from tfAlign.score either way. */
+    if(r.tfAlign&&r.tfAlign.bearish4h&&r.c>=2)return false;
     /* Idea 1: reject Pump & Dump setups (3+ retail-FOMO warnings firing
        at once). The quickScan score penalty already pushes these below
        threshold, but we defend in depth in case a noisy bonus pushes

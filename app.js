@@ -1166,9 +1166,17 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
       +'<span style="color:var(--t3)">'+(lang==='ar'?'سعر الاكتشاف: ':'Detection: ')+fP(sigPriceDet)+' <span style="color:'+driftCol+';font-weight:700">'+(sigDrift>=0?'+':'')+sigDrift.toFixed(1)+'%</span></span>'
       +'</div>'
       +'<span class="timing-badge '+timingBadgeCls+'">'+timingLabel+'</span></div>';
-    h+='<div class="scan-card"><div class="scan-card-bar" style="background:'+(s.ultra?'var(--ultra)':s.type==='fast'?'var(--blue)':'var(--up)')+'"></div><div class="scan-card-body">'
+    /* Whales-meet-Scanner golden badge: when the candidate carries the
+       WHALE_TARGET tag (whale engine confidence >= 60), paint the card
+       bar gold and prepend a 🐋✨ marker to the symbol. This is the
+       killer combo — accumulation already detected by the Whales
+       section AND a pre-pump setup forming on the Scanner. */
+    var _isWhaleTarget=(s.tags||[]).some(function(t){return t.indexOf('WHALE_TARGET')>=0});
+    var _barColor=_isWhaleTarget?'linear-gradient(90deg,#ffd700,#ff8c00)':(s.ultra?'var(--ultra)':s.type==='fast'?'var(--blue)':'var(--up)');
+    var _whaleMarker=_isWhaleTarget?'🐋✨ ':(s.ultra?'⭐ ':s.confirmed?'🟢 ':'');
+    h+='<div class="scan-card"'+(_isWhaleTarget?' style="border:2px solid #ffd700;box-shadow:0 0 12px rgba(255,215,0,.3)"':'')+'><div class="scan-card-bar" style="background:'+_barColor+'"></div><div class="scan-card-body">'
       /* Header: rank + name + type + time + confidence */
-      +'<div class="sc-head"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--t3);font-weight:800">#'+(i+1)+'</span><div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">'+(s.ultra?'⭐ ':s.confirmed?'🟢 ':'')+s.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+'</div><span class="sc-time '+(ta.cls==='fresh'?'fresh':'')+'">'+(ta.cls==='fresh'?'🆕 ':'⏱ ')+ta.text+'</span></div></div><div style="text-align:right"><div class="sc-badge" style="background:'+(s.conf>=70?'var(--ud)':s.conf>=55?'var(--bd)':'var(--wd)')+';color:'+(s.conf>=70?'var(--up)':s.conf>=55?'var(--blue)':'var(--warn)')+'">'+s.conf+'%</div><div style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+tCol+';font-weight:700;margin-top:3px">'+tLbl+'</div></div></div>'
+      +'<div class="sc-head"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--t3);font-weight:800">#'+(i+1)+'</span><div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">'+_whaleMarker+s.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+'</div><span class="sc-time '+(ta.cls==='fresh'?'fresh':'')+'">'+(ta.cls==='fresh'?'🆕 ':'⏱ ')+ta.text+'</span></div></div><div style="text-align:right"><div class="sc-badge" style="background:'+(s.conf>=70?'var(--ud)':s.conf>=55?'var(--bd)':'var(--wd)')+';color:'+(s.conf>=70?'var(--up)':s.conf>=55?'var(--blue)':'var(--warn)')+'">'+s.conf+'%</div><div style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+tCol+';font-weight:700;margin-top:3px">'+tLbl+'</div></div></div>'
       /* ═══ NEW: Signal Timing Bar ═══ */
       +timingHTML
       /* Price */
@@ -1749,6 +1757,21 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   if(d.c>=8&&d.v<3e7){pdFlags++;pdReasons.push('THIN_PUMP')}
   if(pdFlags>=3){sc=Math.min(sc,-100);tags.push('🚨P&D_RISK:'+pdFlags+'/5')}
   else if(pdFlags===2){sc-=25;tags.push('⚠️P&D_WARN:'+pdFlags+'/5')}
+  /* ═══ Whales → Scanner bridge ═══
+     The Whales section's job is to find coins where whales are
+     accumulating (the "what"). The Scanner's job is to catch the
+     pre-explosion moment (the "when"). The strongest signal is when
+     both fire on the same coin — accumulation already in progress AND
+     the early-move setup forming. We surface that by adding a strong
+     bonus and a unique tag the renderer paints in gold. */
+  var _ww=whaleWaves[s];
+  if(_ww&&_ww.engine&&_ww.engine.confidence>=60){
+    sc+=30;
+    tags.push('🐋✨WHALE_TARGET:'+_ww.engine.confidence);
+  }else if(_ww&&_ww.engine&&_ww.engine.confidence>=40){
+    sc+=15;
+    tags.push('🐋WHALE_ACTIVE:'+_ww.engine.confidence);
+  }
   if(sc>=15)cands.push({s:s,p:d.p,c:d.c,v:d.v,score:sc,tags:tags,fr:fr?fr.rate:null,by:d.by,cb:CBP[s],pdFlags:pdFlags})});
   return cands.sort(function(a,b){return b.score-a.score})}
 /* DEEP ANALYZE — tier-aware: T1=6 checks, T2=4 checks, T3=volume only */

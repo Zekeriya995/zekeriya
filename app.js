@@ -996,13 +996,101 @@ function scanTab(idx,btn){curScanTab=idx;document.querySelectorAll('#pg-scan>.bi
 /* ═══ TAB 1: SECTOR TRENDING ═══ */
 function analyzeSectors(){var res=[];for(var k in SECTORS){var sec=SECTORS[k];var coins=sec.coins.filter(function(s){return T[s]});if(coins.length<2)continue;var totC=0,rising=0,totV=0,cd=[];coins.forEach(function(s){var d=T[s];totC+=d.c;totV+=d.v;if(d.c>0)rising++;cd.push({s:s,c:d.c,p:d.p,v:d.v})});cd.sort(function(a,b){return b.c-a.c});var avg=totC/coins.length;var rPct=Math.round(rising/coins.length*100);var str=0;if(avg>=8)str=90;else if(avg>=5)str=75;else if(avg>=3)str=60;else if(avg>=1)str=45;else if(avg>=0)str=30;else if(avg>=-3)str=15;else str=5;if(rPct>=80)str+=10;else if(rPct>=60)str+=5;str=Math.min(100,str);var v,vc;if(str>=70){v=lang==='ar'?'🔥 قطاع حامي — فرصة!':'🔥 Hot — Opportunity!';vc='var(--up)'}else if(str>=50){v=lang==='ar'?'📈 صاعد':'📈 Rising';vc='var(--neon)'}else if(str>=30){v=lang==='ar'?'🟡 محايد':'🟡 Neutral';vc='var(--warn)'}else{v=lang==='ar'?'🔴 هابط — تجنب':'🔴 Declining — Avoid';vc='var(--dn)'}
   res.push({k:k,ic:sec.ic,name:sec.n[lang]||sec.n.en,col:sec.col,avg:+avg.toFixed(1),rising:rising,total:coins.length,rPct:rPct,vol:totV,str:str,coins:cd,verdict:v,verdictCol:vc})}res.sort(function(a,b){return b.str-a.str});return res}
-function loadTrending(){var secs=analyzeSectors();var h='';secs.forEach(function(s){var isHot=s.str>=60;var isMed=s.str>=30&&s.str<60;
-  h+='<div class="whale-card" style="border-left:3px solid '+s.col+';margin-bottom:8px;padding:10px">'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:18px">'+s.ic+'</span><div><div style="font-weight:800;font-size:13px;color:var(--t0)">'+s.name+'</div><div style="font-size:8px;color:var(--t3)">'+s.rising+'/'+s.total+' '+(lang==='ar'?'صاعدة':'rising')+'</div></div></div><div style="text-align:right"><div style="font-family:var(--fm);font-size:16px;font-weight:800;color:'+(s.avg>=0?'var(--up)':'var(--dn)')+'">'+(s.avg>=0?'+':'')+s.avg+'%</div><div style="font-size:8px;color:'+s.verdictCol+';font-weight:700">'+s.verdict+'</div></div></div>';
-  if(isHot||isMed){var showCount=isHot?5:3;h+='<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">';s.coins.slice(0,showCount).forEach(function(c){h+='<div style="display:flex;align-items:center;gap:4px;padding:3px 6px;background:var(--bg2);border-radius:6px;font-size:9px;font-family:var(--fm);cursor:pointer" onclick="openCoin(\''+c.s+'\')"><span style="font-weight:800">'+c.s+'</span><span style="color:'+(c.c>=0?'var(--up)':'var(--dn)')+';font-weight:700">'+(c.c>=0?'+':'')+c.c.toFixed(1)+'%</span></div>'});h+='</div>'}
-  if(isHot){h+='<div style="text-align:center"><button class="chart-tf" onclick="scanTab(1,document.querySelectorAll(\'#pg-scan>.big-tabs>.big-tab\')[1]);curTradeFilter=\''+s.k+'\'" style="font-size:9px">📊 '+(lang==='ar'?'تداول '+s.name:'Trade '+s.name)+'</button></div>'}
-  h+='<div style="height:4px;background:var(--bg2);border-radius:2px;overflow:hidden;margin-top:4px"><div style="width:'+s.str+'%;height:100%;background:'+s.col+';border-radius:2px"></div></div></div>'});
-  var trendEl=document.getElementById('trendList');if(trendEl)trendEl.innerHTML=h||'<div class="empty"><div class="empty-ic">📡</div><div class="empty-tx">'+(lang==='ar'?'جاري التحليل...':'Analyzing...')+'</div></div>'}
+
+/* ═══ Sector Rotation — money-flow tracker ═══
+   Snapshots each sector's average change every time loadTrending runs,
+   then computes the 1-hour delta to surface "where is the money going".
+   Persisted to localStorage so the history survives page reloads.
+   Capped at 144 samples per sector (24h at 10-min cadence) to avoid
+   unbounded growth. */
+var sectorHistory={};
+try{sectorHistory=JSON.parse(localStorage.getItem('nxSectorHist10')||'{}');if(typeof sectorHistory!=='object'||!sectorHistory)sectorHistory={}}catch(e){sectorHistory={}}
+var _sectorSaveTimer=null;
+function saveSectorHistory(){
+  if(_sectorSaveTimer)clearTimeout(_sectorSaveTimer);
+  _sectorSaveTimer=setTimeout(function(){try{localStorage.setItem('nxSectorHist10',JSON.stringify(sectorHistory))}catch(e){}},2000);
+}
+
+function analyzeSectorRotation(){
+  var current=analyzeSectors();
+  var rotation=[];
+  var now=Date.now();
+  current.forEach(function(s){
+    if(!sectorHistory[s.k])sectorHistory[s.k]=[];
+    var hist=sectorHistory[s.k];
+    /* Sample at most every ~5 min so a manual refresh storm doesn't pollute. */
+    var lastSample=hist.length?hist[hist.length-1]:null;
+    if(!lastSample||now-lastSample.time>=5*60*1000){
+      hist.push({time:now,avg:s.avg,str:s.str,rPct:s.rPct});
+      if(hist.length>144)sectorHistory[s.k]=hist.slice(-144);
+    }
+    /* Find earliest sample at least 1h old as the baseline for delta. */
+    var baseline=null;
+    for(var i=0;i<hist.length;i++){
+      if(now-hist[i].time>=60*60*1000){baseline=hist[i]}
+    }
+    var change1h=baseline?+(s.avg-baseline.avg).toFixed(2):0;
+    var flow,flowIc;
+    if(change1h>1.5){flow='inflow';flowIc='↗'}
+    else if(change1h<-1.5){flow='outflow';flowIc='↘'}
+    else{flow='stable';flowIc='→'}
+    rotation.push({sector:s.k,ic:s.ic,name:s.name,col:s.col,currentAvg:s.avg,change1h:change1h,flow:flow,flowIc:flowIc,str:s.str,coins:s.coins,rising:s.rising,total:s.total,verdict:s.verdict,verdictCol:s.verdictCol,hasBaseline:!!baseline});
+  });
+  saveSectorHistory();
+  /* Sort by 1h-delta descending; sectors without baseline fall to natural rank. */
+  rotation.sort(function(a,b){
+    if(a.hasBaseline&&!b.hasBaseline)return-1;
+    if(!a.hasBaseline&&b.hasBaseline)return 1;
+    return b.change1h-a.change1h;
+  });
+  var withBaseline=rotation.filter(function(x){return x.hasBaseline});
+  return{
+    sectors:rotation,
+    leading:withBaseline.length?withBaseline[0]:null,
+    lagging:withBaseline.length?withBaseline[withBaseline.length-1]:null,
+  };
+}
+
+function loadTrending(){
+  var rotData=analyzeSectorRotation();
+  var h='';
+  /* Leading vs lagging banner — only when we have at least one hour of data. */
+  if(rotData.leading&&rotData.lagging&&rotData.leading.sector!==rotData.lagging.sector){
+    h+='<div class="sc-info" style="margin-bottom:8px;padding:8px 12px">'
+      +'<div style="font-size:10px;color:var(--t3);margin-bottom:4px;font-weight:700">'+(lang==='ar'?'🔄 تدفق المال (آخر ساعة)':'🔄 Money flow (last 1h)')+'</div>'
+      +'<div style="display:flex;justify-content:space-between;font-size:11px">'
+      +'<span><span style="color:var(--up);font-weight:800">'+rotData.leading.ic+' '+rotData.leading.name+'</span> '+(lang==='ar'?'يقود':'leading')+' <span style="color:var(--up);font-family:var(--fm);font-weight:700">'+(rotData.leading.change1h>=0?'+':'')+rotData.leading.change1h+'%</span></span>'
+      +'<span><span style="color:var(--dn);font-weight:800">'+rotData.lagging.ic+' '+rotData.lagging.name+'</span> '+(lang==='ar'?'متراجع':'lagging')+' <span style="color:var(--dn);font-family:var(--fm);font-weight:700">'+(rotData.lagging.change1h>=0?'+':'')+rotData.lagging.change1h+'%</span></span>'
+      +'</div></div>';
+  }
+  rotData.sectors.forEach(function(s){
+    var isHot=s.str>=60;var isMed=s.str>=30&&s.str<60;
+    var flowCol=s.flow==='inflow'?'var(--up)':s.flow==='outflow'?'var(--dn)':'var(--t2)';
+    var flowText=s.hasBaseline?(s.flowIc+' '+(s.change1h>=0?'+':'')+s.change1h+'%'):'·';
+    h+='<div class="whale-card" style="border-left:3px solid '+s.col+';margin-bottom:8px;padding:10px">'
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+      +'<div style="display:flex;align-items:center;gap:8px">'
+      +'<span style="font-size:18px">'+s.ic+'</span>'
+      +'<div>'
+      +'<div style="font-weight:800;font-size:13px;color:var(--t0)">'+s.name+'</div>'
+      +'<div style="font-size:8px;color:var(--t3)">'+s.rising+'/'+s.total+' '+(lang==='ar'?'صاعدة':'rising')+' · <span style="color:'+flowCol+';font-weight:700">'+flowText+'</span></div>'
+      +'</div></div>'
+      +'<div style="text-align:right">'
+      +'<div style="font-family:var(--fm);font-size:16px;font-weight:800;color:'+(s.currentAvg>=0?'var(--up)':'var(--dn)')+'">'+(s.currentAvg>=0?'+':'')+s.currentAvg+'%</div>'
+      +'<div style="font-size:8px;color:'+s.verdictCol+';font-weight:700">'+s.verdict+'</div>'
+      +'</div></div>';
+    if(isHot||isMed){
+      var showCount=isHot?5:3;
+      h+='<div style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px">';
+      s.coins.slice(0,showCount).forEach(function(c){h+='<div style="display:flex;align-items:center;gap:4px;padding:3px 6px;background:var(--bg2);border-radius:6px;font-size:9px;font-family:var(--fm);cursor:pointer" onclick="openCoin(\''+c.s+'\')"><span style="font-weight:800">'+c.s+'</span><span style="color:'+(c.c>=0?'var(--up)':'var(--dn)')+';font-weight:700">'+(c.c>=0?'+':'')+c.c.toFixed(1)+'%</span></div>'});
+      h+='</div>';
+    }
+    if(isHot){h+='<div style="text-align:center"><button class="chart-tf" onclick="scanTab(1,document.querySelectorAll(\'#pg-scan>.big-tabs>.big-tab\')[1]);curTradeFilter=\''+s.sector+'\'" style="font-size:9px">📊 '+(lang==='ar'?'تداول '+s.name:'Trade '+s.name)+'</button></div>'}
+    h+='<div style="height:4px;background:var(--bg2);border-radius:2px;overflow:hidden;margin-top:4px"><div style="width:'+s.str+'%;height:100%;background:'+s.col+';border-radius:2px"></div></div></div>';
+  });
+  var trendEl=document.getElementById('trendList');
+  if(trendEl)trendEl.innerHTML=h||'<div class="empty"><div class="empty-ic">📡</div><div class="empty-tx">'+(lang==='ar'?'جاري التحليل...':'Analyzing...')+'</div></div>';
+}
 /* ═══ TAB 2: SMART TRADING ═══ */
 async function loadTrading(){var trLoadEl=document.getElementById('tradeList');if(trLoadEl)trLoadEl.innerHTML='<div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div>';
   /* ═══ DATA CHECK: If no data loaded yet, show smart error ═══ */

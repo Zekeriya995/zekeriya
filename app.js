@@ -6061,21 +6061,44 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   /* ═══ MAIN POLLING: fetch /api/all every 5 seconds ═══ */
   setInterval(async function(){try{await loadTk();checkWatchlistAlerts();updateConnStatus()}catch(e){connMetrics.apiFail++;updateConnStatus()}},5000);
   setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))try{await loadDash()}catch(e){}},120000);
-  /* Idea 4 — Scanner tab auto-refresh. While the user is on the
-     Scanner tab and its Trading sub-tab is active, re-run loadTrading
-     every 2 minutes so the signal list stays fresh without manual
-     taps. Respects the same visibility + tab-active pattern used by
-     the Dashboard refresher above, so backgrounded tabs stay quiet. */
+  /* Smart Scanner auto-refresh — replaces the simple 2-min cadence
+     from PR #13 with a more responsive trigger:
+       1. Refresh immediately when BTC moves >= 1% since last refresh
+          (a real market event the scanner should react to fast).
+       2. Refresh anyway if 5 min have elapsed since the last refresh
+          (safety net so a sideways market still gets fresh signals).
+     Checked every 60 seconds. Same guards as before: skip when the
+     tab is backgrounded, the Scanner tab isn't active, or the user
+     is on a sub-tab other than Trading.
+     Visual hint: when a refresh fires, briefly overwrite the info
+     bar with the trigger reason so the user understands why it
+     just updated. */
+  var _scanLastRefresh=0;
+  var _scanLastBTC=0;
+  var SCAN_BTC_TRIGGER=1.0;       /* % move that forces an early refresh */
+  var SCAN_TIME_TRIGGER=5*60*1000; /* fallback cadence when BTC is calm */
   setInterval(async function(){
     if(typeof document.visibilityState==='string'&&document.visibilityState==='hidden')return;
     var pgScan=document.getElementById('pg-scan');
     if(!pgScan||!pgScan.classList.contains('act'))return;
-    /* Only auto-refresh the Trading sub-tab (idx=0) — sectors and
-       small-caps have their own cadences and would churn UI for no
-       benefit. */
     if(curScanTab!==0)return;
+    var btc=T.BTC;if(!btc||!btc.p)return;
+    var now=Date.now();
+    var btcMove=_scanLastBTC>0?Math.abs((btc.p-_scanLastBTC)/_scanLastBTC*100):0;
+    var timeSince=now-_scanLastRefresh;
+    var trigger=null;
+    if(btcMove>=SCAN_BTC_TRIGGER)trigger=(lang==='ar'?'BTC تحرّك ':'BTC moved ')+btcMove.toFixed(1)+'%';
+    else if(timeSince>=SCAN_TIME_TRIGGER)trigger=(lang==='ar'?'تحديث دوري':'periodic refresh');
+    if(!trigger)return;
+    _scanLastRefresh=now;_scanLastBTC=btc.p;
+    var infoEl=document.getElementById('scanI');
+    if(infoEl){
+      var origText=infoEl.textContent;
+      infoEl.textContent='🔄 '+(lang==='ar'?'تحديث تلقائي':'auto-refresh')+' — '+trigger;
+      setTimeout(function(){if(infoEl.textContent.indexOf('🔄')===0)infoEl.textContent=origText},3000);
+    }
     try{await loadTrading()}catch(e){}
-  },120000);
+  },60000);
   setInterval(monitorTrades,10000);
   setInterval(function(){try{renderTop3()}catch(e){}},60000); /* Auto-update VIP trades every minute */
   setInterval(function(){notifiedSet={};safeSet('nxnot10','{}');tgSent={}},3600000);

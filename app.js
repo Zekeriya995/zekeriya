@@ -1016,6 +1016,22 @@ function setScanTF(tf,btn){
   }
   loadTrading();
 }
+
+/* ═══ Setup Filter ═══
+   Lets the user focus on a specific trade pattern — accumulation,
+   reversal, early_breakout, pullback, or trend. 'all' (default)
+   shows every classified signal. */
+var scannerSetup='all';
+var SETUP_TYPES=['all','accumulation','early_breakout','reversal','pullback','trend'];
+function setScanSetup(s,btn){
+  if(SETUP_TYPES.indexOf(s)===-1)return;
+  scannerSetup=s;
+  if(btn&&btn.parentElement){
+    btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});
+    btn.classList.add('act');
+  }
+  loadTrading();
+}
 function scanTab(idx,btn){curScanTab=idx;document.querySelectorAll('#pg-scan>.big-tabs>.big-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');['scanTrade','scanTrend','scanSmall'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=j===idx?'block':'none'});updateScanSummary(0,Object.keys(T).length);if(idx===0)loadTrading();if(idx===1)loadTrending();if(idx===2)loadSmallCapsUI()}
 /* ═══ TAB 1: SECTOR TRENDING ═══ */
 function analyzeSectors(){var res=[];for(var k in SECTORS){var sec=SECTORS[k];var coins=sec.coins.filter(function(s){return T[s]});if(coins.length<2)continue;var totC=0,rising=0,totV=0,cd=[];coins.forEach(function(s){var d=T[s];totC+=d.c;totV+=d.v;if(d.c>0)rising++;cd.push({s:s,c:d.c,p:d.p,v:d.v})});cd.sort(function(a,b){return b.c-a.c});var avg=totC/coins.length;var rPct=Math.round(rising/coins.length*100);var str=0;if(avg>=8)str=90;else if(avg>=5)str=75;else if(avg>=3)str=60;else if(avg>=1)str=45;else if(avg>=0)str=30;else if(avg>=-3)str=15;else str=5;if(rPct>=80)str+=10;else if(rPct>=60)str+=5;str=Math.min(100,str);var v,vc;if(str>=70){v=lang==='ar'?'🔥 قطاع حامي — فرصة!':'🔥 Hot — Opportunity!';vc='var(--up)'}else if(str>=50){v=lang==='ar'?'📈 صاعد':'📈 Rising';vc='var(--neon)'}else if(str>=30){v=lang==='ar'?'🟡 محايد':'🟡 Neutral';vc='var(--warn)'}else{v=lang==='ar'?'🔴 هابط — تجنب':'🔴 Declining — Avoid';vc='var(--dn)'}
@@ -1185,7 +1201,11 @@ async function loadTrading(){var trLoadEl=document.getElementById('tradeList');i
     var rawConf=earlyBonus+latePenalty+cvdBonus+takerBonus+obBonus+lsBonus+smartMoney+vpinB+exchangeDiv+cbPremB+checkBonus+frBonus+whaleBonus+btcBonus;
     var conf=Math.min(95,Math.max(20,Math.round(rawConf)));
     var sec=getCoinSector(x.s);
-    sigs.push({s:x.s,p:d.p,c:d.c,v:d.v,type:type,conf:conf,entry:entry,target:target,stop:stop,rr:rr,dur:dur,reasons:reasons,score:x.score,checks:x.checks,passed:x.passed,total:x.total,ultra:x.ultra,confirmed:x.confirmed,tags:x.tags,sec:sec,detectedAt:x.detectedAt,priceAtDetection:x.priceAtDetection,ageMinutes:x.ageMinutes,changeFromDetection:x.changeFromDetection,freshness:x.freshness})}
+    /* Classify the setup so the user can filter by trade pattern. */
+    var _btcChg=T.BTC?T.BTC.c:0;
+    var _cvdDiv=null;try{var _cvdRes=analyzeCVD(x.s);if(_cvdRes)_cvdDiv=_cvdRes.divergence}catch(e){}
+    var setup=classifySetup(x,d,_btcChg,_cvdDiv);
+    sigs.push({s:x.s,p:d.p,c:d.c,v:d.v,type:type,setup:setup,conf:conf,entry:entry,target:target,stop:stop,rr:rr,dur:dur,reasons:reasons,score:x.score,checks:x.checks,passed:x.passed,total:x.total,ultra:x.ultra,confirmed:x.confirmed,tags:x.tags,sec:sec,detectedAt:x.detectedAt,priceAtDetection:x.priceAtDetection,ageMinutes:x.ageMinutes,changeFromDetection:x.changeFromDetection,freshness:x.freshness})}
   sigs.sort(function(a,b){return b.conf-a.conf});renderTrading(sigs)}
 function filterTrade(f,btn){curTradeFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadTrading()}
 /* Idea 3 — Recent win rate per signal tier.
@@ -1209,6 +1229,7 @@ function recentTierRates(limit){
 }
 
 function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter(function(x){return x.type==='fast'});else if(curTradeFilter==='daily')f=sigs.filter(function(x){return x.type==='daily'});else if(curTradeFilter!=='all'){f=sigs.filter(function(x){return x.sec===curTradeFilter})}
+  if(scannerSetup!=='all'){f=f.filter(function(x){return x.setup===scannerSetup})}
   /* Part B: Quality filter — min 40% confidence, max 7 — adaptive */
   var minConf=monitorState&&monitorState.minConf?Math.max(35,monitorState.minConf-10):40;
   f=f.filter(function(s){return s.conf>=minConf});

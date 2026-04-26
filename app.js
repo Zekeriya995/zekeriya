@@ -992,6 +992,30 @@ function renderMySettings(){
 /* ⚖️ calcRisk2 for QA page */
 function calcRisk2(){var cap=+document.getElementById('rcCap2').value,risk=+document.getElementById('rcRisk2').value,entry=+document.getElementById('rcEntry2').value,sl=+document.getElementById('rcSL2').value,tp=+document.getElementById('rcTP2').value;if(!cap||!entry||!sl){document.getElementById('rcRes2').innerHTML='<div style="text-align:center;color:var(--t3);padding:12px;font-size:12px">'+t('enter_data')+'</div>';return};var rA=cap*(risk/100),slD=Math.abs(entry-sl),pos=slD>0?rA/slD:0,posV=pos*entry,rew=tp?pos*Math.abs(tp-entry):0,rr=tp&&rA>0?rew/rA:0,lev=cap>0?posV/cap:0;document.getElementById('rcRes2').innerHTML='<div class="rc-row"><span>'+t('risk_amt')+'</span><span class="rc-val" style="color:var(--dn)">'+fmt(rA)+'</span></div><div class="rc-row"><span>'+t('pos_size')+'</span><span class="rc-val">'+pos.toFixed(4)+'</span></div><div class="rc-row"><span>'+t('pos_val')+'</span><span class="rc-val">'+fmt(posV)+'</span></div><div class="rc-row"><span>'+t('leverage')+'</span><span class="rc-val" style="color:'+(lev>10?'var(--dn)':lev>5?'var(--warn)':'var(--up)')+'">'+lev.toFixed(1)+'x</span></div>'+(tp?'<div class="rc-row"><span>'+t('exp_profit')+'</span><span class="rc-val" style="color:var(--up)">'+fmt(rew)+'</span></div><div class="rc-row"><span>R/R</span><span class="rc-val" style="color:'+(rr>=2?'var(--up)':rr>=1?'var(--warn)':'var(--dn)')+'">1:'+rr.toFixed(1)+'</span></div>':'')+'<div class="rc-row"><span>'+t('sl_loss')+'</span><span class="rc-val" style="color:var(--dn)">-'+fmt(rA)+'</span></div>'}
 var curScanTab=0,curTradeFilter='all',curSmallFilter='all',chartSignal=null;
+/* ═══ Timeframe Selector ═══
+   The scanner already fetches 5m + 15m + 1h + 4h klines for the top
+   candidates. This selector doesn't change WHAT we fetch — it tunes
+   HOW STRICT we are for each timeframe. A 15m signal needs much
+   stronger confirmation than a 1d signal because the move window is
+   tighter and noise is higher. The displayed hold duration on each
+   card matches the user's selected timeframe so the trade plan and
+   the signal match. */
+var scannerTimeframe='1h';
+var TF_CONFIG={
+  '15m':{vol5mStrong:3.0,vol5mLight:2.0,vol1hStrong:2.2,vol1hLight:1.6,holdAr:'10-30 دقيقة',holdEn:'10-30 min'},
+  '1h': {vol5mStrong:2.5,vol5mLight:1.5,vol1hStrong:1.8,vol1hLight:1.3,holdAr:'1-4 ساعة',holdEn:'1-4 hours'},
+  '4h': {vol5mStrong:2.0,vol5mLight:1.4,vol1hStrong:1.5,vol1hLight:1.2,holdAr:'4-12 ساعة',holdEn:'4-12 hours'},
+  '1d': {vol5mStrong:1.8,vol5mLight:1.3,vol1hStrong:1.4,vol1hLight:1.15,holdAr:'1-3 أيام',holdEn:'1-3 days'}
+};
+function setScanTF(tf,btn){
+  if(!TF_CONFIG[tf])return;
+  scannerTimeframe=tf;
+  if(btn&&btn.parentElement){
+    btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});
+    btn.classList.add('act');
+  }
+  loadTrading();
+}
 function scanTab(idx,btn){curScanTab=idx;document.querySelectorAll('#pg-scan>.big-tabs>.big-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');['scanTrade','scanTrend','scanSmall'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=j===idx?'block':'none'});updateScanSummary(0,Object.keys(T).length);if(idx===0)loadTrading();if(idx===1)loadTrending();if(idx===2)loadSmallCapsUI()}
 /* ═══ TAB 1: SECTOR TRENDING ═══ */
 function analyzeSectors(){var res=[];for(var k in SECTORS){var sec=SECTORS[k];var coins=sec.coins.filter(function(s){return T[s]});if(coins.length<2)continue;var totC=0,rising=0,totV=0,cd=[];coins.forEach(function(s){var d=T[s];totC+=d.c;totV+=d.v;if(d.c>0)rising++;cd.push({s:s,c:d.c,p:d.p,v:d.v})});cd.sort(function(a,b){return b.c-a.c});var avg=totC/coins.length;var rPct=Math.round(rising/coins.length*100);var str=0;if(avg>=8)str=90;else if(avg>=5)str=75;else if(avg>=3)str=60;else if(avg>=1)str=45;else if(avg>=0)str=30;else if(avg>=-3)str=15;else str=5;if(rPct>=80)str+=10;else if(rPct>=60)str+=5;str=Math.min(100,str);var v,vc;if(str>=70){v=lang==='ar'?'🔥 قطاع حامي — فرصة!':'🔥 Hot — Opportunity!';vc='var(--up)'}else if(str>=50){v=lang==='ar'?'📈 صاعد':'📈 Rising';vc='var(--neon)'}else if(str>=30){v=lang==='ar'?'🟡 محايد':'🟡 Neutral';vc='var(--warn)'}else{v=lang==='ar'?'🔴 هابط — تجنب':'🔴 Declining — Avoid';vc='var(--dn)'}
@@ -1109,10 +1133,14 @@ async function loadTrading(){var trLoadEl=document.getElementById('tradeList');i
      delayed; the results feed into the *next* scan (cache TTL = 60s). */
   try{detectWhaleWaves(r)}catch(e){}
   cache.scan=r;cache.scanTime=Date.now();var sigs=[];
+  /* Hold-duration label tracks the user's selected timeframe so the
+     trade plan on each card matches the timeframe they're hunting on. */
+  var _tfCfgRender=TF_CONFIG[scannerTimeframe]||TF_CONFIG['1h'];
+  var _tfHold=lang==='ar'?_tfCfgRender.holdAr:_tfCfgRender.holdEn;
   for(var i=0;i<Math.min(r.length,7);i++){var x=r[i];var d=T[x.s];if(!d)continue;
     var type=(d.c>=-3&&d.c<=0&&d.v>1e8)?'fast':'daily';var entry,target,stop,dur;
-    if(x.smartEntry&&type!=='fast'){entry=x.smartEntry.entry;target=x.smartEntry.target1;stop=x.smartEntry.stop;dur=lang==='ar'?'4-12 ساعة':'4-12 hours'}
-    else if(type==='fast'){entry=d.p;target=d.p*1.015;stop=d.p*0.995;dur=lang==='ar'?'10-30 دقيقة':'10-30 min'}else{entry=d.p*0.995;target=x.ultra?d.p*1.08:d.p*1.06;stop=d.p*0.97;dur=lang==='ar'?'4-12 ساعة':'4-12 hours'}
+    if(x.smartEntry&&type!=='fast'){entry=x.smartEntry.entry;target=x.smartEntry.target1;stop=x.smartEntry.stop;dur=_tfHold}
+    else if(type==='fast'){entry=d.p;target=d.p*1.015;stop=d.p*0.995;dur=scannerTimeframe==='15m'?_tfHold:(lang==='ar'?'10-30 دقيقة':'10-30 min')}else{entry=d.p*0.995;target=x.ultra?d.p*1.08:d.p*1.06;stop=d.p*0.97;dur=_tfHold}
     var risk=Math.abs(entry-stop);var rr=risk>0?+((target-entry)/risk).toFixed(1):0;if(rr<1.5)continue;
     var reasons=[];var ww=whaleWaves[x.s];if(ww&&ww.engine&&ww.engine.confidence>=30)reasons.push({ic:'🐋',t:lang==='ar'?'حوت مؤكد '+ww.engine.confidence+'%':'Whale '+ww.engine.confidence+'%'});
     var cvd=analyzeCVD(x.s);if(cvd.divergence==='BULLISH')reasons.push({ic:'📈',t:lang==='ar'?'CVD صاعد — تجميع صامت':'CVD rising — accumulation'});
@@ -1884,21 +1912,24 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
     await Promise.all(byProms)}
   for(var ci=0;ci<top.length;ci++){var c=top[ci];var ds=c.score,dt=c.tags.slice();
     var checks={vol:false,ob:false,rsi:false,macd:false,fr:false,oi:false};var passed=0;
-    /* ═══ CHECK 1: VOL Acceleration (5m klines preferred, fallback 1h) ═══ */
+    /* ═══ CHECK 1: VOL Acceleration (5m klines preferred, fallback 1h) ═══
+       Thresholds adapt to the user's selected timeframe — a 15m hunt
+       requires a much stronger spike to be meaningful than a 1d hunt. */
     var kl5=kl5Data[c.s];var kl=klData[c.s];
+    var _tfCfg=TF_CONFIG[scannerTimeframe]||TF_CONFIG['1h'];
     if(kl5&&kl5.length>=12){
       var vols5=kl5.map(function(k){return+k[5]});
       var avg5=vols5.slice(0,-3).reduce(function(a,b){return a+b},0)/Math.max(1,vols5.length-3);
       var rec5=(vols5[vols5.length-1]+vols5[vols5.length-2]+vols5[vols5.length-3])/3;
-      if(rec5>avg5*2.5){ds+=20;checks.vol=true;dt.push('VOL5m:'+Math.round(rec5/avg5*10)/10+'x')}
-      else if(rec5>avg5*1.5){ds+=10;checks.vol=true;dt.push('VOL5m↑')}
+      if(rec5>avg5*_tfCfg.vol5mStrong){ds+=20;checks.vol=true;dt.push('VOL5m:'+Math.round(rec5/avg5*10)/10+'x')}
+      else if(rec5>avg5*_tfCfg.vol5mLight){ds+=10;checks.vol=true;dt.push('VOL5m↑')}
     }
     if(!checks.vol&&kl&&kl.length>=20){
       var vols=kl.map(function(k){return+k[5]});
       var avgVol=vols.slice(0,-3).reduce(function(a,b){return a+b},0)/Math.max(1,vols.length-3);
       var recentVol=(vols[vols.length-1]+vols[vols.length-2])/2;
-      if(recentVol>avgVol*1.8){ds+=18;checks.vol=true;dt.push('VOL:'+Math.round(recentVol/avgVol*10)/10+'x')}
-      else if(recentVol>avgVol*1.3){ds+=10;checks.vol=true;dt.push('VOL↑')}
+      if(recentVol>avgVol*_tfCfg.vol1hStrong){ds+=18;checks.vol=true;dt.push('VOL:'+Math.round(recentVol/avgVol*10)/10+'x')}
+      else if(recentVol>avgVol*_tfCfg.vol1hLight){ds+=10;checks.vol=true;dt.push('VOL↑')}
     }
     /* ═══ CHECK 2: OB Pressure — prefer rolling 10-min OFI over snapshot.
        Sustained bid imbalance is much harder to fake than a flashed wall.

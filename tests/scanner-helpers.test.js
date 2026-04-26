@@ -174,6 +174,76 @@ test('atrZones — partial mults object falls back to defaults for missing keys'
 
 /* ─── countWavesInWindow ──────────────────────────────────────────── */
 
+/* ─── classifySetup ──────────────────────────────────────────────── */
+
+test('classifySetup — missing inputs return "unknown"', () => {
+  assert.equal(classifySetup(null, {}, 0, null), 'unknown');
+  assert.equal(classifySetup({}, null, 0, null), 'unknown');
+});
+
+test('classifySetup — ACC tag wins immediately', () => {
+  const r = { tags: ['🐋ACC', '📊VOL'], passed: 4, checks: {} };
+  const d = { p: 100, h: 100, c: 1, v: 9e7 };
+  /* Even though the price/vol match early_breakout, ACC tag dominates. */
+  assert.equal(classifySetup(r, d, 0, null), 'accumulation');
+});
+
+test('classifySetup — high vol + flat price = accumulation (no tag needed)', () => {
+  const r = { tags: [], passed: 2, checks: {} };
+  const d = { p: 100, h: 110, c: 0.5, v: 6e7 };
+  assert.equal(classifySetup(r, d, 0, null), 'accumulation');
+});
+
+test('classifySetup — BOTTOM tag + bullish CVD = reversal', () => {
+  const r = { tags: ['📉BOTTOM'], passed: 3, checks: {} };
+  const d = { p: 100, h: 110, c: -2, v: 5e6 };
+  assert.equal(classifySetup(r, d, 0, 'BULLISH'), 'reversal');
+});
+
+test('classifySetup — BOTTOM tag without bullish CVD is NOT a reversal', () => {
+  /* Bottom alone could be capitulation. We need confirmation. */
+  const r = { tags: ['📉BOTTOM'], passed: 2, checks: {} };
+  const d = { p: 100, h: 110, c: -2, v: 5e6 };
+  /* Falls through to mixed (no other category matches). */
+  assert.equal(classifySetup(r, d, 0, null), 'mixed');
+});
+
+test('classifySetup — near high + small move + high vol = early_breakout', () => {
+  /* Pre-pump window: price within 5% of daily high, hasn't run yet. */
+  const r = { tags: [], passed: 4, checks: {} };
+  const d = { p: 99, h: 100, c: 1.5, v: 6e7 };
+  assert.equal(classifySetup(r, d, 0, null), 'early_breakout');
+});
+
+test('classifySetup — near high but already moved 4% is NOT early_breakout', () => {
+  /* This is the AFTER-breakout case the platform refuses to enter. */
+  const r = { tags: [], passed: 4, checks: {} };
+  const d = { p: 99, h: 100, c: 4, v: 6e7 };
+  /* c > 2 means it's no longer "early" — falls to trend or mixed. */
+  assert.notEqual(classifySetup(r, d, 0, null), 'early_breakout');
+});
+
+test('classifySetup — small dip while BTC up + RSI passed = pullback', () => {
+  const r = { tags: [], passed: 3, checks: { rsi: true } };
+  const d = { p: 98, h: 110, c: -1.5, v: 5e6 };
+  assert.equal(classifySetup(r, d, 0.5, null), 'pullback');
+});
+
+test('classifySetup — modest uptrend with 4+ checks = trend', () => {
+  const r = { tags: [], passed: 5, checks: {} };
+  const d = { p: 102, h: 105, c: 2, v: 5e6 };
+  assert.equal(classifySetup(r, d, 0, null), 'trend');
+});
+
+test('classifySetup — uptrend without confluence is "mixed"', () => {
+  /* 2% up but only 2 checks passed — not strong enough for trend. */
+  const r = { tags: [], passed: 2, checks: {} };
+  const d = { p: 102, h: 105, c: 2, v: 5e6 };
+  assert.equal(classifySetup(r, d, 0, null), 'mixed');
+});
+
+/* ─── countWavesInWindow ──────────────────────────────────────────── */
+
 test('countWavesInWindow — empty / missing waves returns 0', () => {
   assert.equal(countWavesInWindow(null, 60000), 0);
   assert.equal(countWavesInWindow([], 60000), 0);

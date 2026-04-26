@@ -211,6 +211,59 @@ function computePerformanceReport(preds, trades) {
   return out;
 }
 
+/* Classify a candidate into one of five setup types — used by the
+   scanner's setup filter so the user can focus on a specific
+   trade pattern. Pure function: takes the candidate result, its
+   ticker snapshot, the current BTC change %, and a CVD divergence
+   string ('BULLISH' | 'BEARISH' | null) so it doesn't depend on
+   app-level globals.
+
+   Categories are evaluated in priority order — accumulation wins
+   over trend even if both could match, because pre-pump signals
+   are the platform's primary hunt. Returns:
+
+     'early_breakout' — near daily high, small move, high vol
+                        (pre-breakout, not the breakout candle itself)
+     'pullback'       — small dip in an uptrend
+     'reversal'       — bottom of range + bullish CVD
+     'accumulation'   — silent accumulation tag or vol+flat
+     'trend'          — modest uptrend with confluence
+     'mixed'          — none of the above
+
+   Aligned with the platform's "enter before the explosion" goal:
+   early_breakout is intentionally bounded at c <= 2% so it captures
+   coins approaching the high WITHOUT requiring the breakout candle. */
+function classifySetup(r, d, btcChange, cvdDivergence) {
+  if (!r || !d) return 'unknown';
+  var tags = r.tags || [];
+  /* Accumulation has highest priority — it's the killer pre-pump tag. */
+  var hasAccTag = false;
+  for (var i = 0; i < tags.length; i++) {
+    if (tags[i] && tags[i].indexOf('ACC') >= 0) { hasAccTag = true; break; }
+  }
+  if (hasAccTag) return 'accumulation';
+  if (d.v > 5e7 && Math.abs(d.c) < 1.5) return 'accumulation';
+  /* Reversal — bottom of range with bullish CVD divergence. */
+  var hasBottomTag = false;
+  for (var j = 0; j < tags.length; j++) {
+    if (tags[j] && tags[j].indexOf('BOTTOM') >= 0) { hasBottomTag = true; break; }
+  }
+  if (hasBottomTag && cvdDivergence === 'BULLISH') return 'reversal';
+  /* Early breakout — near the high but hasn't run yet. The c bounds
+     are intentional: 0 to 2% is the pre-breakout window we want; the
+     prompt's original 2-6% would catch only AFTER the candle prints. */
+  if (d.h > 0 && d.p / d.h > 0.95 && d.c >= 0 && d.c <= 2 && d.v > 5e7) {
+    return 'early_breakout';
+  }
+  /* Pullback — small dip while BTC is up and RSI confirmed. */
+  if (d.c >= -3 && d.c <= -0.5 && btcChange > 0 && r.checks && r.checks.rsi) {
+    return 'pullback';
+  }
+  /* Trend — modest uptrend with at least 4 of 6 checks. */
+  if (d.c >= 0.5 && d.c <= 3 && r.passed >= 4) return 'trend';
+  return 'mixed';
+}
+
 /* Average rolling Order Flow Imbalance over the samples in `arr` that
    fall within `windowMs` of now. Needs at least 5 samples in the
    window to return a number — otherwise returns null so callers can

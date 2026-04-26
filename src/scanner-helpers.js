@@ -211,6 +211,28 @@ function computePerformanceReport(preds, trades) {
   return out;
 }
 
+/* Evaluate a signal's outcome by comparing entry price to current
+   price. Used by the per-tag performance tracker so we can answer
+   "which tags actually predict winners?" Pure: takes prices and
+   thresholds, returns the outcome string.
+
+   Returns 'win'  if gain >= winThreshold (default +5%)
+   Returns 'loss' if gain <= -lossThreshold (default -3%)
+   Returns 'neutral' otherwise (sideways or missing data).
+
+   Asymmetric thresholds (5% win vs 3% loss) reflect the platform's
+   pre-pump bias — we want signals that pump meaningfully, but a 3%
+   drawdown is enough to call it a miss. */
+function evaluateSignalOutcome(entryPrice, currentPrice, winThreshold, lossThreshold) {
+  if (!entryPrice || !currentPrice || entryPrice <= 0) return 'neutral';
+  var gain = ((currentPrice - entryPrice) / entryPrice) * 100;
+  var winT = winThreshold == null ? 5 : winThreshold;
+  var lossT = lossThreshold == null ? 3 : lossThreshold;
+  if (gain >= winT) return 'win';
+  if (gain <= -lossT) return 'loss';
+  return 'neutral';
+}
+
 /* Classify a candidate into one of five setup types — used by the
    scanner's setup filter so the user can focus on a specific
    trade pattern. Pure function: takes the candidate result, its

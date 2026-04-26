@@ -1148,6 +1148,10 @@ async function loadTrading(){var trLoadEl=document.getElementById('tradeList');i
      and Confirmed depend on. Fire-and-forget so the first render isn't
      delayed; the results feed into the *next* scan (cache TTL = 60s). */
   try{detectWhaleWaves(r)}catch(e){}
+  /* Tag performance tracking: record fresh high-score signals and
+     evaluate any pending entries old enough (>12h) to have a verdict. */
+  try{r.forEach(function(_x){recordSignalForTracking(_x)})}catch(e){}
+  try{checkPendingTagOutcomes()}catch(e){}
   cache.scan=r;cache.scanTime=Date.now();var sigs=[];
   /* Hold-duration label tracks the user's selected timeframe so the
      trade plan on each card matches the timeframe they're hunting on. */
@@ -1228,6 +1232,117 @@ function recentTierRates(limit){
   };
 }
 
+/* ═══ Per-tag Performance Tracker ═══
+   Records every high-score signal with its tags + entry price, then
+   evaluates the outcome 12h later by comparing to current price.
+   Builds a tag-level win/loss table so we can answer "which tag
+   actually predicts winners?" — finer granularity than recentTierRates
+   (which buckets by score tier). Persisted to localStorage 'nxTagPerf10'.
+
+   Storage shape:
+     tagPerf = {
+       <tag>: { wins, losses, total },
+       _pending: { <key>: { sym, entry, tags, score, time, checked? } }
+     }
+   _pending is capped at 200 entries (oldest evicted) to bound storage. */
+var TAG_PERF_KEY='nxTagPerf10';
+var tagPerf={_pending:{}};
+try{var _saved=JSON.parse(localStorage.getItem(TAG_PERF_KEY)||'null');if(_saved&&typeof _saved==='object'){tagPerf=_saved;if(!tagPerf._pending)tagPerf._pending={}}}catch(e){tagPerf={_pending:{}}}
+var _saveTagPerfTimer=null;
+function saveTagPerf(){
+  if(_saveTagPerfTimer)clearTimeout(_saveTagPerfTimer);
+  _saveTagPerfTimer=setTimeout(function(){try{localStorage.setItem(TAG_PERF_KEY,JSON.stringify(tagPerf))}catch(e){}},2000);
+}
+
+/* Record a signal we want to evaluate later. Only fires for the
+   confidence band where measurement is meaningful (score >= 50).
+   Idempotent: re-recording the same coin within an hour is skipped
+   so repeated renders don't pollute the data. */
+function recordSignalForTracking(r){
+  if(!r||r.score<50||!r.tags||!r.tags.length)return;
+  var d=T[r.s];if(!d||!d.p||d.p<=0)return;
+  /* Skip if a non-evaluated record for this coin already exists from
+     less than an hour ago — avoids duplicate counts on repeat renders. */
+  var pending=tagPerf._pending||{};
+  var keys=Object.keys(pending);
+  var now=Date.now();
+  for(var i=0;i<keys.length;i++){
+    var p=pending[keys[i]];
+    if(p&&p.sym===r.s&&!p.checked&&now-p.time<3600000)return;
+  }
+  var key=r.s+'_'+now;
+  pending[key]={sym:r.s,entry:d.p,tags:r.tags.slice(),score:r.score,time:now,checked:false};
+  /* Cap pending to 200 entries by age. */
+  keys=Object.keys(pending);
+  if(keys.length>200){
+    keys.sort(function(a,b){return pending[a].time-pending[b].time});
+    for(var j=0;j<keys.length-200;j++)delete pending[keys[j]];
+  }
+  tagPerf._pending=pending;
+  saveTagPerf();
+}
+
+/* Evaluate any pending signals older than 12h: compare entry price
+   to current price, attribute the outcome to each tag the signal
+   carried. Win threshold +5% / loss threshold -3% — asymmetric to
+   match the platform's pre-pump bias. */
+function checkPendingTagOutcomes(){
+  var pending=tagPerf._pending||{};
+  var keys=Object.keys(pending);
+  var now=Date.now();
+  var changed=false;
+  for(var i=0;i<keys.length;i++){
+    var p=pending[keys[i]];
+    if(!p||p.checked)continue;
+    if(now-p.time<12*3600000)continue;
+    var cur=T[p.sym];if(!cur||!cur.p)continue;
+    var outcome=evaluateSignalOutcome(p.entry,cur.p);
+    p.tags.forEach(function(tag){
+      if(!tagPerf[tag])tagPerf[tag]={wins:0,losses:0,total:0};
+      tagPerf[tag].total++;
+      if(outcome==='win')tagPerf[tag].wins++;
+      else if(outcome==='loss')tagPerf[tag].losses++;
+    });
+    p.checked=true;p.outcome=outcome;
+    changed=true;
+  }
+  if(changed)saveTagPerf();
+}
+
+/* Sorted summary: { tag, winRate, total, wins, losses }
+   Excludes tags with fewer than 5 samples — too noisy. */
+function summarizeTagPerformance(){
+  var stats=[];
+  Object.keys(tagPerf).forEach(function(tag){
+    if(tag==='_pending')return;
+    var s=tagPerf[tag];
+    if(!s||s.total<5)return;
+    var winRate=Math.round((s.wins/s.total)*100);
+    stats.push({tag:tag,winRate:winRate,total:s.total,wins:s.wins,losses:s.losses});
+  });
+  stats.sort(function(a,b){return b.winRate-a.winRate});
+  return stats;
+}
+
+/* Tiny chip strip showing top tags by win rate — appears above the
+   trade list when at least one tag has the 5-sample minimum. */
+function renderTagPerfChips(){
+  var stats=summarizeTagPerformance();
+  if(!stats.length)return '';
+  var top=stats.slice(0,5);
+  var html='<div class="sc-info" style="padding:8px 12px;margin-bottom:8px">'
+    +'<div style="font-size:10px;color:var(--t3);margin-bottom:4px;font-weight:700">'
+    +(lang==='ar'?'📊 أداء الإشارات (آخر إغلاقات)':'📊 Tag performance (recent outcomes)')
+    +'</div><div style="display:flex;flex-wrap:wrap;gap:4px">';
+  top.forEach(function(s){
+    var col=s.winRate>=60?'var(--up)':s.winRate>=40?'var(--warn)':'var(--dn)';
+    html+='<span style="padding:3px 8px;border-radius:6px;background:var(--bg2);font-size:10px;font-family:var(--fm)">'
+      +s.tag+' <b style="color:'+col+'">'+s.winRate+'%</b> <span style="color:var(--t3);font-size:9px">('+s.total+')</span></span>';
+  });
+  html+='</div></div>';
+  return html;
+}
+
 function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter(function(x){return x.type==='fast'});else if(curTradeFilter==='daily')f=sigs.filter(function(x){return x.type==='daily'});else if(curTradeFilter!=='all'){f=sigs.filter(function(x){return x.sec===curTradeFilter})}
   if(scannerSetup!=='all'){f=f.filter(function(x){return x.setup===scannerSetup})}
   /* Part B: Quality filter — min 40% confidence, max 7 — adaptive */
@@ -1257,7 +1372,10 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
      in the same tier shows the same rate, so there's no reason to
      recompute it per signal. */
   var _tierRates=recentTierRates(50);
-  var h='';f.forEach(function(s,i){
+  /* Per-tag perf chips above the list (only shown when we have >=5
+     evaluated signals for at least one tag). */
+  var h=renderTagPerfChips();
+  f.forEach(function(s,i){
     var tCol=s.type==='fast'?'var(--blue)':'var(--up)';var tLbl=s.type==='fast'?t('scan_fast'):t('scan_daily');
     var tb=getTierBadge(s.s);var ta=timeAgo(s.detectedAt||Date.now());
     /* Win-rate badge: pick the bucket that matches this signal's score

@@ -174,6 +174,42 @@ test('atrZones — partial mults object falls back to defaults for missing keys'
 
 /* ─── countWavesInWindow ──────────────────────────────────────────── */
 
+/* ─── evaluateSignalOutcome ───────────────────────────────────────── */
+
+test('evaluateSignalOutcome — missing or zero entry returns neutral', () => {
+  assert.equal(evaluateSignalOutcome(0, 100), 'neutral');
+  assert.equal(evaluateSignalOutcome(null, 100), 'neutral');
+  assert.equal(evaluateSignalOutcome(100, null), 'neutral');
+  assert.equal(evaluateSignalOutcome(-5, 100), 'neutral');
+});
+
+test('evaluateSignalOutcome — gain >= 5% by default = win', () => {
+  assert.equal(evaluateSignalOutcome(100, 105), 'win');
+  assert.equal(evaluateSignalOutcome(100, 110), 'win');
+  assert.equal(evaluateSignalOutcome(100, 104.99), 'neutral');
+});
+
+test('evaluateSignalOutcome — drop <= -3% by default = loss', () => {
+  assert.equal(evaluateSignalOutcome(100, 97), 'loss');
+  assert.equal(evaluateSignalOutcome(100, 90), 'loss');
+  assert.equal(evaluateSignalOutcome(100, 97.01), 'neutral');
+});
+
+test('evaluateSignalOutcome — sideways stays neutral', () => {
+  assert.equal(evaluateSignalOutcome(100, 100), 'neutral');
+  assert.equal(evaluateSignalOutcome(100, 102), 'neutral');
+  assert.equal(evaluateSignalOutcome(100, 98), 'neutral');
+});
+
+test('evaluateSignalOutcome — custom thresholds override defaults', () => {
+  /* Stricter win threshold (10%): a 6% gain is no longer a win. */
+  assert.equal(evaluateSignalOutcome(100, 106, 10, 3), 'neutral');
+  assert.equal(evaluateSignalOutcome(100, 110, 10, 3), 'win');
+  /* Looser loss threshold (5%): a 4% drop is no longer a loss. */
+  assert.equal(evaluateSignalOutcome(100, 96, 5, 5), 'neutral');
+  assert.equal(evaluateSignalOutcome(100, 95, 5, 5), 'loss');
+});
+
 /* ─── classifySetup ──────────────────────────────────────────────── */
 
 test('classifySetup — missing inputs return "unknown"', () => {

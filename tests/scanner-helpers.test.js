@@ -174,6 +174,288 @@ test('atrZones — partial mults object falls back to defaults for missing keys'
 
 /* ─── countWavesInWindow ──────────────────────────────────────────── */
 
+/* ─── evaluateProvenStatus ──────────────────────────────────────── */
+
+test('evaluateProvenStatus — missing coinStat returns false + rate 0', () => {
+  assert.deepEqual(evaluateProvenStatus(null), { proven: false, rate: 0 });
+  assert.deepEqual(evaluateProvenStatus(undefined), { proven: false, rate: 0 });
+});
+
+test('evaluateProvenStatus — missing total or rate field returns false + rate 0', () => {
+  assert.deepEqual(evaluateProvenStatus({}), { proven: false, rate: 0 });
+  assert.deepEqual(evaluateProvenStatus({ total: 10 }), { proven: false, rate: 0 });
+  assert.deepEqual(evaluateProvenStatus({ rate: 70 }), { proven: false, rate: 0 });
+});
+
+test('evaluateProvenStatus — too few trades blocks proven (contract: 5 min)', () => {
+  /* 4 trades is below the threshold even at 100% win rate. */
+  assert.deepEqual(evaluateProvenStatus({ total: 4, rate: 100 }), { proven: false, rate: 100 });
+  assert.deepEqual(evaluateProvenStatus({ total: 1, rate: 100 }), { proven: false, rate: 100 });
+});
+
+test('evaluateProvenStatus — exactly 5 trades crosses the boundary (contract: >= 5)', () => {
+  /* The contract is >=, not >. At total === 5 with rate >= 60, proven. */
+  assert.deepEqual(evaluateProvenStatus({ total: 5, rate: 60 }), { proven: true, rate: 60 });
+});
+
+test('evaluateProvenStatus — too low win rate blocks proven (contract: 60 min)', () => {
+  /* 59% with plenty of samples is still below the threshold. */
+  assert.deepEqual(evaluateProvenStatus({ total: 50, rate: 59 }), { proven: false, rate: 59 });
+});
+
+test('evaluateProvenStatus — exactly 60% win rate crosses the boundary (contract: >= 60)', () => {
+  assert.deepEqual(evaluateProvenStatus({ total: 5, rate: 60 }), { proven: true, rate: 60 });
+});
+
+test('evaluateProvenStatus — strong record clears both thresholds', () => {
+  assert.deepEqual(evaluateProvenStatus({ total: 20, rate: 75 }), { proven: true, rate: 75 });
+});
+
+test('evaluateProvenStatus — custom thresholds override defaults', () => {
+  /* If the platform tunes thresholds (10 trades, 70%), the helper
+     respects the new values. This is the seam a future calibration
+     layer or A/B test would attach to. */
+  assert.deepEqual(
+    evaluateProvenStatus({ total: 8, rate: 80 }, 10, 70),
+    { proven: false, rate: 80 }
+  );
+  assert.deepEqual(
+    evaluateProvenStatus({ total: 12, rate: 80 }, 10, 70),
+    { proven: true, rate: 80 }
+  );
+});
+
+test('evaluateProvenStatus — defends against rate=0 with total>=5 (zero division avoidance)', () => {
+  /* A losing streak shouldn't produce a noisy "proven" via stale data. */
+  assert.deepEqual(evaluateProvenStatus({ total: 10, rate: 0 }), { proven: false, rate: 0 });
+});
+
+/* ─── pickCardVisualTier ────────────────────────────────────────── */
+
+test('pickCardVisualTier — null signal falls to default tier', () => {
+  const v = pickCardVisualTier(null);
+  assert.equal(v.tier, 'default');
+  assert.equal(v.marker, '');
+  assert.equal(v.hasBanner, false);
+});
+
+test('pickCardVisualTier — bare signal with no flags = default + up bar', () => {
+  const v = pickCardVisualTier({ tags: [], type: 'daily' });
+  assert.equal(v.tier, 'default');
+  assert.equal(v.barColor, 'var(--up)');
+  assert.equal(v.marker, '');
+  assert.equal(v.cardStyle, '');
+  assert.equal(v.hasBanner, false);
+});
+
+test('pickCardVisualTier — fast type changes default bar to blue', () => {
+  const v = pickCardVisualTier({ tags: [], type: 'fast' });
+  assert.equal(v.barColor, 'var(--blue)');
+});
+
+test('pickCardVisualTier — confirmed flag = green tier', () => {
+  const v = pickCardVisualTier({ tags: [], confirmed: true });
+  assert.equal(v.tier, 'confirmed');
+  assert.equal(v.marker, '🟢 ');
+});
+
+test('pickCardVisualTier — ultra flag outranks confirmed', () => {
+  const v = pickCardVisualTier({ tags: [], ultra: true, confirmed: true });
+  assert.equal(v.tier, 'ultra');
+  assert.equal(v.marker, '⭐ ');
+});
+
+test('pickCardVisualTier — WHALE_TARGET tag elevates to whale tier', () => {
+  const v = pickCardVisualTier({ tags: ['🐋✨WHALE_TARGET:75'], ultra: false });
+  assert.equal(v.tier, 'whale');
+  assert.equal(v.marker, '🐋✨ ');
+  assert.ok(v.cardStyle.indexOf('#ffd700') >= 0, 'whale card style should include gold border');
+  assert.equal(v.hasBanner, false, 'whale tier alone does NOT show the banner');
+});
+
+test('pickCardVisualTier — WHALE_TARGET + proven = double tier (the killer combo)', () => {
+  const v = pickCardVisualTier({
+    tags: ['🐋✨WHALE_TARGET:75'],
+    proven: true,
+  });
+  assert.equal(v.tier, 'double');
+  assert.equal(v.marker, '🌟 ');
+  assert.ok(v.cardStyle.indexOf('#b07cff') >= 0, 'double card style should include purple');
+  assert.ok(v.cardStyle.indexOf('#ffd700') < 0, 'double does NOT include the gold-border style');
+  assert.equal(v.hasBanner, true, 'double tier must render the banner');
+});
+
+test('pickCardVisualTier — proven without WHALE_TARGET = NO double (must be both)', () => {
+  /* Defensive: a proven coin without whale activity is just confirmed
+     or ultra at most — never double. The banner should NOT show. */
+  const v = pickCardVisualTier({
+    tags: [],
+    proven: true,
+    ultra: true,
+  });
+  assert.equal(v.tier, 'ultra');
+  assert.equal(v.hasBanner, false);
+});
+
+test('pickCardVisualTier — WHALE_TARGET + proven=false = whale tier (not double)', () => {
+  /* Explicit false should NOT activate double — strict equality with
+     true is the correct check. */
+  const v = pickCardVisualTier({
+    tags: ['🐋✨WHALE_TARGET:75'],
+    proven: false,
+  });
+  assert.equal(v.tier, 'whale');
+});
+
+test('pickCardVisualTier — tier ladder priority: double > whale > ultra > confirmed > default', () => {
+  /* All flags set — the highest tier should win and the banner should
+     show because double is at the top of the ladder. */
+  const v = pickCardVisualTier({
+    tags: ['🐋✨WHALE_TARGET:80'],
+    proven: true,
+    ultra: true,
+    confirmed: true,
+    type: 'fast',
+  });
+  assert.equal(v.tier, 'double');
+  assert.equal(v.hasBanner, true);
+});
+
+/* ─── scoreGemCandidate ─────────────────────────────────────────── */
+
+test('scoreGemCandidate — null ticker = zero score', () => {
+  const r = scoreGemCandidate(null, { vx: 5, timing: 'early' }, {});
+  assert.equal(r.score, 0);
+  assert.deepEqual(r.tags, []);
+});
+
+test('scoreGemCandidate — vol multiplier ladder hits each rung', () => {
+  const t = { p: 1, c: 1, v: 1e6, h: 1, l: 1 };
+  /* Position-in-range guard: h===l means no bottom-of-range bonus,
+     so each call below ONLY gets the vx bonus + the c-in-(0,3) +20. */
+  assert.equal(scoreGemCandidate(t, { vx: 5, timing: null }, null).score, 45 + 20);
+  assert.equal(scoreGemCandidate(t, { vx: 3.5, timing: null }, null).score, 40 + 20);
+  assert.equal(scoreGemCandidate(t, { vx: 2.5, timing: null }, null).score, 30 + 20);
+  assert.equal(scoreGemCandidate(t, { vx: 1.7, timing: null }, null).score, 15 + 20);
+  assert.equal(scoreGemCandidate(t, { vx: 1.0, timing: null }, null).score, 0 + 20);
+});
+
+test('scoreGemCandidate — timing buckets', () => {
+  const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
+  assert.equal(scoreGemCandidate(t, { vx: 1, timing: 'early' }, null).score, 30);
+  assert.equal(scoreGemCandidate(t, { vx: 1, timing: 'still' }, null).score, 15);
+  assert.equal(scoreGemCandidate(t, { vx: 1, timing: 'late' }, null).score, 0);
+});
+
+test('scoreGemCandidate — bottom-of-range adds 10 only when in lower 30%', () => {
+  /* Range: 100 to 110 (span 10). Below 103 = lower 30% -> bonus. */
+  const inLow = { p: 102, c: 0, v: 1e6, h: 110, l: 100 };
+  const middle = { p: 105, c: 0, v: 1e6, h: 110, l: 100 };
+  assert.equal(scoreGemCandidate(inLow, null, null).score, 10);
+  assert.equal(scoreGemCandidate(middle, null, null).score, 0);
+});
+
+test('scoreGemCandidate — V3 boosts compose correctly', () => {
+  const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
+  const v3 = {
+    iceberg: { signal: 'ICEBERG_BUY' },        // +20
+    vpin: { vpin: 0.7 },                        // +15
+    whalePnL: { pct: 2 },                       // +10
+    cvd: { divergence: 'BULLISH' },             // +15
+  };
+  /* No klineStats, no c-bonus. Only V3 contributes. */
+  assert.equal(scoreGemCandidate(t, null, v3).score, 60);
+  assert.deepEqual(
+    scoreGemCandidate(t, null, v3).tags.sort(),
+    ['🐋PRO', '🧊ICE', '🧪VPIN', '📈CVD'].sort()
+  );
+});
+
+test('scoreGemCandidate — VPIN rung is exclusive (high or moderate, not both)', () => {
+  const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
+  assert.equal(scoreGemCandidate(t, null, { vpin: { vpin: 0.65 } }).score, 15);
+  assert.equal(scoreGemCandidate(t, null, { vpin: { vpin: 0.5 } }).score, 8);
+  assert.equal(scoreGemCandidate(t, null, { vpin: { vpin: 0.3 } }).score, 0);
+});
+
+test('scoreGemCandidate — c kicker buckets', () => {
+  const t1 = { p: 1, c: 1.5, v: 1e6, h: 1, l: 1 };  // (0,3)
+  const t2 = { p: 1, c: 5, v: 1e6, h: 1, l: 1 };    // [3,8)
+  const t3 = { p: 1, c: 10, v: 1e6, h: 1, l: 1 };   // out
+  assert.equal(scoreGemCandidate(t1, null, null).score, 20);
+  assert.equal(scoreGemCandidate(t2, null, null).score, 10);
+  assert.equal(scoreGemCandidate(t3, null, null).score, 0);
+});
+
+test('scoreGemCandidate — ICEBERG_SELL does NOT trigger the buy boost', () => {
+  /* Defensive: only ICEBERG_BUY is bullish; SELL must not be rewarded. */
+  const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
+  assert.equal(scoreGemCandidate(t, null, { iceberg: { signal: 'ICEBERG_SELL' } }).score, 0);
+});
+
+/* ─── getRugPullRisk ─────────────────────────────────────────────── */
+
+test('getRugPullRisk — missing ticker returns max risk (100)', () => {
+  assert.equal(getRugPullRisk(null), 100);
+  assert.equal(getRugPullRisk(undefined), 100);
+});
+
+test('getRugPullRisk — clean coin: high vol, narrow spread, futures, calm = 0', () => {
+  const d = { v: 5000000, c: 2 };
+  const fr = { rate: 0.0001 };
+  const book = { spread: 0.05, bidQty: 5000, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, fr, book), 0);
+});
+
+test('getRugPullRisk — wide spread alone adds 30', () => {
+  const d = { v: 5000000, c: 2 };
+  const fr = { rate: 0.0001 };
+  const book = { spread: 2, bidQty: 5000, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, fr, book), 30);
+});
+
+test('getRugPullRisk — thin bid book adds 20', () => {
+  const d = { v: 5000000, c: 2 };
+  const fr = { rate: 0.0001 };
+  const book = { spread: 0.1, bidQty: 50, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, fr, book), 20);
+});
+
+test('getRugPullRisk — low volume adds 25', () => {
+  const d = { v: 100000, c: 2 };
+  const fr = { rate: 0.0001 };
+  const book = { spread: 0.1, bidQty: 5000, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, fr, book), 25);
+});
+
+test('getRugPullRisk — extreme price move adds 15', () => {
+  const d = { v: 5000000, c: 45 };
+  const fr = { rate: 0.0001 };
+  const book = { spread: 0.1, bidQty: 5000, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, fr, book), 15);
+});
+
+test('getRugPullRisk — no futures market adds 10', () => {
+  const d = { v: 5000000, c: 2 };
+  const book = { spread: 0.1, bidQty: 5000, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, null, book), 10);
+});
+
+test('getRugPullRisk — multiple red flags stack and cap at 100', () => {
+  /* Worst-case shitcoin: wide spread, thin book, low vol, big move,
+     no futures. Sum: 30 + 20 + 25 + 15 + 10 = 100 (no cap-bend needed). */
+  const d = { v: 100000, c: 60 };
+  const book = { spread: 5, bidQty: 10, askQty: 10 };
+  assert.equal(getRugPullRisk(d, null, book), 100);
+});
+
+test('getRugPullRisk — missing book ticker contributes nothing (gap, not risk)', () => {
+  const d = { v: 5000000, c: 2 };
+  const fr = { rate: 0.0001 };
+  /* No book ticker passed — risk should be 0, not 50 */
+  assert.equal(getRugPullRisk(d, fr, null), 0);
+});
+
 /* ─── evaluateSignalOutcome ───────────────────────────────────────── */
 
 test('evaluateSignalOutcome — missing or zero entry returns neutral', () => {

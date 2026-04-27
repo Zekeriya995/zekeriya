@@ -3,18 +3,28 @@
    pure helpers (esc/fmt/fP/safeC/calcRSI/calcMACD/calcEMA) in src/utils.js —
    both are loaded before this file by index.html. */
 var tg=window.Telegram&&window.Telegram.WebApp?window.Telegram.WebApp:null;if(tg){tg.ready();tg.expand();tg.setHeaderColor('#060b14');tg.setBackgroundColor('#020408')}
+/* Per-symbol market cap from CoinGecko — populated as a side effect
+   of the hourly updateTop100() call below (no extra API request).
+   Used by the Gem Hunter to filter the small-cap range honestly
+   instead of the previous d.v * 10 approximation, which is just
+   ten times daily volume and has nothing to do with market cap. */
+var marketCapData={};
 /* ═══ 🏆 AUTO TOP 100 — updates every hour from CoinGecko + trending from exchanges ═══ */
 async function updateTop100(){
   try{
     var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD','USD','UST'];
     var newWL=[];
-    /* Part 1: Top 100 by market cap from CoinGecko */
-    var data=await fj(CG+'/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=120&page=1');
+    /* Part 1: Top 100 by market cap from CoinGecko (250 rows so we
+       reach further into the long tail for marketCapData coverage). */
+    var data=await fj(CG+'/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1');
     if(data&&data.length){
       data.forEach(function(c){
         if(!c.symbol)return;
         var sym=c.symbol.toUpperCase();
         if(STABLES.includes(sym))return;
+        /* Capture the real market cap for every row (not just top 100)
+           so the Gem Hunter can filter mid/small caps too. */
+        if(c.market_cap!=null&&c.market_cap>0)marketCapData[sym]=c.market_cap;
         if(newWL.length<100&&newWL.indexOf(sym)===-1)newWL.push(sym);
       });
     }
@@ -1209,7 +1219,7 @@ async function loadTrading(){var trLoadEl=document.getElementById('tradeList');i
     var _btcChg=T.BTC?T.BTC.c:0;
     var _cvdDiv=null;try{var _cvdRes=analyzeCVD(x.s);if(_cvdRes)_cvdDiv=_cvdRes.divergence}catch(e){}
     var setup=classifySetup(x,d,_btcChg,_cvdDiv);
-    sigs.push({s:x.s,p:d.p,c:d.c,v:d.v,type:type,setup:setup,conf:conf,entry:entry,target:target,stop:stop,rr:rr,dur:dur,reasons:reasons,score:x.score,checks:x.checks,passed:x.passed,total:x.total,ultra:x.ultra,confirmed:x.confirmed,tags:x.tags,sec:sec,detectedAt:x.detectedAt,priceAtDetection:x.priceAtDetection,ageMinutes:x.ageMinutes,changeFromDetection:x.changeFromDetection,freshness:x.freshness})}
+    sigs.push({s:x.s,p:d.p,c:d.c,v:d.v,type:type,setup:setup,conf:conf,entry:entry,target:target,stop:stop,rr:rr,dur:dur,reasons:reasons,score:x.score,checks:x.checks,passed:x.passed,total:x.total,ultra:x.ultra,confirmed:x.confirmed,tags:x.tags,sec:sec,proven:x.proven,coinWinRate:x.coinWinRate,detectedAt:x.detectedAt,priceAtDetection:x.priceAtDetection,ageMinutes:x.ageMinutes,changeFromDetection:x.changeFromDetection,freshness:x.freshness})}
   sigs.sort(function(a,b){return b.conf-a.conf});renderTrading(sigs)}
 function filterTrade(f,btn){curTradeFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadTrading()}
 /* Idea 3 — Recent win rate per signal tier.
@@ -1421,15 +1431,23 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
       +'<span style="color:var(--t3)">'+(lang==='ar'?'سعر الاكتشاف: ':'Detection: ')+fP(sigPriceDet)+' <span style="color:'+driftCol+';font-weight:700">'+(sigDrift>=0?'+':'')+sigDrift.toFixed(1)+'%</span></span>'
       +'</div>'
       +'<span class="timing-badge '+timingBadgeCls+'">'+timingLabel+'</span></div>';
-    /* Whales-meet-Scanner golden badge: when the candidate carries the
-       WHALE_TARGET tag (whale engine confidence >= 60), paint the card
-       bar gold and prepend a 🐋✨ marker to the symbol. This is the
-       killer combo — accumulation already detected by the Whales
-       section AND a pre-pump setup forming on the Scanner. */
-    var _isWhaleTarget=(s.tags||[]).some(function(t){return t.indexOf('WHALE_TARGET')>=0});
-    var _barColor=_isWhaleTarget?'linear-gradient(90deg,#ffd700,#ff8c00)':(s.ultra?'var(--ultra)':s.type==='fast'?'var(--blue)':'var(--up)');
-    var _whaleMarker=_isWhaleTarget?'🐋✨ ':(s.ultra?'⭐ ':s.confirmed?'🟢 ':'');
-    h+='<div class="scan-card"'+(_isWhaleTarget?' style="border:2px solid #ffd700;box-shadow:0 0 12px rgba(255,215,0,.3)"':'')+'><div class="scan-card-bar" style="background:'+_barColor+'"></div><div class="scan-card-body">'
+    /* Visual tier picker — pure, lives in src/scanner-helpers.js so
+       the bar gradient / marker / card style / banner-flag logic can
+       be unit tested. See pickCardVisualTier doc for the tier ladder. */
+    var _tier=pickCardVisualTier(s);
+    var _isDoubleConfirmed=_tier.tier==='double';
+    var _whaleMarker=_tier.marker;
+    h+='<div class="scan-card"'+_tier.cardStyle+'>';
+    /* Banner above the card body for DOUBLE CONFIRMED — small but
+       visually loud so the user can't miss it. */
+    if(_tier.hasBanner){
+      h+='<div style="padding:4px 10px;background:linear-gradient(90deg,rgba(255,215,0,.15),rgba(176,124,255,.15));font-size:10px;font-weight:800;color:#fff;display:flex;align-items:center;justify-content:center;gap:6px;border-radius:6px 6px 0 0">'
+        +'<span>⭐ '+(lang==='ar'?'تأكيد مزدوج':'DOUBLE CONFIRMED')+'</span>'
+        +'<span style="color:#b07cff">·</span>'
+        +'<span style="font-family:var(--fm)">'+(lang==='ar'?'سجلك ':'your win rate ')+(s.coinWinRate||0)+'%</span>'
+        +'</div>';
+    }
+    h+='<div class="scan-card-bar" style="background:'+_tier.barColor+'"></div><div class="scan-card-body">'
       /* Header: rank + name + type + time + confidence */
       +'<div class="sc-head"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--t3);font-weight:800">#'+(i+1)+'</span><div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">'+_whaleMarker+s.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+'</div><span class="sc-time '+(ta.cls==='fresh'?'fresh':'')+'">'+(ta.cls==='fresh'?'🆕 ':'⏱ ')+ta.text+'</span></div></div><div style="text-align:right"><div class="sc-badge" style="background:'+(s.conf>=70?'var(--ud)':s.conf>=55?'var(--bd)':'var(--wd)')+';color:'+(s.conf>=70?'var(--up)':s.conf>=55?'var(--blue)':'var(--warn)')+'">'+s.conf+'%</div><div style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+tCol+';font-weight:700;margin-top:3px">'+tLbl+'</div></div></div>'
       /* ═══ NEW: Signal Timing Bar ═══ */
@@ -1490,26 +1508,130 @@ async function loadSmallCapsUI(){
     slEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">❌</div><div class="sc-empty-title">'+(lang==='ar'?'خطأ في التحليل':'Analysis error')+'</div><div class="sc-empty-sub">'+esc(e&&e.message?e.message:'unknown')+'</div></div>';
   }
 }
-async function loadSmallCaps2(){if(!Object.keys(T).length)await loadTk();var cands=Object.entries(T).filter(function(e){var d=e[1];var tier=getCoinTier(e[0]);return d.p>0&&d.p<20&&d.v>100000&&!TIER1.has(e[0])}).sort(function(a,b){return b[1].v-a[1].v}).slice(0,50);var res=[];
-  var proms=cands.slice(0,25).map(function(e){var s=e[0];return fj(BN+'/klines?symbol='+s+'USDT&interval=1h&limit=12').then(function(kl){if(!kl||kl.length<6)return;var vols=kl.map(function(k){return+k[5]});var cls=kl.map(function(k){return+k[4]});var avgV=vols.slice(0,-2).reduce(function(a,b){return a+b},0)/Math.max(1,vols.length-2);var recV=(vols[vols.length-1]+vols[vols.length-2])/2;var vx=avgV>0?recV/avgV:1;
-    var sI=vols.length-1;for(var i=vols.length-1;i>=1;i--){if(vols[i]>avgV*1.5)sI=i;else break}var pS=+kl[sI][1];var pN=cls[cls.length-1];var gain=pS>0?((pN-pS)/pS*100):0;
-    var timing,tBadge;if(gain<3){timing='early';tBadge={ic:'🟢',l:lang==='ar'?'مبكر — ادخل!':'Early — Enter!',col:'var(--up)'}}else if(gain<8){timing='still';tBadge={ic:'🟡',l:lang==='ar'?'فيه فرصة — حذر':'Still time — Caution',col:'var(--warn)'}}else{timing='late';tBadge={ic:'🔴',l:lang==='ar'?'متأخر — راقب':'Late — Watch',col:'var(--dn)'}}
-    var _d=T[s];if(!_d)return;
-    var sc=0;if(vx>=4)sc+=45;else if(vx>=3)sc+=40;else if(vx>=2)sc+=30;else if(vx>=1.5)sc+=15;if(timing==='early')sc+=30;else if(timing==='still')sc+=15;if(_d.c>0&&_d.c<3)sc+=20;else if(_d.c>=3&&_d.c<8)sc+=10;
-    var target=timing!=='late'?pN*(timing==='early'?1.30:1.25):null;var stop=timing!=='late'?pN*(timing==='early'?0.90:0.88):null;
-    if(sc>=25)res.push({s:s,p:_d.p,c:_d.c,v:_d.v,vx:vx,gain:gain,timing:timing,tBadge:tBadge,sc:sc,target:target,stop:stop})}).catch(function(){})});
-  await Promise.all(proms);res.sort(function(a,b){return b.sc-a.sc});return res}
+/* ═══ Gem Hunter v2 — small-cap pre-pump scanner ═══
+   Two-stage filter, then V3-aware scoring on the survivors.
+
+   Pre-filter (cheap, ticker only):
+     - Not a stablecoin, not a Top-100 watchlist member
+     - Price in (0, 20] and 24h volume > 100K
+     - Real CoinGecko market cap in [$1M, $50M] when known
+       (when MC is missing, we KEEP the candidate — better than
+       blocking the whole feature on a cold start)
+     - Rugpull risk < 70 via getRugPullRisk(d, FR, bookTickers)
+
+   Per-survivor scoring (kline + V3, top 25 only to bound API calls):
+     vol-spike multiplier on 1h klines  +15..+45
+     timing (early / still / late)      +30 / +15 / 0
+     position-in-range (bottom 30%)     +10
+     V3 — Iceberg BUY                   +20
+     V3 — VPIN > 0.6 / 0.4              +15 / +8
+     V3 — Whale P&L > +1%               +10
+     V3 — CVD bullish divergence        +15
+     24h change in (0, 3] / [3, 8)      +20 / +10
+
+   Results with score >= 25 are returned, sorted desc. The renderer
+   shows the top 20. */
+async function loadSmallCaps2(){
+  if(!Object.keys(T).length)await loadTk();
+  var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD'];
+  var cands=Object.entries(T).filter(function(e){
+    var s=e[0],d=e[1];
+    if(STABLES.indexOf(s)!==-1)return false;
+    if(TIER1.has(s))return false;
+    if(!d.p||d.p<=0||d.p>20)return false;
+    if(d.v<100000)return false;
+    /* Market-cap window — only enforce when the data is loaded. */
+    var mc=marketCapData[s];
+    if(mc!=null&&mc>0&&(mc<1000000||mc>50000000))return false;
+    /* Rugpull risk gate — pure helper from src/scanner-helpers.js. */
+    var rug=getRugPullRisk(d,FR[s],bookTickers[s]);
+    if(rug>=70)return false;
+    return true;
+  }).sort(function(a,b){return b[1].v-a[1].v}).slice(0,50);
+  var res=[];
+  var proms=cands.slice(0,25).map(function(e){
+    var s=e[0];
+    return fj(BN+'/klines?symbol='+s+'USDT&interval=1h&limit=12').then(function(kl){
+      if(!kl||kl.length<6)return;
+      var vols=kl.map(function(k){return+k[5]});
+      var cls=kl.map(function(k){return+k[4]});
+      var avgV=vols.slice(0,-2).reduce(function(a,b){return a+b},0)/Math.max(1,vols.length-2);
+      var recV=(vols[vols.length-1]+vols[vols.length-2])/2;
+      var vx=avgV>0?recV/avgV:1;
+      /* Walk back to find where the volume spike began for "% from spike". */
+      var sI=vols.length-1;
+      for(var i=vols.length-1;i>=1;i--){if(vols[i]>avgV*1.5)sI=i;else break}
+      var pS=+kl[sI][1];
+      var pN=cls[cls.length-1];
+      var gain=pS>0?((pN-pS)/pS*100):0;
+      var timing,tBadge;
+      if(gain<3){timing='early';tBadge={ic:'🟢',l:lang==='ar'?'مبكر — ادخل!':'Early — Enter!',col:'var(--up)'}}
+      else if(gain<8){timing='still';tBadge={ic:'🟡',l:lang==='ar'?'فيه فرصة — حذر':'Still time — Caution',col:'var(--warn)'}}
+      else{timing='late';tBadge={ic:'🔴',l:lang==='ar'?'متأخر — راقب':'Late — Watch',col:'var(--dn)'}}
+      var d=T[s];if(!d)return;
+      /* Look up V3 results — each call can throw on small caps with
+         sparse data, so wrap individually. */
+      var _ice=null,_vp=null,_wPnL=null,_cvd=null;
+      try{_ice=detectIceberg(s)}catch(e){}
+      try{_vp=calcVPIN(s)}catch(e){}
+      try{_wPnL=calcWhalePnL(s)}catch(e){}
+      try{_cvd=analyzeCVD(s)}catch(e){}
+      var _scored=scoreGemCandidate(d,{vx:vx,timing:timing},{iceberg:_ice,vpin:_vp,whalePnL:_wPnL,cvd:_cvd});
+      var sc=_scored.score;
+      var tags=_scored.tags;
+      var target=timing!=='late'?pN*(timing==='early'?1.30:1.25):null;
+      var stop=timing!=='late'?pN*(timing==='early'?0.90:0.88):null;
+      var rugRisk=getRugPullRisk(d,FR[s],bookTickers[s]);
+      var mc=marketCapData[s]||0;
+      if(sc>=25)res.push({s:s,p:d.p,c:d.c,v:d.v,mc:mc,rugRisk:rugRisk,vx:vx,gain:gain,timing:timing,tBadge:tBadge,sc:sc,tags:tags,target:target,stop:stop});
+    }).catch(function(){});
+  });
+  await Promise.all(proms);
+  res.sort(function(a,b){return b.sc-a.sc});
+  return res;
+}
 function filterSmall(f,btn){curSmallFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadSmallCapsUI()}
-function renderSmallCaps(res){var f=res;if(curSmallFilter!=='all')f=res.filter(function(x){return x.timing===curSmallFilter});
+function renderSmallCaps(res){
+  var f=res;
+  if(curSmallFilter!=='all')f=res.filter(function(x){return x.timing===curSmallFilter});
   var slEl=document.getElementById('smallList');if(!slEl)return;
   if(!f.length){slEl.innerHTML='<div class="empty"><div class="empty-ic">💎</div><div class="empty-tx">'+(lang==='ar'?'لا جواهر حالياً':'No gems now')+'</div></div>';return}
-  var h='';f.slice(0,15).forEach(function(g){
+  var h='';
+  f.slice(0,20).forEach(function(g){
+    /* Rug-risk pill: visible reassurance that we filtered, not just guessed. */
+    var rugCol=g.rugRisk<30?'var(--up)':g.rugRisk<60?'var(--warn)':'var(--dn)';
+    var rugTxt=g.rugRisk<30?(lang==='ar'?'🛡 آمن':'🛡 Safe'):g.rugRisk<60?(lang==='ar'?'⚠ متوسط':'⚠ Medium'):(lang==='ar'?'🚨 خطر':'🚨 Risk');
+    var mcDisplay=g.mc>0?fmt(g.mc):(lang==='ar'?'MC ?':'MC ?');
     h+='<div class="whale-card" style="border-left:3px solid '+g.tBadge.col+';margin-bottom:8px" onclick="openCoin(\''+g.s+'\')">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="display:flex;align-items:center;gap:6px"><span style="font-weight:800;font-size:14px">💎 '+g.s+'</span><span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+g.tBadge.col+';font-weight:700">'+g.tBadge.ic+' '+g.tBadge.l+'</span></div><span style="font-family:var(--fm);font-size:12px;font-weight:800;color:var(--neon)">'+g.vx.toFixed(1)+'x vol</span></div>'
-      +'<div style="display:flex;justify-content:space-between;font-family:var(--fm);font-size:10px;margin-bottom:4px"><span>'+fP(g.p)+'</span><span style="color:'+(g.c>=0?'var(--up)':'var(--dn)')+'">'+(g.c>=0?'+':'')+g.c.toFixed(1)+'%</span><span>Vol:'+fmt(g.v)+'</span><span style="color:var(--warn)">+'+g.gain.toFixed(1)+'% from spike</span></div>'
-      +(g.target?'<div style="display:flex;gap:8px;font-size:8px;font-family:var(--fm);margin-bottom:4px"><span style="color:var(--up)">🎯 '+fP(g.target)+'</span><span style="color:var(--dn)">🛑 '+fP(g.stop)+'</span></div>':'')
-      +'<div style="height:4px;background:var(--bg2);border-radius:2px;overflow:hidden"><div style="width:'+Math.min(100,g.sc)+'%;height:100%;background:'+(g.timing==='early'?'var(--up)':g.timing==='still'?'var(--warn)':'var(--dn)')+';border-radius:2px"></div></div></div>'});
-  slEl.innerHTML=h}
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+      +'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+      +'<span style="font-weight:800;font-size:14px">💎 '+g.s+'</span>'
+      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+g.tBadge.col+';font-weight:700">'+g.tBadge.ic+' '+g.tBadge.l+'</span>'
+      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+rugCol+';font-weight:700">'+rugTxt+'</span>'
+      +'</div>'
+      +'<span style="font-family:var(--fm);font-size:12px;font-weight:800;color:var(--neon)">'+g.vx.toFixed(1)+'x vol</span>'
+      +'</div>'
+      +'<div style="display:flex;justify-content:space-between;font-family:var(--fm);font-size:10px;margin-bottom:4px;flex-wrap:wrap;gap:4px">'
+      +'<span>'+fP(g.p)+'</span>'
+      +'<span style="color:'+(g.c>=0?'var(--up)':'var(--dn)')+'">'+(g.c>=0?'+':'')+g.c.toFixed(1)+'%</span>'
+      +'<span>Vol:'+fmt(g.v)+'</span>'
+      +'<span style="color:var(--t2)">'+(lang==='ar'?'سوق:':'MC:')+mcDisplay+'</span>'
+      +'<span style="color:var(--warn)">+'+g.gain.toFixed(1)+'% '+(lang==='ar'?'من القفزة':'from spike')+'</span>'
+      +'</div>';
+    /* V3 confirmation chips — only when we have 1+ */
+    if(g.tags&&g.tags.length){
+      h+='<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px">';
+      g.tags.slice(0,6).forEach(function(t){
+        h+='<span style="font-size:8px;padding:2px 5px;border-radius:4px;background:var(--bg2);color:var(--t1);font-family:var(--fm)">'+t+'</span>';
+      });
+      h+='</div>';
+    }
+    if(g.target)h+='<div style="display:flex;gap:8px;font-size:8px;font-family:var(--fm);margin-bottom:4px"><span style="color:var(--up)">🎯 '+fP(g.target)+'</span><span style="color:var(--dn)">🛑 '+fP(g.stop)+'</span></div>';
+    h+='<div style="height:4px;background:var(--bg2);border-radius:2px;overflow:hidden"><div style="width:'+Math.min(100,g.sc)+'%;height:100%;background:'+(g.timing==='early'?'var(--up)':g.timing==='still'?'var(--warn)':'var(--dn)')+';border-radius:2px"></div></div>'
+      +'</div>';
+  });
+  slEl.innerHTML=h;
+}
 function onSrch(v){var el=document.getElementById('sRes');if(!v){el.classList.remove('show');return}v=v.toUpperCase();var m=Object.entries(T).filter(function(e){return e[0].includes(v)}).slice(0,8);if(!m.length){el.classList.remove('show');return}el.innerHTML=m.map(function(e){var s=e[0],d=e[1];return'<div class="sr-i" onclick="openCoin(\''+s+'\')"><span style="font-weight:700">'+s+'</span><span style="font-family:var(--fm);font-size:10px">'+fP(d.p)+' <span class="cr-ch '+(d.c>=0?'up':'dn')+'">'+(d.c>=0?'+':'')+d.c.toFixed(1)+'%</span></span></div>'}).join('');el.classList.add('show')}
 document.addEventListener('click',function(e){if(!e.target.closest('.srch'))document.getElementById('sRes').classList.remove('show')});
 /* WS */
@@ -2234,6 +2356,20 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,300);
     if(c.tags.some(function(t){return t.includes('ACC')||t.includes('STEALTH')||t.includes('EARLY')})){recSig(c.s,'whale',c.p);if(c.v>5e7||checks.ob)notify(c.s,'whale',ds)}
     if(c.c>=3)recSig(c.s,'breakout',c.p);
     recSig(c.s,'trade',c.p);
+    /* ═══ Cross-module sync: PROVEN tag ═══
+       The Monitor (Smart Supervisor) tracks per-coin win rates in
+       monitorState.coinStats. evaluateProvenStatus (pure helper in
+       scanner-helpers.js) checks the threshold contract — at least
+       5 closed trades AND >= 60% win rate — so the policy is
+       machine-verified instead of an inline if-condition. */
+    var _coinStat=monitorState&&monitorState.coinStats?monitorState.coinStats[c.s]:null;
+    var _provenStatus=evaluateProvenStatus(_coinStat);
+    var _proven=_provenStatus.proven;
+    var _coinWinRate=_provenStatus.rate;
+    if(_proven){
+      ds+=10;
+      dt.push('🏅PROVEN:'+_coinWinRate+'%');
+    }
     /* Build result with new + old fields */
     var sigInfo=sigHist[c.s+'_trade'];
     var _priceAtDet=sigInfo&&sigInfo.priceAtDetection?sigInfo.priceAtDetection:c.p;
@@ -2242,7 +2378,7 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,300);
     var _freshness='fresh';
     if(_ageMins>60||Math.abs(_changeDet)>5)_freshness='old';
     else if(_ageMins>15||Math.abs(_changeDet)>2)_freshness='warm';
-    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,pdFlags:c.pdFlags||0,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
+    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,pdFlags:c.pdFlags||0,proven:_proven,coinWinRate:_coinWinRate,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
   return results.sort(function(a,b){return b.score-a.score})}
 /* ═══ QUALITY FILTER v3 — strict gate before rendering ═══ */
 function qualityFilter(results){

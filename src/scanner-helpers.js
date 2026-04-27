@@ -211,6 +211,218 @@ function computePerformanceReport(preds, trades) {
   return out;
 }
 
+/* Decide whether a coin's user-history qualifies as PROVEN. Pure:
+   takes the coinStats entry from monitorState.coinStats[sym] plus
+   optional thresholds, returns { proven, rate }.
+
+   Thresholds (defaults match the live scoring engine):
+     minTrades = 5    — fewer samples are too noisy to trust
+     minRate   = 60   — comfortably above coin-flip; matches the
+                        platform's pre-pump alpha threshold
+
+   This is a CONTRACT test, not a backtest. It verifies that the
+   thresholds we ship match the documented values — it does NOT
+   prove that 5/60 are the *optimal* values. Determining optimum
+   requires historical replay over real predictions data, which is
+   the unbuilt backtest harness mentioned in earlier reviews.
+
+   Behavior:
+     - missing coinStat              → { proven: false, rate: 0 }
+     - missing total or rate field   → { proven: false, rate: 0 }
+     - total < minTrades             → { proven: false, rate: <as-is> }
+     - rate  < minRate               → { proven: false, rate: <as-is> }
+     - both meet threshold           → { proven: true,  rate: <as-is> } */
+function evaluateProvenStatus(coinStat, minTrades, minRate) {
+  if (minTrades == null) minTrades = 5;
+  if (minRate == null) minRate = 60;
+  if (!coinStat || coinStat.total == null || coinStat.rate == null) {
+    return { proven: false, rate: 0 };
+  }
+  if (coinStat.total < minTrades) return { proven: false, rate: coinStat.rate };
+  if (coinStat.rate < minRate) return { proven: false, rate: coinStat.rate };
+  return { proven: true, rate: coinStat.rate };
+}
+
+/* Pick the visual tier for a scanner signal card. Pure: takes the
+   signal object (the rendered shape, with .tags, .proven, .ultra,
+   .confirmed, .type) and returns the bar gradient + symbol marker
+   + outer card style + whether to render the DOUBLE CONFIRMED
+   banner above the card body.
+
+   Tier ladder (highest priority first):
+     'double'    — WHALE_TARGET tag AND proven === true
+                   purple-gold gradient, 🌟 marker, banner above body
+     'whale'     — WHALE_TARGET tag (whaleConf >= 60 from PR #14)
+                   gold gradient, 🐋✨ marker, gold border + glow
+     'ultra'     — signal.ultra === true (legacy ULTRA flag)
+                   ultra color, ⭐ marker
+     'confirmed' — signal.confirmed === true
+                   up color, 🟢 marker
+     'default'   — none of the above
+                   blue if type 'fast' else up; no marker
+
+   Extracted from renderTrading() so the visual logic can be unit
+   tested without spinning up a DOM. All CSS strings preserved
+   verbatim; the renderer composes them into HTML. */
+function pickCardVisualTier(signal) {
+  if (!signal) {
+    return {
+      tier: 'default',
+      barColor: 'var(--up)',
+      marker: '',
+      cardStyle: '',
+      hasBanner: false,
+    };
+  }
+  var tags = signal.tags || [];
+  var isWhaleTarget = false;
+  for (var i = 0; i < tags.length; i++) {
+    if (tags[i] && tags[i].indexOf('WHALE_TARGET') >= 0) {
+      isWhaleTarget = true;
+      break;
+    }
+  }
+  var isDouble = isWhaleTarget && signal.proven === true;
+  if (isDouble) {
+    return {
+      tier: 'double',
+      barColor: 'linear-gradient(90deg,#ffd700,#b07cff)',
+      marker: '🌟 ',
+      cardStyle: ' style="border:2px solid #b07cff;box-shadow:0 0 14px rgba(176,124,255,.4),0 0 6px rgba(255,215,0,.3)"',
+      hasBanner: true,
+    };
+  }
+  if (isWhaleTarget) {
+    return {
+      tier: 'whale',
+      barColor: 'linear-gradient(90deg,#ffd700,#ff8c00)',
+      marker: '🐋✨ ',
+      cardStyle: ' style="border:2px solid #ffd700;box-shadow:0 0 12px rgba(255,215,0,.3)"',
+      hasBanner: false,
+    };
+  }
+  if (signal.ultra) {
+    return {
+      tier: 'ultra',
+      barColor: 'var(--ultra)',
+      marker: '⭐ ',
+      cardStyle: '',
+      hasBanner: false,
+    };
+  }
+  if (signal.confirmed) {
+    return {
+      tier: 'confirmed',
+      barColor: 'var(--up)',
+      marker: '🟢 ',
+      cardStyle: '',
+      hasBanner: false,
+    };
+  }
+  return {
+    tier: 'default',
+    barColor: signal.type === 'fast' ? 'var(--blue)' : 'var(--up)',
+    marker: '',
+    cardStyle: '',
+    hasBanner: false,
+  };
+}
+
+/* Score a Gem-Hunter candidate from already-computed inputs.
+   Pure: takes the ticker snapshot, kline-derived stats, and V3
+   technique results — no globals, no fetches, deterministic.
+   Returns { score, tags }.
+
+   Inputs:
+     ticker      { p, c, v, h, l }     — current ticker snapshot
+     klineStats  { vx, timing }        — vx = vol multiplier vs avg,
+                                         timing in {'early','still','late'}
+     v3          { iceberg, vpin,
+                   whalePnL, cvd }     — outputs of the V3 functions
+                                         (any field may be null/undefined)
+
+   Scoring contract (must match the live Gem Hunter):
+     vx in [4, ∞)      +45  '🔥VOL <vx>x'
+     vx in [3, 4)      +40  '📊VOL <vx>x'
+     vx in [2, 3)      +30  '📊VOL <vx>x'
+     vx in [1.5, 2)    +15  'vol <vx>x'
+     timing 'early'    +30
+     timing 'still'    +15
+     bottom-of-range   +10  '📉LOW'   (price in lower 30% of h-l band)
+     iceberg BUY       +20  '🧊ICE'
+     vpin > 0.6        +15  '🧪VPIN'
+     vpin in (0.4, 0.6] +8  '🧪vp'
+     whalePnL > +1%    +10  '🐋PRO'
+     cvd BULLISH       +15  '📈CVD'
+     c in (0, 3)       +20
+     c in [3, 8)       +10 */
+function scoreGemCandidate(ticker, klineStats, v3) {
+  if (!ticker) return { score: 0, tags: [] };
+  var sc = 0;
+  var tags = [];
+  if (klineStats && klineStats.vx != null) {
+    var vx = klineStats.vx;
+    if (vx >= 4) { sc += 45; tags.push('🔥VOL ' + vx.toFixed(1) + 'x'); }
+    else if (vx >= 3) { sc += 40; tags.push('📊VOL ' + vx.toFixed(1) + 'x'); }
+    else if (vx >= 2) { sc += 30; tags.push('📊VOL ' + vx.toFixed(1) + 'x'); }
+    else if (vx >= 1.5) { sc += 15; tags.push('vol ' + vx.toFixed(1) + 'x'); }
+  }
+  if (klineStats && klineStats.timing === 'early') sc += 30;
+  else if (klineStats && klineStats.timing === 'still') sc += 15;
+  if (ticker.h != null && ticker.l != null && ticker.h !== ticker.l) {
+    var posInRange = (ticker.p - ticker.l) / (ticker.h - ticker.l);
+    if (posInRange < 0.3) { sc += 10; tags.push('📉LOW'); }
+  }
+  if (v3) {
+    if (v3.iceberg && v3.iceberg.signal === 'ICEBERG_BUY') { sc += 20; tags.push('🧊ICE'); }
+    if (v3.vpin && v3.vpin.vpin != null) {
+      if (v3.vpin.vpin > 0.6) { sc += 15; tags.push('🧪VPIN'); }
+      else if (v3.vpin.vpin > 0.4) { sc += 8; tags.push('🧪vp'); }
+    }
+    if (v3.whalePnL && v3.whalePnL.pct != null && v3.whalePnL.pct > 1) {
+      sc += 10; tags.push('🐋PRO');
+    }
+    if (v3.cvd && v3.cvd.divergence === 'BULLISH') { sc += 15; tags.push('📈CVD'); }
+  }
+  if (ticker.c != null) {
+    if (ticker.c > 0 && ticker.c < 3) sc += 20;
+    else if (ticker.c >= 3 && ticker.c < 8) sc += 10;
+  }
+  return { score: sc, tags: tags };
+}
+
+/* Rugpull risk score (0-100) for the Gem Hunter — coins with high
+   risk are filtered out before the user ever sees them. Pure: takes
+   a ticker snapshot, optional funding-rate object, optional book
+   ticker (best bid/ask + qty + spread). Returns a number; the
+   Gem Hunter rejects anything above 70.
+
+   Risk factors (additive, capped at 100):
+     +30  bid/ask spread > 1%        (illiquid market)
+     +20  bid OR ask qty < 100        (thin order book)
+     +25  24h volume < $500K          (very low turnover)
+     +15  abs(24h change) > 30%       (manipulation suspicion)
+     +10  no futures market exists    (no institutional interest)
+
+   Missing inputs are treated as "data unavailable" and contribute 0
+   to risk — we don't penalize a coin for our own data gaps. The
+   exception is `d` itself: if no ticker snapshot, return 100 (max
+   risk) because we can't make any safety claim. */
+function getRugPullRisk(d, fr, bookTicker) {
+  if (!d) return 100;
+  var risk = 0;
+  if (bookTicker) {
+    if (bookTicker.spread != null && bookTicker.spread > 1) risk += 30;
+    if (bookTicker.bidQty != null && bookTicker.bidQty < 100) risk += 20;
+    else if (bookTicker.askQty != null && bookTicker.askQty < 100) risk += 20;
+  }
+  if (d.v != null && d.v < 500000) risk += 25;
+  if (d.c != null && Math.abs(d.c) > 30) risk += 15;
+  if (!fr) risk += 10;
+  if (risk > 100) risk = 100;
+  return risk;
+}
+
 /* Evaluate a signal's outcome by comparing entry price to current
    price. Used by the per-tag performance tracker so we can answer
    "which tags actually predict winners?" Pure: takes prices and

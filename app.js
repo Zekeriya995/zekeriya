@@ -1148,7 +1148,18 @@ async function loadTrading(){var trLoadEl=document.getElementById('tradeList');i
     if(trLoadEl)trLoadEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">⚠️</div><div class="sc-empty-title">'+(lang==='ar'?'جاري تحميل البيانات...':'Loading data...')+'</div><div class="sc-empty-sub">'+(lang==='ar'?(_proxyAlive?'يتم الاتصال بالسيرفر — انتظر 5 ثواني':'⚡ السيرفر غير متصل — يتم التحويل للاتصال المباشر'):(_proxyAlive?'Connecting to server — wait 5s':'⚡ Server offline — switching to direct API'))+'</div><div class="sc-empty-retry"><button class="rfr" onclick="loadTk().then(function(){loadTrading()})">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div></div>';
     setTimeout(function(){if(Object.keys(T).length>=5)loadTrading()},3000);
     return}
-  var c=quickScan();var r=await deepAnalyze(c);
+  var c=quickScan();
+  var r;
+  try{
+    r=await deepAnalyze(c);
+  }catch(e){
+    /* deepAnalyze threw or one of its kline fetches hung past timeout.
+       Replace the loader with a visible, retry-able error state so the
+       user isn't stuck on a perpetual "scanning..." with no recourse. */
+    if(trLoadEl)trLoadEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">⚠️</div><div class="sc-empty-title">'+(lang==='ar'?'تعذّر تحميل الإشارات':'Could not load signals')+'</div><div class="sc-empty-sub">'+(lang==='ar'?'مشكلة في الشبكة أو الـ API. اضغط إعادة المحاولة.':'Network or API issue. Tap retry.')+'</div><div class="sc-empty-retry"><button class="rfr" onclick="loadTrading()">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div></div>';
+    try{updateScanSummary(0,Object.keys(T).length)}catch(_e){}
+    return;
+  }
   /* ═══ NEW: Apply qualityFilter before rendering ═══ */
   r=qualityFilter(r);
   /* Fix A: populate whaleWaves for the Scanner tab too.
@@ -2152,16 +2163,17 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   if(sc>=15)cands.push({s:s,p:d.p,c:d.c,v:d.v,score:sc,tags:tags,fr:fr?fr.rate:null,by:d.by,cb:CBP[s],pdFlags:pdFlags})});
   return cands.sort(function(a,b){return b.score-a.score})}
 /* DEEP ANALYZE — tier-aware: T1=6 checks, T2=4 checks, T3=volume only.
-   Coverage expanded from top 50 to top 300 candidates so mid-cap
-   pre-pump setups don't get filtered out by an arbitrary cap. The
-   loop body already handles missing klines gracefully (every kline
-   read is guarded by length check), so ranks 31-300 process from
-   quickScan score + non-kline data sources only — no extra API
-   calls for them. The 1h kline fetch grows from top 15 to top 30
-   so the medium-tier candidates still get MACD + RSI confirmation,
-   while the heavy 5m/15m/4h fetches stay capped at top 10 to keep
-   total API load well under Binance's 1200/min rate limit. */
-async function deepAnalyze(cands){var results=[];var top=cands.slice(0,300);
+   Coverage cap is 100 candidates — wider than the original 50 so
+   mid-cap pre-pump setups still get a fair chance, but tighter than
+   the 300 cap that PR #17 introduced. On Telegram WebApp's slower
+   mobile network, the 300-cap variant could leave loadTrading stuck
+   on "scanning..." when one of the kline fetches hung. The loop
+   body still handles missing klines gracefully (every kline read is
+   guarded by length check), so ranks 31-100 process from quickScan
+   score + non-kline data sources only. The 1h kline fetch covers
+   top 30 so medium-tier candidates still get MACD + RSI; heavy
+   5m/15m/4h fetches stay at top 10. */
+async function deepAnalyze(cands){var results=[];var top=cands.slice(0,100);
   var klData={},obData={},kl5Data={},kl15Data={},kl4hData={};
   /* Rate-limit aware: top10 get 5m+15m+4h, top30 get 1h */
   var t1t2=top.filter(function(c){return getCoinTier(c.s)<=2||c.score>=30});

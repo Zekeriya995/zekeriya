@@ -5739,21 +5739,25 @@ function renderTopCoins(){
 function renderTop3(){
   var el=document.getElementById('top3List');if(!el||!cache.scan)return;
   var ar=lang==='ar';var opps=[];
+  /* Diagnostic counters — populated as we walk the candidates so we can
+     answer "why are zero cards rendering?" by dumping a single labelled
+     object to the console. Counters are silent when cards render. */
+  var _diag={candidates:cache.scan.length,notTier1:0,noPrice:0,pumped:0,dumped:0,lowPassed:0,btcCrash:0,lowVol:0,whaleLoss:0,iceSell:0,frHigh:0,predBear:0,stale:0,unlock:0,lowRR:0,gateFail:0};
   cache.scan.forEach(function(r){
-    if(!TIER1.has(r.s))return;
-    var d=T[r.s];if(!d||!d.p||d.p<=0)return;
+    if(!TIER1.has(r.s)){_diag.notTier1++;return}
+    var d=T[r.s];if(!d||!d.p||d.p<=0){_diag.noPrice++;return}
 
     /* ═══ STRICT QUALITY GATE (before scoring) ═══ */
-    if(r.c>=8)return;
-    if(r.c<=-5)return;
-    if(r.passed<2)return;
-    if(T.BTC&&T.BTC.c<-4)return;
-    if(d.v<3000000)return;
-    try{var wPnLGate=calcWhalePnL(r.s);if(wPnLGate&&wPnLGate.pct<-3)return;}catch(e){}
-    try{var iceGate=detectIceberg(r.s);if(iceGate&&iceGate.signal==='ICEBERG_SELL'&&iceGate.count>=2)return;}catch(e){}
-    if(FR[r.s]&&FR[r.s].rate>0.12)return;
-    try{var predGate=getPredArrow(r.s);if(predGate&&predGate.sc<=-5)return;}catch(e){}
-    if(r.ageMinutes>120&&r.changeFromDetection>5)return;
+    if(r.c>=8){_diag.pumped++;return}
+    if(r.c<=-5){_diag.dumped++;return}
+    if(r.passed<2){_diag.lowPassed++;return}
+    if(T.BTC&&T.BTC.c<-4){_diag.btcCrash++;return}
+    if(d.v<3000000){_diag.lowVol++;return}
+    try{var wPnLGate=calcWhalePnL(r.s);if(wPnLGate&&wPnLGate.pct<-3){_diag.whaleLoss++;return}}catch(e){}
+    try{var iceGate=detectIceberg(r.s);if(iceGate&&iceGate.signal==='ICEBERG_SELL'&&iceGate.count>=2){_diag.iceSell++;return}}catch(e){}
+    if(FR[r.s]&&FR[r.s].rate>0.12){_diag.frHigh++;return}
+    try{var predGate=getPredArrow(r.s);if(predGate&&predGate.sc<=-5){_diag.predBear++;return}}catch(e){}
+    if(r.ageMinutes>120&&r.changeFromDetection>5){_diag.stale++;return}
     if(typeof tokenUnlocks!=='undefined'&&tokenUnlocks&&tokenUnlocks.length){
       var nowU=new Date();
       var unlockMatch=tokenUnlocks.filter(function(u){
@@ -5763,7 +5767,7 @@ function renderTop3(){
       });
       if(unlockMatch.length){
         var totalUnlockValue=unlockMatch.reduce(function(s,u){return s+(u.amount||0)},0);
-        if(totalUnlockValue>20000000)return;
+        if(totalUnlockValue>20000000){_diag.unlock++;return}
       }
     }
 
@@ -5928,10 +5932,10 @@ function renderTop3(){
     if(sl>=d.p*0.99)sl=d.p*0.95;
     if(tp1<=d.p*1.01)tp1=d.p*1.05;
     if(tp2<=tp1)tp2=d.p*1.1;
-    if(rr<1.5)return;
+    if(rr<1.5){_diag.lowRR++;return}
 
     /* ═══ SIGNAL QUALITY GATE ═══ */
-    try{var gate=signalQualityGate(r.s,'top3',r.score);if(!gate.pass)return}catch(e){}
+    try{var gate=signalQualityGate(r.s,'top3',r.score);if(!gate.pass){_diag.gateFail++;return}}catch(e){}
 
     /* ═══ Classify type ═══ */
     var type='';var icon='';
@@ -5982,6 +5986,18 @@ function renderTop3(){
 
   /* ═══ Quality controls ═══ */
   if(!top.length||top[0].priority<25){
+    /* Dump the rejection breakdown so we can see whether 'no cards' means
+       'nothing in the scan', 'all candidates blocked by gates', or
+       'candidates passed the gates but priority<25'. Logged once per
+       render, only when the section is empty. */
+    try{
+      var _bestPri=opps.length?+opps[0].priority.toFixed(1):null;
+      var _bestSym=opps.length?opps[0].s:null;
+      console.log('[TOP3] 🎯 0 cards — diag:',
+        'scan='+_diag.candidates,'passed_inline='+opps.length,
+        _bestPri!==null?('best='+_bestSym+' pri='+_bestPri+' (gate=25)'):'no candidate cleared inline filters',
+        _diag);
+    }catch(_e){}
     el.innerHTML='<div class="muted">'+(ar
       ?'🎯 لا صفقات VIP حالياً — الفلتر الذكي لا يقبل إلا الأفضل'
       :'🎯 No VIP trades right now — Smart filter accepts only the best')+'</div>';

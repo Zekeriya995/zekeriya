@@ -2359,6 +2359,26 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,300);
     if(c.tags.some(function(t){return t.includes('ACC')||t.includes('STEALTH')||t.includes('EARLY')})){recSig(c.s,'whale',c.p);if(c.v>5e7||checks.ob)notify(c.s,'whale',ds)}
     if(c.c>=3)recSig(c.s,'breakout',c.p);
     recSig(c.s,'trade',c.p);
+    /* ═══ Cross-module sync: PROVEN tag ═══
+       The Monitor (Smart Supervisor) tracks per-coin win rates in
+       monitorState.coinStats. If this coin has a real track record
+       with the user — at least 5 closed trades and >= 60% win rate —
+       reward the signal: +10 score and a 🏅PROVEN tag. The threshold
+       is intentionally strict (5 trades minimum) so we don't lock
+       in noise from a 2-of-3 lucky streak. The user-specific signal
+       (their own history) compounds with the global signal (whale
+       activity, microstructure) instead of being ignored. */
+    var _proven=false;
+    var _coinWinRate=0;
+    if(monitorState&&monitorState.coinStats&&monitorState.coinStats[c.s]){
+      var _cs=monitorState.coinStats[c.s];
+      if(_cs.total>=5&&_cs.rate>=60){
+        _proven=true;
+        _coinWinRate=_cs.rate;
+        ds+=10;
+        dt.push('🏅PROVEN:'+_cs.rate+'%');
+      }
+    }
     /* Build result with new + old fields */
     var sigInfo=sigHist[c.s+'_trade'];
     var _priceAtDet=sigInfo&&sigInfo.priceAtDetection?sigInfo.priceAtDetection:c.p;
@@ -2367,7 +2387,7 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,300);
     var _freshness='fresh';
     if(_ageMins>60||Math.abs(_changeDet)>5)_freshness='old';
     else if(_ageMins>15||Math.abs(_changeDet)>2)_freshness='warm';
-    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,pdFlags:c.pdFlags||0,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
+    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,pdFlags:c.pdFlags||0,proven:_proven,coinWinRate:_coinWinRate,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}
   return results.sort(function(a,b){return b.score-a.score})}
 /* ═══ QUALITY FILTER v3 — strict gate before rendering ═══ */
 function qualityFilter(results){

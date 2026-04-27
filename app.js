@@ -1170,23 +1170,29 @@ function loadTrending(){
   var trendEl=document.getElementById('trendList');
   if(trendEl)trendEl.innerHTML=h||'<div class="empty"><div class="empty-ic">📡</div><div class="empty-tx">'+(lang==='ar'?'جاري التحليل...':'Analyzing...')+'</div></div>';
 }
-/* ═══ TAB 2: SMART TRADING ═══ */
-async function loadTrading(){var trLoadEl=document.getElementById('tradeList');if(trLoadEl)trLoadEl.innerHTML='<div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div>';
+/* ═══ TAB 2: SMART TRADING ═══
+   forceFresh=true bypasses the 60s scan cache — used by user-driven
+   retry buttons so a click on "Retry" actually re-runs the analysis
+   instead of silently serving the same cached snapshot that just
+   failed to surface a signal. Tab switches and filter changes leave
+   it falsy so they keep the fast cached path. */
+async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tradeList');if(trLoadEl)trLoadEl.innerHTML='<div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div>';
   /* ═══ DATA CHECK: If no data loaded yet, show smart error ═══ */
   if(Object.keys(T).length<5){
-    if(trLoadEl)trLoadEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">⚠️</div><div class="sc-empty-title">'+(lang==='ar'?'جاري تحميل البيانات...':'Loading data...')+'</div><div class="sc-empty-sub">'+(lang==='ar'?(_proxyAlive?'يتم الاتصال بالسيرفر — انتظر 5 ثواني':'⚡ السيرفر غير متصل — يتم التحويل للاتصال المباشر'):(_proxyAlive?'Connecting to server — wait 5s':'⚡ Server offline — switching to direct API'))+'</div><div class="sc-empty-retry"><button class="rfr" onclick="loadTk().then(function(){loadTrading()})">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div></div>';
+    if(trLoadEl)trLoadEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">⚠️</div><div class="sc-empty-title">'+(lang==='ar'?'جاري تحميل البيانات...':'Loading data...')+'</div><div class="sc-empty-sub">'+(lang==='ar'?(_proxyAlive?'يتم الاتصال بالسيرفر — انتظر 5 ثواني':'⚡ السيرفر غير متصل — يتم التحويل للاتصال المباشر'):(_proxyAlive?'Connecting to server — wait 5s':'⚡ Server offline — switching to direct API'))+'</div><div class="sc-empty-retry"><button class="rfr" onclick="loadTk().then(function(){loadTrading(true)})">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div></div>';
     setTimeout(function(){if(Object.keys(T).length>=5)loadTrading()},3000);
     return}
   var r;
   try{
     /* Route through the shared semaphore: serves cache when fresh,
-       coalesces concurrent calls onto one in-flight scan. */
-    r=await getScanResults();
+       coalesces concurrent calls onto one in-flight scan.
+       forceFresh from a retry click bypasses the cache. */
+    r=await getScanResults(forceFresh);
   }catch(e){
     /* deepAnalyze threw or one of its kline fetches hung past timeout.
        Replace the loader with a visible, retry-able error state so the
        user isn't stuck on a perpetual "scanning..." with no recourse. */
-    if(trLoadEl)trLoadEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">⚠️</div><div class="sc-empty-title">'+(lang==='ar'?'تعذّر تحميل الإشارات':'Could not load signals')+'</div><div class="sc-empty-sub">'+(lang==='ar'?'مشكلة في الشبكة أو الـ API. اضغط إعادة المحاولة.':'Network or API issue. Tap retry.')+'</div><div class="sc-empty-retry"><button class="rfr" onclick="loadTrading()">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div></div>';
+    if(trLoadEl)trLoadEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">⚠️</div><div class="sc-empty-title">'+(lang==='ar'?'تعذّر تحميل الإشارات':'Could not load signals')+'</div><div class="sc-empty-sub">'+(lang==='ar'?'مشكلة في الشبكة أو الـ API. اضغط إعادة المحاولة.':'Network or API issue. Tap retry.')+'</div><div class="sc-empty-retry"><button class="rfr" onclick="loadTrading(true)">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div></div>';
     try{updateScanSummary(0,Object.keys(T).length)}catch(_e){}
     return;
   }
@@ -1418,7 +1424,7 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
   if(scanIEl)scanIEl.innerHTML='📊 '+f.length+' '+t('scan_signals')+' <span style="color:var(--t3)">/ '+tkCount+' '+(lang==='ar'?'عملة':'coins')+'</span> | '+srcLabel+' | '+t('scan_updated')+': '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
   /* ═══ Update summary bar ═══ */
   updateScanSummary(f.length,tkCount);
-  if(!f.length){var trEl=document.getElementById('tradeList');if(trEl)trEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">'+(tkCount<5?'⚠️':'📡')+'</div><div class="sc-empty-title">'+(tkCount<5?(lang==='ar'?'لم يتم تحميل البيانات بعد':'Data not loaded yet'):(lang==='ar'?'السوق هادئ — لا فرص قوية':'Market quiet — No strong signals'))+'</div><div class="sc-empty-sub">'+(tkCount<5?(lang==='ar'?'تحقق من اتصال الإنترنت أو اضغط تحديث':'Check internet or tap refresh'):(lang==='ar'?'البوابة الذكية ترفض الإشارات الضعيفة — الانتظار أفضل':'Smart gate blocks weak signals — Waiting is better'))+'</div>'+(tkCount<5?'<div class="sc-empty-retry"><button class="rfr" onclick="loadTk().then(function(){loadTrading()})">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div>':'')+'<div class="sc-empty-stats"><span>📊 '+tkCount+' '+(lang==='ar'?'عملة محملة':'coins loaded')+'</span><span>'+srcLabel+'</span></div></div>';return}
+  if(!f.length){var trEl=document.getElementById('tradeList');if(trEl)trEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">'+(tkCount<5?'⚠️':'📡')+'</div><div class="sc-empty-title">'+(tkCount<5?(lang==='ar'?'لم يتم تحميل البيانات بعد':'Data not loaded yet'):(lang==='ar'?'السوق هادئ — لا فرص قوية':'Market quiet — No strong signals'))+'</div><div class="sc-empty-sub">'+(tkCount<5?(lang==='ar'?'تحقق من اتصال الإنترنت أو اضغط تحديث':'Check internet or tap refresh'):(lang==='ar'?'البوابة الذكية ترفض الإشارات الضعيفة — الانتظار أفضل':'Smart gate blocks weak signals — Waiting is better'))+'</div>'+(tkCount<5?'<div class="sc-empty-retry"><button class="rfr" onclick="loadTk().then(function(){loadTrading(true)})">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div>':'')+'<div class="sc-empty-stats"><span>📊 '+tkCount+' '+(lang==='ar'?'عملة محملة':'coins loaded')+'</span><span>'+srcLabel+'</span></div></div>';return}
   /* Idea 3: precompute per-tier win rates once per render — every card
      in the same tier shows the same rate, so there's no reason to
      recompute it per signal. */

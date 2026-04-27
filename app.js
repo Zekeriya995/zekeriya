@@ -2029,15 +2029,24 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   }
   if(sc>=15)cands.push({s:s,p:d.p,c:d.c,v:d.v,score:sc,tags:tags,fr:fr?fr.rate:null,by:d.by,cb:CBP[s],pdFlags:pdFlags})});
   return cands.sort(function(a,b){return b.score-a.score})}
-/* DEEP ANALYZE — tier-aware: T1=6 checks, T2=4 checks, T3=volume only */
-async function deepAnalyze(cands){var results=[];var top=cands.slice(0,50);
+/* DEEP ANALYZE — tier-aware: T1=6 checks, T2=4 checks, T3=volume only.
+   Coverage expanded from top 50 to top 300 candidates so mid-cap
+   pre-pump setups don't get filtered out by an arbitrary cap. The
+   loop body already handles missing klines gracefully (every kline
+   read is guarded by length check), so ranks 31-300 process from
+   quickScan score + non-kline data sources only — no extra API
+   calls for them. The 1h kline fetch grows from top 15 to top 30
+   so the medium-tier candidates still get MACD + RSI confirmation,
+   while the heavy 5m/15m/4h fetches stay capped at top 10 to keep
+   total API load well under Binance's 1200/min rate limit. */
+async function deepAnalyze(cands){var results=[];var top=cands.slice(0,300);
   var klData={},obData={},kl5Data={},kl15Data={},kl4hData={};
-  /* Rate-limit aware: top10 get 5m+15m+4h, top15 get 1h */
+  /* Rate-limit aware: top10 get 5m+15m+4h, top30 get 1h */
   var t1t2=top.filter(function(c){return getCoinTier(c.s)<=2||c.score>=30});
   var top10=t1t2.slice(0,10);
-  var top15=t1t2.slice(0,15);
-  /* Fetch 1h klines for top 15 */
-  var klProms=top15.map(function(c){return fj(BN+'/klines?symbol='+c.s+'USDT&interval=1h&limit=60').then(function(d){klData[c.s]=d}).catch(function(){})});
+  var top30=t1t2.slice(0,30);
+  /* Fetch 1h klines for top 30 (was top 15) */
+  var klProms=top30.map(function(c){return fj(BN+'/klines?symbol='+c.s+'USDT&interval=1h&limit=60').then(function(d){klData[c.s]=d}).catch(function(){})});
   /* Fetch 15m klines for top 10 */
   var kl15Proms=top10.map(function(c){return fj(BN+'/klines?symbol='+c.s+'USDT&interval=15m&limit=60').then(function(d){kl15Data[c.s]=d}).catch(function(){})});
   /* Fetch 5m klines for top 10 */

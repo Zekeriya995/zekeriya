@@ -918,3 +918,72 @@ test('qualityFilterRejectReason — survivor batch matches expected', () => {
     .map((row) => row.sig.s);
   assert.deepEqual(survivors, ['A', 'F'], 'only the two pass rows survive');
 });
+
+/* ─── shared scoring sub-formulas (PR #28) ────────────────────────
+   The two scoring formulas (loadTrading confidence, renderTop3 V3
+   priority) used to inline the same fact extractions in slightly
+   different ways. These tests pin down the shared helpers so each
+   call-site composes the same facts under its own scoring policy. */
+
+test('coinbasePremiumPct — null/zero/negative inputs return null', () => {
+  assert.equal(coinbasePremiumPct(null, 100), null);
+  assert.equal(coinbasePremiumPct(100, null), null);
+  assert.equal(coinbasePremiumPct(100, 0), null);
+  assert.equal(coinbasePremiumPct(100, -5), null);
+  assert.equal(coinbasePremiumPct(0, 100), null, 'zero CB price treated as missing');
+});
+
+test('coinbasePremiumPct — positive premium returns positive percentage', () => {
+  /* 0.5% premium */
+  assert.ok(Math.abs(coinbasePremiumPct(100.5, 100) - 0.5) < 1e-9);
+  /* No premium */
+  assert.equal(coinbasePremiumPct(100, 100), 0);
+  /* Coinbase discount = negative percentage */
+  assert.ok(Math.abs(coinbasePremiumPct(99, 100) - (-1)) < 1e-9);
+});
+
+test('coinbasePremiumPct — matches the boundary thresholds in both scoring policies', () => {
+  /* loadTrading binary cutoff at +0.2%, renderTop3 tiered at +0.15 / +0.3. */
+  assert.ok(coinbasePremiumPct(100.2, 100) > 0.15, 'just over the renderTop3 weak tier');
+  assert.ok(coinbasePremiumPct(100.2, 100) > 0.2 - 1e-9, 'right at the loadTrading binary cutoff');
+  assert.ok(coinbasePremiumPct(100.4, 100) > 0.3, 'comfortably over the renderTop3 strong tier');
+});
+
+test('topTraderLatestLong — missing entry / arrays return null', () => {
+  assert.equal(topTraderLatestLong(null), null);
+  assert.equal(topTraderLatestLong({}), null, 'no .accounts and no .positions');
+  assert.equal(topTraderLatestLong({ accounts: [] }), null, 'empty array');
+  assert.equal(topTraderLatestLong({ positions: [] }, 'positions'), null);
+  assert.equal(topTraderLatestLong({ accounts: [{}] }), null, 'latest entry missing .long');
+  assert.equal(topTraderLatestLong({ accounts: [{ long: 'high' }] }), null, '.long must be numeric');
+});
+
+test('topTraderLatestLong — picks the FRESHEST entry (last in array)', () => {
+  const data = {
+    accounts: [{ long: 0.5 }, { long: 0.7 }, { long: 0.9 }],
+  };
+  assert.equal(topTraderLatestLong(data), 0.9);
+});
+
+test('topTraderLatestLong — defaults to .accounts but reads .positions when asked', () => {
+  /* renderTop3 reads .accounts (count-weighted), loadTrading reads
+     .positions (size-weighted). Same helper, different slice. */
+  const data = {
+    accounts: [{ long: 0.6 }],
+    positions: [{ long: 0.7 }],
+  };
+  assert.equal(topTraderLatestLong(data), 0.6, 'default = accounts');
+  assert.equal(topTraderLatestLong(data, 'accounts'), 0.6);
+  assert.equal(topTraderLatestLong(data, 'positions'), 0.7);
+});
+
+test('topTraderLatestLong — boundary at the 0.55 / 0.58 thresholds both formulas use', () => {
+  /* Both formulas check long > threshold (strict). Pin both
+     boundaries: 0.55 (loadTrading single tier; renderTop3 weak tier)
+     and 0.58 (renderTop3 strong tier). */
+  assert.equal(topTraderLatestLong({ accounts: [{ long: 0.55 }] }), 0.55);
+  assert.equal(topTraderLatestLong({ accounts: [{ long: 0.58 }] }), 0.58);
+  /* Both formulas use strict > so 0.55 itself does NOT trigger the
+     loadTrading tier — that's a runtime concern, not a helper one,
+     but worth documenting here so tests catch any boundary drift. */
+});

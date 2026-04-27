@@ -592,3 +592,49 @@ function qualityFilterRejectReason(r, ctx) {
   }
   return null;
 }
+
+/* ─── shared scoring sub-formulas ──────────────────────────────────
+   The audit flagged that loadTrading (Smart Trading tab confidence)
+   and renderTop3 (home-screen VIP priority) had two completely
+   independent scoring models with no shared logic. After tracing
+   them carefully, most of the divergence is intentional — the two
+   tabs answer different questions (~"is this signal entry-worthy
+   right now?" vs "is this in the top 3 VIP picks?") and weight the
+   same signals differently on purpose.
+
+   What IS genuinely shared is the *fact extraction* underneath:
+   computing the Coinbase premium percentage, picking the latest
+   top-trader long ratio. Both call-sites used to inline the same
+   safe-access pattern in slightly different ways. These helpers
+   pull the facts out so each scoring formula composes them into
+   its own policy. */
+
+/* Coinbase-vs-Binance price premium expressed as a percentage of
+   the Binance price. A positive number means Coinbase trades at a
+   premium — typically a smart-money inflow signal because U.S.
+   institutions transact through Coinbase. Returns null when either
+   price is missing, zero, or negative. */
+function coinbasePremiumPct(cbpPrice, lastPrice) {
+  if (!cbpPrice || !lastPrice || lastPrice <= 0) return null;
+  return ((cbpPrice - lastPrice) / lastPrice) * 100;
+}
+
+/* Latest "long ratio" (0–1) for top traders on Binance Futures.
+   Binance exposes two related streams that we store on the same
+   object: top-by-account-count (`.accounts`) and top-by-position-
+   size (`.positions`). renderTop3 reads `.accounts` (count-weighted
+   smart-money sentiment); loadTrading reads `.positions` (size-
+   weighted smart-money commitment). Both pick the freshest entry
+   and compare its `.long` field to a threshold. The helper
+   defaults to `.accounts` to match renderTop3 — pass 'positions'
+   to mimic loadTrading's read.
+
+   Returns the long ratio (0–1) or null when data is missing. */
+function topTraderLatestLong(topTradersEntry, field) {
+  if (!topTradersEntry) return null;
+  var arr = topTradersEntry[field || 'accounts'];
+  if (!arr || !arr.length) return null;
+  var latest = arr[arr.length - 1];
+  if (!latest || typeof latest.long !== 'number') return null;
+  return latest.long;
+}

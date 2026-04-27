@@ -1219,7 +1219,7 @@ async function loadTrading(){var trLoadEl=document.getElementById('tradeList');i
     var _btcChg=T.BTC?T.BTC.c:0;
     var _cvdDiv=null;try{var _cvdRes=analyzeCVD(x.s);if(_cvdRes)_cvdDiv=_cvdRes.divergence}catch(e){}
     var setup=classifySetup(x,d,_btcChg,_cvdDiv);
-    sigs.push({s:x.s,p:d.p,c:d.c,v:d.v,type:type,setup:setup,conf:conf,entry:entry,target:target,stop:stop,rr:rr,dur:dur,reasons:reasons,score:x.score,checks:x.checks,passed:x.passed,total:x.total,ultra:x.ultra,confirmed:x.confirmed,tags:x.tags,sec:sec,detectedAt:x.detectedAt,priceAtDetection:x.priceAtDetection,ageMinutes:x.ageMinutes,changeFromDetection:x.changeFromDetection,freshness:x.freshness})}
+    sigs.push({s:x.s,p:d.p,c:d.c,v:d.v,type:type,setup:setup,conf:conf,entry:entry,target:target,stop:stop,rr:rr,dur:dur,reasons:reasons,score:x.score,checks:x.checks,passed:x.passed,total:x.total,ultra:x.ultra,confirmed:x.confirmed,tags:x.tags,sec:sec,proven:x.proven,coinWinRate:x.coinWinRate,detectedAt:x.detectedAt,priceAtDetection:x.priceAtDetection,ageMinutes:x.ageMinutes,changeFromDetection:x.changeFromDetection,freshness:x.freshness})}
   sigs.sort(function(a,b){return b.conf-a.conf});renderTrading(sigs)}
 function filterTrade(f,btn){curTradeFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadTrading()}
 /* Idea 3 — Recent win rate per signal tier.
@@ -1435,11 +1435,42 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
        WHALE_TARGET tag (whale engine confidence >= 60), paint the card
        bar gold and prepend a 🐋✨ marker to the symbol. This is the
        killer combo — accumulation already detected by the Whales
-       section AND a pre-pump setup forming on the Scanner. */
+       section AND a pre-pump setup forming on the Scanner.
+
+       DOUBLE CONFIRMED treatment kicks in when a coin is BOTH a
+       WHALE_TARGET AND PROVEN (user track record >= 60% over 5+
+       trades). The card gets a purple-gold border, a header banner
+       saying "⭐ DOUBLE CONFIRMED — <coin win rate>%", and a 🌟
+       marker. This is the rarest, strongest signal: global signal
+       (whales) + personal signal (your history) firing together. */
     var _isWhaleTarget=(s.tags||[]).some(function(t){return t.indexOf('WHALE_TARGET')>=0});
-    var _barColor=_isWhaleTarget?'linear-gradient(90deg,#ffd700,#ff8c00)':(s.ultra?'var(--ultra)':s.type==='fast'?'var(--blue)':'var(--up)');
-    var _whaleMarker=_isWhaleTarget?'🐋✨ ':(s.ultra?'⭐ ':s.confirmed?'🟢 ':'');
-    h+='<div class="scan-card"'+(_isWhaleTarget?' style="border:2px solid #ffd700;box-shadow:0 0 12px rgba(255,215,0,.3)"':'')+'><div class="scan-card-bar" style="background:'+_barColor+'"></div><div class="scan-card-body">'
+    var _isDoubleConfirmed=_isWhaleTarget&&s.proven===true;
+    var _barColor;
+    if(_isDoubleConfirmed)_barColor='linear-gradient(90deg,#ffd700,#b07cff)';
+    else if(_isWhaleTarget)_barColor='linear-gradient(90deg,#ffd700,#ff8c00)';
+    else if(s.ultra)_barColor='var(--ultra)';
+    else if(s.type==='fast')_barColor='var(--blue)';
+    else _barColor='var(--up)';
+    var _whaleMarker;
+    if(_isDoubleConfirmed)_whaleMarker='🌟 ';
+    else if(_isWhaleTarget)_whaleMarker='🐋✨ ';
+    else if(s.ultra)_whaleMarker='⭐ ';
+    else if(s.confirmed)_whaleMarker='🟢 ';
+    else _whaleMarker='';
+    var _cardStyle='';
+    if(_isDoubleConfirmed)_cardStyle=' style="border:2px solid #b07cff;box-shadow:0 0 14px rgba(176,124,255,.4),0 0 6px rgba(255,215,0,.3)"';
+    else if(_isWhaleTarget)_cardStyle=' style="border:2px solid #ffd700;box-shadow:0 0 12px rgba(255,215,0,.3)"';
+    h+='<div class="scan-card"'+_cardStyle+'>';
+    /* Banner above the card body for DOUBLE CONFIRMED — small but
+       visually loud so the user can't miss it. */
+    if(_isDoubleConfirmed){
+      h+='<div style="padding:4px 10px;background:linear-gradient(90deg,rgba(255,215,0,.15),rgba(176,124,255,.15));font-size:10px;font-weight:800;color:#fff;display:flex;align-items:center;justify-content:center;gap:6px;border-radius:6px 6px 0 0">'
+        +'<span>⭐ '+(lang==='ar'?'تأكيد مزدوج':'DOUBLE CONFIRMED')+'</span>'
+        +'<span style="color:#b07cff">·</span>'
+        +'<span style="font-family:var(--fm)">'+(lang==='ar'?'سجلك ':'your win rate ')+(s.coinWinRate||0)+'%</span>'
+        +'</div>';
+    }
+    h+='<div class="scan-card-bar" style="background:'+_barColor+'"></div><div class="scan-card-body">'
       /* Header: rank + name + type + time + confidence */
       +'<div class="sc-head"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--t3);font-weight:800">#'+(i+1)+'</span><div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">'+_whaleMarker+s.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+'</div><span class="sc-time '+(ta.cls==='fresh'?'fresh':'')+'">'+(ta.cls==='fresh'?'🆕 ':'⏱ ')+ta.text+'</span></div></div><div style="text-align:right"><div class="sc-badge" style="background:'+(s.conf>=70?'var(--ud)':s.conf>=55?'var(--bd)':'var(--wd)')+';color:'+(s.conf>=70?'var(--up)':s.conf>=55?'var(--blue)':'var(--warn)')+'">'+s.conf+'%</div><div style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+tCol+';font-weight:700;margin-top:3px">'+tLbl+'</div></div></div>'
       /* ═══ NEW: Signal Timing Bar ═══ */

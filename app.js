@@ -1265,16 +1265,20 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
     var obBonus=_depthBR>2?15:_depthBR>1.5?8:0;
     var lsBonus=LS[x.s]&&LS[x.s].ratio<0.8?10:0;
     var smartMoney=0;
-    if(topTradersLS[x.s]&&topTradersLS[x.s].positions&&topTradersLS[x.s].positions.length>0){
-      var _tpL=topTradersLS[x.s].positions[topTradersLS[x.s].positions.length-1];
-      if(_tpL&&_tpL.long>0.55)smartMoney=12;
-    }
+    /* Reads top-trader-by-position-size (size-weighted commitment).
+       renderTop3 reads .accounts instead — same data source, different
+       slice. See topTraderLatestLong helper. */
+    var _tpLong=topTraderLatestLong(topTradersLS[x.s],'positions');
+    if(_tpLong!==null&&_tpLong>0.55)smartMoney=12;
     var vpinB=0;var _vpC=calcVPIN(x.s);
     if(_vpC&&_vpC.vpin>0.55)vpinB=12;else if(_vpC&&_vpC.vpin>0.4)vpinB=6;
     var exchangeDiv=0;
     if(T[x.s]&&T[x.s].by&&T[x.s].p>0&&((T[x.s].by-T[x.s].p)/T[x.s].p)>0.003)exchangeDiv=10;
     var cbPremB=0;
-    if(CBP[x.s]&&T[x.s]&&T[x.s].p>0&&((CBP[x.s]-T[x.s].p)/T[x.s].p)>0.002)cbPremB=10;
+    /* >0.2% Coinbase premium = +10. Binary threshold; renderTop3
+       uses the same helper but with a tiered scoring policy. */
+    var _cbPct=coinbasePremiumPct(CBP[x.s],T[x.s]&&T[x.s].p);
+    if(_cbPct!==null&&_cbPct>0.2)cbPremB=10;
     var checkBonus=x.passed?x.passed*3:0;
     var frBonus=0;
     if(fr&&fr.rate<-0.02)frBonus=10;else if(fr&&fr.rate<0.01)frBonus=5;else if(fr&&fr.rate>0.05)frBonus=-12;
@@ -5873,16 +5877,26 @@ function renderTop3(){
 
     /* ═══ CATEGORY 2: Smart Money & Cross-Exchange (20 pts max) ═══ */
     var smartScore=0;
-    if(topTradersLS[r.s]&&topTradersLS[r.s].accounts&&topTradersLS[r.s].accounts.length){
-      var topLatest=topTradersLS[r.s].accounts[topTradersLS[r.s].accounts.length-1];
+    /* Reads top-trader-by-account-count (count-weighted sentiment).
+       loadTrading reads .positions instead — same data source,
+       different slice. The strong tier here also requires retail
+       divergence (retail short while top traders long); loadTrading
+       skips the retail check and uses a single 0.55 threshold. */
+    var _tlLong=topTraderLatestLong(topTradersLS[r.s],'accounts');
+    if(_tlLong!==null){
       var retailLS=LS[r.s];
-      if(topLatest.long>0.58&&retailLS&&retailLS.ratio<0.85)smartScore+=10;
-      else if(topLatest.long>0.55)smartScore+=5;
+      if(_tlLong>0.58&&retailLS&&retailLS.ratio<0.85)smartScore+=10;
+      else if(_tlLong>0.55)smartScore+=5;
     }
-    if(CBP[r.s]&&T[r.s]&&T[r.s].p){
-      var cbPrem=((CBP[r.s]-T[r.s].p)/T[r.s].p)*100;
-      if(cbPrem>0.3)smartScore+=4;
-      else if(cbPrem>0.15)smartScore+=2;
+    /* Tiered Coinbase premium scoring (>0.3% = +4, >0.15% = +2).
+       loadTrading uses the same helper with a binary >0.2% policy.
+       The helper returns null when T[r.s].p<=0 — defensive against
+       corrupt ticker data that the old inline (CBP-p)/p would have
+       turned into Infinity and silently awarded the +4 tier. */
+    var _cbPctTop=coinbasePremiumPct(CBP[r.s],T[r.s]&&T[r.s].p);
+    if(_cbPctTop!==null){
+      if(_cbPctTop>0.3)smartScore+=4;
+      else if(_cbPctTop>0.15)smartScore+=2;
     }
     if(bitfinexMargin[r.s]&&bitfinexMargin[r.s].longPct>65)smartScore+=3;
     if(hyperliquidData[r.s]&&FR[r.s]){

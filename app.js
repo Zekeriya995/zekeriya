@@ -862,6 +862,35 @@ function openAdminPanel(){try{openQA('monitor')}catch(e){}}
 /* CACHE */
 var cache={scan:null,scanTime:0,whale:null,whaleTime:0,fr:null,frTime:0};
 var CACHE_TTL=60000;
+/* ─── scan semaphore ───────────────────────────────────────────────
+   Holds the in-flight quickScan+deepAnalyze promise. Concurrent callers
+   (loadTrading, loadDash, runScan, loadWhales, loadWhaleSells) coalesce
+   onto this single promise instead of each kicking off their own
+   deepAnalyze run — which used to multiply API load and produce
+   inconsistent cache.scan snapshots when tabs switched within ~3s. */
+var _scanInFlight=null;
+/* Single entry-point for "give me the latest scan results". Serves
+   cache.scan if still within CACHE_TTL (unless forceFresh=true),
+   otherwise starts a new analysis and shares it with anyone who calls
+   while it's running. The lock auto-clears in finally so a thrown
+   deepAnalyze can't deadlock the app. */
+function getScanResults(forceFresh){
+  if(_scanInFlight)return _scanInFlight;
+  if(!forceFresh&&cache.scan&&Date.now()-cache.scanTime<CACHE_TTL){
+    return Promise.resolve(cache.scan);
+  }
+  _scanInFlight=(async function(){
+    try{
+      var c=quickScan();
+      var r=await deepAnalyze(c);
+      cache.scan=r;cache.scanTime=Date.now();
+      return r;
+    }finally{
+      _scanInFlight=null;
+    }
+  })();
+  return _scanInFlight;
+}
 /* Rolling Order Flow Imbalance history — per-symbol bid/ask ratios sampled
    on every quickScan pass. Sustained imbalance (avg over 10 min) is far
    harder to spoof than a single snapshot; the scanner uses this instead
@@ -1141,22 +1170,29 @@ function loadTrending(){
   var trendEl=document.getElementById('trendList');
   if(trendEl)trendEl.innerHTML=h||'<div class="empty"><div class="empty-ic">📡</div><div class="empty-tx">'+(lang==='ar'?'جاري التحليل...':'Analyzing...')+'</div></div>';
 }
-/* ═══ TAB 2: SMART TRADING ═══ */
-async function loadTrading(){var trLoadEl=document.getElementById('tradeList');if(trLoadEl)trLoadEl.innerHTML='<div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div>';
+/* ═══ TAB 2: SMART TRADING ═══
+   forceFresh=true bypasses the 60s scan cache — used by user-driven
+   retry buttons so a click on "Retry" actually re-runs the analysis
+   instead of silently serving the same cached snapshot that just
+   failed to surface a signal. Tab switches and filter changes leave
+   it falsy so they keep the fast cached path. */
+async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tradeList');if(trLoadEl)trLoadEl.innerHTML='<div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div>';
   /* ═══ DATA CHECK: If no data loaded yet, show smart error ═══ */
   if(Object.keys(T).length<5){
-    if(trLoadEl)trLoadEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">⚠️</div><div class="sc-empty-title">'+(lang==='ar'?'جاري تحميل البيانات...':'Loading data...')+'</div><div class="sc-empty-sub">'+(lang==='ar'?(_proxyAlive?'يتم الاتصال بالسيرفر — انتظر 5 ثواني':'⚡ السيرفر غير متصل — يتم التحويل للاتصال المباشر'):(_proxyAlive?'Connecting to server — wait 5s':'⚡ Server offline — switching to direct API'))+'</div><div class="sc-empty-retry"><button class="rfr" onclick="loadTk().then(function(){loadTrading()})">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div></div>';
+    if(trLoadEl)trLoadEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">⚠️</div><div class="sc-empty-title">'+(lang==='ar'?'جاري تحميل البيانات...':'Loading data...')+'</div><div class="sc-empty-sub">'+(lang==='ar'?(_proxyAlive?'يتم الاتصال بالسيرفر — انتظر 5 ثواني':'⚡ السيرفر غير متصل — يتم التحويل للاتصال المباشر'):(_proxyAlive?'Connecting to server — wait 5s':'⚡ Server offline — switching to direct API'))+'</div><div class="sc-empty-retry"><button class="rfr" onclick="loadTk().then(function(){loadTrading(true)})">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div></div>';
     setTimeout(function(){if(Object.keys(T).length>=5)loadTrading()},3000);
     return}
-  var c=quickScan();
   var r;
   try{
-    r=await deepAnalyze(c);
+    /* Route through the shared semaphore: serves cache when fresh,
+       coalesces concurrent calls onto one in-flight scan.
+       forceFresh from a retry click bypasses the cache. */
+    r=await getScanResults(forceFresh);
   }catch(e){
     /* deepAnalyze threw or one of its kline fetches hung past timeout.
        Replace the loader with a visible, retry-able error state so the
        user isn't stuck on a perpetual "scanning..." with no recourse. */
-    if(trLoadEl)trLoadEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">⚠️</div><div class="sc-empty-title">'+(lang==='ar'?'تعذّر تحميل الإشارات':'Could not load signals')+'</div><div class="sc-empty-sub">'+(lang==='ar'?'مشكلة في الشبكة أو الـ API. اضغط إعادة المحاولة.':'Network or API issue. Tap retry.')+'</div><div class="sc-empty-retry"><button class="rfr" onclick="loadTrading()">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div></div>';
+    if(trLoadEl)trLoadEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">⚠️</div><div class="sc-empty-title">'+(lang==='ar'?'تعذّر تحميل الإشارات':'Could not load signals')+'</div><div class="sc-empty-sub">'+(lang==='ar'?'مشكلة في الشبكة أو الـ API. اضغط إعادة المحاولة.':'Network or API issue. Tap retry.')+'</div><div class="sc-empty-retry"><button class="rfr" onclick="loadTrading(true)">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div></div>';
     try{updateScanSummary(0,Object.keys(T).length)}catch(_e){}
     return;
   }
@@ -1173,7 +1209,7 @@ async function loadTrading(){var trLoadEl=document.getElementById('tradeList');i
      evaluate any pending entries old enough (>12h) to have a verdict. */
   try{r.forEach(function(_x){recordSignalForTracking(_x)})}catch(e){}
   try{checkPendingTagOutcomes()}catch(e){}
-  cache.scan=r;cache.scanTime=Date.now();var sigs=[];
+  var sigs=[];
   /* Hold-duration label tracks the user's selected timeframe so the
      trade plan on each card matches the timeframe they're hunting on. */
   var _tfCfgRender=TF_CONFIG[scannerTimeframe]||TF_CONFIG['1h'];
@@ -1388,7 +1424,7 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
   if(scanIEl)scanIEl.innerHTML='📊 '+f.length+' '+t('scan_signals')+' <span style="color:var(--t3)">/ '+tkCount+' '+(lang==='ar'?'عملة':'coins')+'</span> | '+srcLabel+' | '+t('scan_updated')+': '+new Date().toLocaleTimeString('en',{hour:'2-digit',minute:'2-digit'});
   /* ═══ Update summary bar ═══ */
   updateScanSummary(f.length,tkCount);
-  if(!f.length){var trEl=document.getElementById('tradeList');if(trEl)trEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">'+(tkCount<5?'⚠️':'📡')+'</div><div class="sc-empty-title">'+(tkCount<5?(lang==='ar'?'لم يتم تحميل البيانات بعد':'Data not loaded yet'):(lang==='ar'?'السوق هادئ — لا فرص قوية':'Market quiet — No strong signals'))+'</div><div class="sc-empty-sub">'+(tkCount<5?(lang==='ar'?'تحقق من اتصال الإنترنت أو اضغط تحديث':'Check internet or tap refresh'):(lang==='ar'?'البوابة الذكية ترفض الإشارات الضعيفة — الانتظار أفضل':'Smart gate blocks weak signals — Waiting is better'))+'</div>'+(tkCount<5?'<div class="sc-empty-retry"><button class="rfr" onclick="loadTk().then(function(){loadTrading()})">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div>':'')+'<div class="sc-empty-stats"><span>📊 '+tkCount+' '+(lang==='ar'?'عملة محملة':'coins loaded')+'</span><span>'+srcLabel+'</span></div></div>';return}
+  if(!f.length){var trEl=document.getElementById('tradeList');if(trEl)trEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">'+(tkCount<5?'⚠️':'📡')+'</div><div class="sc-empty-title">'+(tkCount<5?(lang==='ar'?'لم يتم تحميل البيانات بعد':'Data not loaded yet'):(lang==='ar'?'السوق هادئ — لا فرص قوية':'Market quiet — No strong signals'))+'</div><div class="sc-empty-sub">'+(tkCount<5?(lang==='ar'?'تحقق من اتصال الإنترنت أو اضغط تحديث':'Check internet or tap refresh'):(lang==='ar'?'البوابة الذكية ترفض الإشارات الضعيفة — الانتظار أفضل':'Smart gate blocks weak signals — Waiting is better'))+'</div>'+(tkCount<5?'<div class="sc-empty-retry"><button class="rfr" onclick="loadTk().then(function(){loadTrading(true)})">🔄 '+(lang==='ar'?'إعادة المحاولة':'Retry')+'</button></div>':'')+'<div class="sc-empty-stats"><span>📊 '+tkCount+' '+(lang==='ar'?'عملة محملة':'coins loaded')+'</span><span>'+srcLabel+'</span></div></div>';return}
   /* Idea 3: precompute per-tier win rates once per render — every card
      in the same tier shows the same rate, so there's no reason to
      recompute it per signal. */
@@ -3372,7 +3408,7 @@ async function detectWhaleSells(candidates){
   return sells.sort(function(a,b){return b.sellConf-a.sellConf})}
 
 async function loadWhaleSells(){
-  var c=quickScan();var r=await deepAnalyze(c);
+  var r=await getScanResults();
   var sells=await detectWhaleSells(r);
   var top5=sells.slice(0,5);
   var totalSellVol=top5.reduce(function(s,x){return s+x.v*0.05},0);
@@ -3775,7 +3811,7 @@ async function loadDash(){
   var bk=Object.values(T).filter(function(x){return x.c>=8}).length;var bkE=document.getElementById('brkC');if(bkE)bkE.textContent=bk;var pBE=document.getElementById('pBrk');if(pBE)pBE.textContent=bk;
   }catch(e){}
   try{
-  var cands=quickScan();var results=await deepAnalyze(cands);cache.scan=results;cache.scanTime=Date.now();detectWhaleWaves(results);
+  var results=await getScanResults();detectWhaleWaves(results);
   var ultras=results.filter(function(r){return r.ultra});var conf=results.filter(function(r){return r.confirmed});
   var ultraLE=document.getElementById('ultraL');if(ultraLE)ultraLE.innerHTML=ultras.length?ultras.slice(0,3).map(ultraCard).join(''):conf.length?conf.slice(0,2).map(ultraCard).join(''):'<div class="muted">'+t('no_ultra')+'</div>';
   var ulCE=document.getElementById('ulC');if(ulCE)ulCE.textContent=ultras.length||conf.length;var pUlE=document.getElementById('pUl');if(pUlE)pUlE.textContent=ultras.length||conf.length;var notifBE=document.getElementById('notifB');if(notifBE)notifBE.dataset.c=(ultras.length||conf.length).toString();
@@ -3788,10 +3824,24 @@ async function loadDash(){
   try{ updateQACards(); }catch(e){}
 }
 /* SCANNER PAGE — uses cache for instant switch */
-async function runScan(){if(cache.scan&&Date.now()-cache.scanTime<CACHE_TTL){renderScanResults(cache.scan);setTimeout(async function(){var c=quickScan();cache.scan=await deepAnalyze(c);cache.scanTime=Date.now();renderScanResults(cache.scan)},100);return}var c=quickScan();var r=await deepAnalyze(c);cache.scan=r;cache.scanTime=Date.now();renderScanResults(r)}
+async function runScan(){
+  /* Preserve the instant-cache + background-refresh UX: paint cache
+     immediately, then kick off a fresh scan and re-paint when it lands.
+     Both paths route through getScanResults so concurrent runScan
+     clicks (or tab switches) coalesce instead of stacking. */
+  if(cache.scan&&Date.now()-cache.scanTime<CACHE_TTL){
+    renderScanResults(cache.scan);
+    setTimeout(async function(){
+      try{var fresh=await getScanResults(true);renderScanResults(fresh)}catch(e){}
+    },100);
+    return;
+  }
+  var r=await getScanResults();
+  renderScanResults(r);
+}
 function renderScanResults(results){var f=results;var t1c=f.filter(function(r){return getCoinTier(r.s)===1}).length;var t2c=f.filter(function(r){return getCoinTier(r.s)===2}).length;var scanIEl=document.getElementById('scanI');if(scanIEl)scanIEl.textContent='📊 '+Object.keys(T).length+' '+(lang==='ar'?'عملة':'coins')+' → ✅ '+f.length+' (🏆'+t1c+' 🥈'+t2c+')';var trEl=document.getElementById('tradeList');if(trEl)trEl.innerHTML=f.length?f.slice(0,30).map(scanItem).join(''):'<div class="sc-empty"><div class="sc-empty-ic">📡</div><div class="sc-empty-title">'+t('no_data')+'</div></div>'}
 /* WHALE PAGE */
-async function loadWhales(){var c=quickScan();var r=await deepAnalyze(c);cache.scan=r;cache.scanTime=Date.now();await detectWhaleWaves(r);renderWhaleResults(r)}
+async function loadWhales(){var r=await getScanResults();await detectWhaleWaves(r);renderWhaleResults(r)}
 function renderWhaleResults(results){var w=results.filter(function(x){return x.tags.some(function(t){return t.includes('ACC')||t.includes('STEALTH')||t.includes('EARLY')||t.includes('BOTTOM')})||(x.v>5e7&&Math.abs(x.c)<3)||(x.checks&&x.checks.ob&&x.v>1e7)||whaleWaves[x.s]}).slice(0,20);
   /* Sort by confidence first, then wave count */
   w.sort(function(a,b){var ea=whaleWaves[a.s]&&whaleWaves[a.s].engine?whaleWaves[a.s].engine.confidence:0;var eb=whaleWaves[b.s]&&whaleWaves[b.s].engine?whaleWaves[b.s].engine.confidence:0;if(eb!==ea)return eb-ea;var wa=whaleWaves[a.s]?whaleWaves[a.s].waves.length:0;var wb=whaleWaves[b.s]?whaleWaves[b.s].waves.length:0;return wb-wa||b.score-a.score});

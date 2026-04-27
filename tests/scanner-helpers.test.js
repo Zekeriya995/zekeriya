@@ -728,3 +728,193 @@ test('rollingOBIFromArr — stale samples outside the window are dropped', () =>
   assert.equal(r.samples, 5, 'only the fresh samples should count');
   assert.equal(r.avg, 1);
 });
+
+/* ─── INTEGRATION SUITE 1: blacklist threshold contract ───────────
+   processTradeOutcome, runAutoImprove, and signalQualityGate Gate 4
+   all share evaluateBlacklistAdd / evaluateBlacklistRemove. The audit
+   (PR #25) caught a UX bug where the user-visible blacklist used a
+   looser 3-trades/<30% rule while Gate 4 enforced a stricter 5/<25%
+   rule — coins shown as blacklisted still passed signal generation.
+   These tests pin down the boundaries so the threshold can't drift
+   silently on either side. */
+
+test('evaluateBlacklistAdd — null / missing stats never adds', () => {
+  assert.equal(evaluateBlacklistAdd(null), false);
+  assert.equal(evaluateBlacklistAdd(undefined), false);
+  assert.equal(evaluateBlacklistAdd({}), false);
+  assert.equal(evaluateBlacklistAdd({ total: 5 }), false, 'rate missing');
+  assert.equal(evaluateBlacklistAdd({ rate: 10 }), false, 'total missing');
+});
+
+test('evaluateBlacklistAdd — boundary: 5 trades + <25% adds, exactly 25% does not', () => {
+  /* The interesting cases live around the two boundaries (5 trades, 25%). */
+  assert.equal(evaluateBlacklistAdd({ total: 4, rate: 0 }), false, '4 trades is not enough sample');
+  assert.equal(evaluateBlacklistAdd({ total: 5, rate: 24 }), true,  '5 trades + 24% adds');
+  assert.equal(evaluateBlacklistAdd({ total: 5, rate: 25 }), false, 'exactly 25% is the cutoff (strict <)');
+  assert.equal(evaluateBlacklistAdd({ total: 5, rate: 0 }), true,   '5 trades + 0% adds');
+  assert.equal(evaluateBlacklistAdd({ total: 100, rate: 24 }), true, 'high sample + low rate adds');
+  assert.equal(evaluateBlacklistAdd({ total: 100, rate: 25 }), false, 'high sample at boundary still excluded');
+});
+
+test('evaluateBlacklistRemove — needs 5 trades AND >=55% (wide hysteresis vs add)', () => {
+  /* Add fires below 25, remove fires at 55+ — leaves a 25–55% gap so
+     a marginal recovery can't immediately un-blacklist a coin. */
+  assert.equal(evaluateBlacklistRemove(null), false);
+  assert.equal(evaluateBlacklistRemove({ total: 4, rate: 99 }), false, '4 trades insufficient even at 99%');
+  assert.equal(evaluateBlacklistRemove({ total: 5, rate: 54 }), false, 'in hysteresis gap stays blacklisted');
+  assert.equal(evaluateBlacklistRemove({ total: 5, rate: 55 }), true,  'exactly 55% removes');
+  assert.equal(evaluateBlacklistRemove({ total: 5, rate: 99 }), true);
+});
+
+test('blacklist contract — monotonic-total invariant: any coin reachable on blacklist has total>=5', () => {
+  /* The runtime invariant the helper depends on:
+     - evaluateBlacklistAdd requires total>=5 to put a coin on the list,
+     - cs.total only ever increments in processTradeOutcome,
+     - the PR #25 migration drops any pre-existing entry with total<5.
+     So a coin that's actually on the blacklist has total>=5, which
+     means evaluateBlacklistRemove's `total>=5` guard is redundant for
+     real call-sites but matches runAutoImprove's explicit guard.
+     This test pins down the chain so a future tweak that breaks any
+     link surfaces a clear failure here. */
+  /* Step 1: only total>=5 coins can be added. */
+  for (let total = 0; total < 5; total++) {
+    assert.equal(evaluateBlacklistAdd({ total, rate: 0 }), false, `total=${total} can't be added`);
+  }
+  /* Step 2: at total>=5, add gates only on rate. */
+  assert.equal(evaluateBlacklistAdd({ total: 5, rate: 24 }), true);
+  assert.equal(evaluateBlacklistAdd({ total: 5, rate: 25 }), false);
+  /* Step 3: a coin with total<5 also cannot be removed (defensive
+     symmetry — even if some bad data path put it on the list,
+     remove won't fire until total reaches 5). */
+  for (let total = 0; total < 5; total++) {
+    assert.equal(evaluateBlacklistRemove({ total, rate: 99 }), false, `total=${total} can't be removed even at 99%`);
+  }
+});
+
+test('blacklist contract — add and remove never overlap (no flap risk)', () => {
+  /* For every (total, rate) pair, at most one of {add, remove} is true. */
+  for (let total = 0; total <= 10; total++) {
+    for (let rate = 0; rate <= 100; rate++) {
+      const stat = { total, rate };
+      const add = evaluateBlacklistAdd(stat);
+      const rem = evaluateBlacklistRemove(stat);
+      assert.equal(add && rem, false, `${total}t/${rate}% should not trigger both add and remove`);
+    }
+  }
+});
+
+/* ─── INTEGRATION SUITE 2: qualityFilter rejection contract ───────
+   qualityFilter() in app.js applies seven hard gates to a
+   deepAnalyze result. The actual gate logic now lives in
+   qualityFilterRejectReason() so the same boundaries are testable.
+   Each test pins one gate at its threshold. */
+
+test('qualityFilterRejectReason — null / empty result rejects', () => {
+  assert.equal(qualityFilterRejectReason(null), 'no-data');
+  assert.equal(qualityFilterRejectReason(undefined), 'no-data');
+});
+
+test('qualityFilterRejectReason — late-entry gate (c >= 5)', () => {
+  /* Pre-built passing baseline: clear all the other gates so we can
+     isolate one boundary at a time. */
+  const base = { c: 0, passed: 5, smartEntry: { rr: 3 }, pdFlags: 0, p: 100, tfAlign: { bearish4h: false } };
+  assert.equal(qualityFilterRejectReason({ ...base, c: 4.99 }), null);
+  assert.equal(qualityFilterRejectReason({ ...base, c: 5 }), 'late');
+  assert.equal(qualityFilterRejectReason({ ...base, c: 8 }), 'late');
+});
+
+test('qualityFilterRejectReason — passed-checks gate (passed < 4)', () => {
+  const base = { c: 0, passed: 4, smartEntry: { rr: 3 }, pdFlags: 0, p: 100, tfAlign: { bearish4h: false } };
+  assert.equal(qualityFilterRejectReason({ ...base, passed: 4 }), null);
+  assert.equal(qualityFilterRejectReason({ ...base, passed: 3 }), 'low-passed');
+  assert.equal(qualityFilterRejectReason({ ...base, passed: 0 }), 'low-passed');
+});
+
+test('qualityFilterRejectReason — risk/reward gate (smartEntry.rr < 2.0)', () => {
+  const base = { c: 0, passed: 5, pdFlags: 0, p: 100, tfAlign: { bearish4h: false } };
+  assert.equal(qualityFilterRejectReason({ ...base, smartEntry: { rr: 2.0 } }), null,    'rr=2.0 passes');
+  assert.equal(qualityFilterRejectReason({ ...base, smartEntry: { rr: 1.99 } }), 'low-rr');
+  assert.equal(qualityFilterRejectReason({ ...base, smartEntry: { rr: 1.5 } }), 'low-rr');
+});
+
+test('qualityFilterRejectReason — funding-rate gate (FR > 5%)', () => {
+  const base = { c: 0, passed: 5, smartEntry: { rr: 3 }, pdFlags: 0, p: 100, tfAlign: { bearish4h: false } };
+  assert.equal(qualityFilterRejectReason(base, { fr: { rate: 0.05 } }), null,    'rate=5% passes');
+  assert.equal(qualityFilterRejectReason(base, { fr: { rate: 0.0501 } }), 'high-fr');
+  assert.equal(qualityFilterRejectReason(base, { fr: { rate: 0.10 } }), 'high-fr');
+});
+
+test('qualityFilterRejectReason — BTC-crash gate (BTC.c < -3)', () => {
+  const base = { c: 0, passed: 5, smartEntry: { rr: 3 }, pdFlags: 0, p: 100, tfAlign: { bearish4h: false } };
+  assert.equal(qualityFilterRejectReason(base, { btc: { c: -3 } }), null);
+  assert.equal(qualityFilterRejectReason(base, { btc: { c: -3.01 } }), 'btc-crash');
+  assert.equal(qualityFilterRejectReason(base, { btc: { c: -10 } }), 'btc-crash');
+});
+
+test('qualityFilterRejectReason — HTF-bear gate only fires when c >= 2', () => {
+  /* Pre-pump candidates (c < 2) are NOT rejected on a bearish 4h
+     because silent accumulation often happens under a flat/weak HTF.
+     Already-running candidates (c >= 2) on a bearish 4h ARE rejected. */
+  const tfBear = { tfAlign: { bearish4h: true } };
+  const base = { passed: 5, smartEntry: { rr: 3 }, pdFlags: 0, p: 100 };
+  assert.equal(qualityFilterRejectReason({ ...base, c: 1.5, ...tfBear }), null,    'c=1.5 + 4h bear is fine');
+  assert.equal(qualityFilterRejectReason({ ...base, c: 2,   ...tfBear }), 'htf-bear');
+  assert.equal(qualityFilterRejectReason({ ...base, c: 4,   ...tfBear }), 'htf-bear');
+});
+
+test('qualityFilterRejectReason — pump-and-dump gate (pdFlags >= 3)', () => {
+  const base = { c: 0, passed: 5, smartEntry: { rr: 3 }, p: 100, tfAlign: { bearish4h: false } };
+  assert.equal(qualityFilterRejectReason({ ...base, pdFlags: 2 }), null);
+  assert.equal(qualityFilterRejectReason({ ...base, pdFlags: 3 }), 'pd');
+  assert.equal(qualityFilterRejectReason({ ...base, pdFlags: 5 }), 'pd');
+});
+
+test('qualityFilterRejectReason — drift-from-detection gate (>8%)', () => {
+  /* Stale signal: caught at $100, now $109 = +9% drift, reject. */
+  const base = { c: 0, passed: 5, smartEntry: { rr: 3 }, pdFlags: 0, tfAlign: { bearish4h: false } };
+  assert.equal(qualityFilterRejectReason({ ...base, p: 108 }, { priceAtDetection: 100 }), null,    '+8% is the cutoff');
+  assert.equal(qualityFilterRejectReason({ ...base, p: 108.01 }, { priceAtDetection: 100 }), 'drift');
+  assert.equal(qualityFilterRejectReason({ ...base, p: 110 }, { priceAtDetection: 100 }), 'drift');
+});
+
+/* ─── INTEGRATION SUITE 3: end-to-end pipeline survivor invariant ──
+   The composition of the gates should leave a known-good signal
+   intact and reject any signal that fails any one gate. This is the
+   integration-level test the audit asked for: instead of testing
+   each gate in isolation, throw a mixed batch through and verify
+   only the all-clean signals survive. */
+
+test('qualityFilterRejectReason — known-good signal passes all gates', () => {
+  const good = {
+    s: 'GOOD', p: 100, c: 1, passed: 5,
+    smartEntry: { rr: 2.5 },
+    pdFlags: 0,
+    tfAlign: { bearish4h: false },
+  };
+  const ctx = { fr: { rate: 0.01 }, btc: { c: 0.5 }, priceAtDetection: 99 };
+  assert.equal(qualityFilterRejectReason(good, ctx), null);
+});
+
+test('qualityFilterRejectReason — survivor batch matches expected', () => {
+  /* Mixed batch: each row tagged with the gate it's designed to fail
+     (or 'pass' for a clean signal). The pipeline should produce
+     exactly the 'pass' rows in order. */
+  const ctx = { fr: { rate: 0.01 }, btc: { c: 0.5 }, priceAtDetection: 100 };
+  const baseGood = {
+    s: 'BTC', p: 100, c: 1, passed: 5,
+    smartEntry: { rr: 2.5 }, pdFlags: 0, tfAlign: { bearish4h: false },
+  };
+  const batch = [
+    { tag: 'pass', sig: { ...baseGood, s: 'A' } },
+    { tag: 'late', sig: { ...baseGood, s: 'B', c: 6 } },
+    { tag: 'low-passed', sig: { ...baseGood, s: 'C', passed: 2 } },
+    { tag: 'low-rr', sig: { ...baseGood, s: 'D', smartEntry: { rr: 1.5 } } },
+    { tag: 'pd', sig: { ...baseGood, s: 'E', pdFlags: 3 } },
+    { tag: 'pass', sig: { ...baseGood, s: 'F' } },
+    { tag: 'drift', sig: { ...baseGood, s: 'G', p: 120 } },
+  ];
+  const survivors = batch
+    .filter((row) => qualityFilterRejectReason(row.sig, ctx) === null)
+    .map((row) => row.sig.s);
+  assert.deepEqual(survivors, ['A', 'F'], 'only the two pass rows survive');
+});

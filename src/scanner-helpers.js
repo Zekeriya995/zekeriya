@@ -517,3 +517,78 @@ function rollingOBIFromArr(arr, windowMs) {
   if (n < 5) return null;
   return { avg: sum / n, samples: n, spanMs: spanMs };
 }
+
+/* ─── blacklist threshold contract ─────────────────────────────────
+   The blacklist used to be populated with a looser "3 trades / <30%"
+   rule while signalQualityGate Gate 4 enforced the stricter
+   "5 trades / <25%" — so the user-visible blacklist UI mismatched
+   what was actually blocked. The audit (PR #25) aligned both to
+   5/25 add, 5/55 remove. These helpers codify the contract so all
+   three call-sites (processTradeOutcome, runAutoImprove, Gate 4)
+   share the exact same rule and the test suite can pin its
+   boundaries down. */
+
+/* True iff this coin should be added to the blacklist on the latest
+   trade-outcome update. Requires 5+ closed trades AND a sub-25%
+   win rate. Null/missing stats → false. */
+function evaluateBlacklistAdd(coinStat) {
+  if (!coinStat) return false;
+  if (typeof coinStat.total !== 'number' || typeof coinStat.rate !== 'number') return false;
+  return coinStat.total >= 5 && coinStat.rate < 25;
+}
+
+/* True iff this coin should be removed from the blacklist now. The
+   recovery threshold (>=55% win rate AND 5+ trades) is intentionally
+   wider than the add threshold to provide hysteresis: a coin needs a
+   meaningful turnaround before earning its way back in, so it doesn't
+   flap in and out on a single lucky trade.
+
+   Note on the 5+ trades guard: runtime call-sites only ever pass a
+   coinStat for a coin that has already been on the blacklist, and a
+   coin can only be added once total reaches 5 (see evaluateBlacklistAdd).
+   Because cs.total is a monotonic counter (only ever incremented in
+   processTradeOutcome), every blacklisted coin's total is >= 5 by
+   construction — so the guard is redundant for runtime code but
+   tightens the helper's contract to match runAutoImprove's explicit
+   guard. The PR #25 migration also drops any pre-PR-25 entry whose
+   total < 5, so persisted state can't violate the invariant either. */
+function evaluateBlacklistRemove(coinStat) {
+  if (!coinStat) return false;
+  if (typeof coinStat.total !== 'number' || typeof coinStat.rate !== 'number') return false;
+  return coinStat.total >= 5 && coinStat.rate >= 55;
+}
+
+/* ─── quality-filter gate contract ─────────────────────────────────
+   qualityFilter() in app.js applies seven hard gates to a deep-analyze
+   result before it reaches the renderer. The gates read FR/T/sigHist
+   globals inline, which makes them untestable without booting the app.
+   This helper takes those reads as a `ctx` parameter so the same gate
+   logic is callable from a unit test.
+
+   Returns null if the signal passes; a short reason string if it's
+   rejected — useful both for test assertions and for surfacing why a
+   coin disappeared mid-pipeline.
+
+   ctx shape:
+     fr:                FR[r.s]                 — { rate } or null
+     btc:               T.BTC                   — { c } or null
+     priceAtDetection:  sigHist[r.s+'_trade'].priceAtDetection */
+function qualityFilterRejectReason(r, ctx) {
+  ctx = ctx || {};
+  if (!r) return 'no-data';
+  if (r.c >= 5) return 'late';
+  if (r.passed < 4) return 'low-passed';
+  if (r.smartEntry && +r.smartEntry.rr < 2.0) return 'low-rr';
+  if (ctx.fr && ctx.fr.rate > 0.05) return 'high-fr';
+  if (ctx.btc && ctx.btc.c < -3) return 'btc-crash';
+  /* HTF headwind only fires when price is already moving (c >= 2);
+     during silent accumulation 4h often looks weakly bearish while
+     whales build, so we don't reject pre-pump candidates. */
+  if (r.tfAlign && r.tfAlign.bearish4h && r.c >= 2) return 'htf-bear';
+  if (r.pdFlags >= 3) return 'pd';
+  if (ctx.priceAtDetection && ctx.priceAtDetection > 0) {
+    var drift = ((r.p - ctx.priceAtDetection) / ctx.priceAtDetection) * 100;
+    if (drift > 8) return 'drift';
+  }
+  return null;
+}

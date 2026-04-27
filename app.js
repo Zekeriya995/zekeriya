@@ -388,15 +388,13 @@ function processTradeOutcome(trade) {
   cs.rate = cs.total > 0 ? Math.round((cs.wins / cs.total) * 100) : 0;
 
   var bl = monitorState.coinBlacklist;
-  /* Blacklist threshold aligned with signalQualityGate Gate 4 (line ~707):
-     5+ trades AND <25% win rate. Previously this used a looser 3/30
-     threshold that put coins on the user-visible blacklist UI even
-     though Gate 4 wouldn't actually block their signals — a UX
-     contradiction surfaced in the scanner audit. */
-  if (cs.total >= 5 && cs.rate < 25 && bl.indexOf(coinKey) === -1) {
+  /* Single source of truth for the blacklist contract — same helper
+     drives runAutoImprove and signalQualityGate Gate 4 so the
+     user-visible list matches what's actually blocked. */
+  if (evaluateBlacklistAdd(cs) && bl.indexOf(coinKey) === -1) {
     bl.push(coinKey);
   }
-  if (cs.rate >= 55 && bl.indexOf(coinKey) !== -1) {
+  if (evaluateBlacklistRemove(cs) && bl.indexOf(coinKey) !== -1) {
     bl.splice(bl.indexOf(coinKey), 1);
   }
 
@@ -704,15 +702,12 @@ function signalQualityGate(sym, type, score) {
   results.push({name: lang === 'ar' ? 'السوق آمن' : 'Market safe', pass: g3, detail: mkt.level});
   if (!g3) pass = false;
 
-  /* Gate 4 — Blacklist: block after 5+ trades AND <25% win rate.
-     This same threshold now drives monitorState.coinBlacklist
-     (recordTradeOutcome + runAutoImprove), so the user-visible
+  /* Gate 4 — Blacklist: block coins matching the shared blacklist
+     contract (5+ trades AND <25% win rate). Helper is shared with
+     processTradeOutcome and runAutoImprove so the user-visible
      blacklist UI matches what's actually blocked here. */
-  var g4 = true;
   var coinStat = monitorState && monitorState.coinStats ? monitorState.coinStats[sym] : null;
-  if (coinStat && coinStat.total >= 5 && coinStat.rate < 25) {
-    g4 = false;
-  }
+  var g4 = !evaluateBlacklistAdd(coinStat);
   results.push({name: lang === 'ar' ? 'عملة غير محظورة' : 'Not blacklisted', pass: g4});
   if (!g4) pass = false;
 
@@ -801,13 +796,13 @@ function runAutoImprove() {
   Object.keys(monitorState.coinStats).forEach(function(coin) {
     var cs = monitorState.coinStats[coin];
     var inBL = monitorState.coinBlacklist.indexOf(coin) !== -1;
-    /* Aligned with signalQualityGate Gate 4 — see comment in
-       recordTradeOutcome above. Add at 5/25, remove at 5/55. */
-    if (cs.total >= 5 && cs.rate < 25 && !inBL) {
+    /* Same evaluateBlacklistAdd/Remove helpers as processTradeOutcome
+       and Gate 4 — single source of truth for the threshold contract. */
+    if (evaluateBlacklistAdd(cs) && !inBL) {
       monitorState.coinBlacklist.push(coin);
       addedToBL.push(coin);
     }
-    if (cs.total >= 5 && cs.rate >= 55 && inBL) {
+    if (evaluateBlacklistRemove(cs) && inBL) {
       monitorState.coinBlacklist.splice(monitorState.coinBlacklist.indexOf(coin), 1);
       removedFromBL.push(coin);
     }
@@ -2473,40 +2468,21 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,100);
     else if(_ageMins>15||Math.abs(_changeDet)>2)_freshness='warm';
     results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,pdFlags:c.pdFlags||0,proven:_proven,coinWinRate:_coinWinRate,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}catch(_perCoinErr){/* one coin's analysis blew up — skip it so the whole scan doesn't fail. Symbol-tagged warn so a recurring bug on the same coin surfaces in DevTools. */ _scWarn('deepAnalyze:'+(top[ci]&&top[ci].s||'?'),_perCoinErr); continue}}
   return results.sort(function(a,b){return b.score-a.score})}
-/* ═══ QUALITY FILTER v3 — strict gate before rendering ═══ */
+/* ═══ QUALITY FILTER v3 — strict gate before rendering ═══
+   The actual gate logic (7 hard rules) is now codified in
+   qualityFilterRejectReason() in src/scanner-helpers.js so it can be
+   unit-tested. This wrapper just feeds the per-symbol globals
+   (FR, T.BTC, sigHist) into the helper as ctx and slices to
+   the top 7 survivors. See helper for gate rationale. */
 function qualityFilter(results){
   return results.filter(function(r){
-    if(r.c>=5)return false;
-    if(r.passed<4)return false;
-    if(r.smartEntry&&+r.smartEntry.rr<2.0)return false;
-    if(FR[r.s]&&FR[r.s].rate>0.05)return false;
-    if(T.BTC&&T.BTC.c<-3)return false;
-    /* Pre-pump alignment: the platform's stated goal is "enter before
-       the explosion" — so we DO NOT reject pre-breakouts. A confirmed
-       15m close above the prior high gives the score a +20 bonus
-       (still applied in deepAnalyze), but its absence is not a reason
-       to drop the candidate — that would put us in the position of
-       only ever entering AFTER the breakout candle prints, which is
-       exactly when the whales are unloading. */
-    /* HTF headwind — 4h bearish + already-moving (c >= 2) is a real
-       red flag (price has lifted off in the wrong macro direction).
-       But during silent accumulation, 4h often looks flat or weakly
-       bearish while whales build positions; rejecting all 4h-bearish
-       candidates would kill the very pre-pump setups we're hunting.
-       The score still takes a -25 from tfAlign.score either way. */
-    if(r.tfAlign&&r.tfAlign.bearish4h&&r.c>=2)return false;
-    /* Idea 1: reject Pump & Dump setups (3+ retail-FOMO warnings firing
-       at once). The quickScan score penalty already pushes these below
-       threshold, but we defend in depth in case a noisy bonus pushes
-       the score back up. */
-    if(r.pdFlags>=3)return false;
-    /* Timing filter: drift too far from detection */
     var sig=sigHist[r.s+'_trade'];
-    if(sig&&typeof sig==='object'&&sig.priceAtDetection>0){
-      var drift=((r.p-sig.priceAtDetection)/sig.priceAtDetection)*100;
-      if(drift>8)return false;
-    }
-    return true;
+    var priceAtDetection=(sig&&typeof sig==='object'&&sig.priceAtDetection>0)?sig.priceAtDetection:0;
+    return qualityFilterRejectReason(r,{
+      fr:FR[r.s]||null,
+      btc:T.BTC||null,
+      priceAtDetection:priceAtDetection,
+    })===null;
   }).slice(0,7);
 }
 /* MARKET HEALTH */

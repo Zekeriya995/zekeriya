@@ -1500,26 +1500,141 @@ async function loadSmallCapsUI(){
     slEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">❌</div><div class="sc-empty-title">'+(lang==='ar'?'خطأ في التحليل':'Analysis error')+'</div><div class="sc-empty-sub">'+esc(e&&e.message?e.message:'unknown')+'</div></div>';
   }
 }
-async function loadSmallCaps2(){if(!Object.keys(T).length)await loadTk();var cands=Object.entries(T).filter(function(e){var d=e[1];var tier=getCoinTier(e[0]);return d.p>0&&d.p<20&&d.v>100000&&!TIER1.has(e[0])}).sort(function(a,b){return b[1].v-a[1].v}).slice(0,50);var res=[];
-  var proms=cands.slice(0,25).map(function(e){var s=e[0];return fj(BN+'/klines?symbol='+s+'USDT&interval=1h&limit=12').then(function(kl){if(!kl||kl.length<6)return;var vols=kl.map(function(k){return+k[5]});var cls=kl.map(function(k){return+k[4]});var avgV=vols.slice(0,-2).reduce(function(a,b){return a+b},0)/Math.max(1,vols.length-2);var recV=(vols[vols.length-1]+vols[vols.length-2])/2;var vx=avgV>0?recV/avgV:1;
-    var sI=vols.length-1;for(var i=vols.length-1;i>=1;i--){if(vols[i]>avgV*1.5)sI=i;else break}var pS=+kl[sI][1];var pN=cls[cls.length-1];var gain=pS>0?((pN-pS)/pS*100):0;
-    var timing,tBadge;if(gain<3){timing='early';tBadge={ic:'🟢',l:lang==='ar'?'مبكر — ادخل!':'Early — Enter!',col:'var(--up)'}}else if(gain<8){timing='still';tBadge={ic:'🟡',l:lang==='ar'?'فيه فرصة — حذر':'Still time — Caution',col:'var(--warn)'}}else{timing='late';tBadge={ic:'🔴',l:lang==='ar'?'متأخر — راقب':'Late — Watch',col:'var(--dn)'}}
-    var _d=T[s];if(!_d)return;
-    var sc=0;if(vx>=4)sc+=45;else if(vx>=3)sc+=40;else if(vx>=2)sc+=30;else if(vx>=1.5)sc+=15;if(timing==='early')sc+=30;else if(timing==='still')sc+=15;if(_d.c>0&&_d.c<3)sc+=20;else if(_d.c>=3&&_d.c<8)sc+=10;
-    var target=timing!=='late'?pN*(timing==='early'?1.30:1.25):null;var stop=timing!=='late'?pN*(timing==='early'?0.90:0.88):null;
-    if(sc>=25)res.push({s:s,p:_d.p,c:_d.c,v:_d.v,vx:vx,gain:gain,timing:timing,tBadge:tBadge,sc:sc,target:target,stop:stop})}).catch(function(){})});
-  await Promise.all(proms);res.sort(function(a,b){return b.sc-a.sc});return res}
+/* ═══ Gem Hunter v2 — small-cap pre-pump scanner ═══
+   Two-stage filter, then V3-aware scoring on the survivors.
+
+   Pre-filter (cheap, ticker only):
+     - Not a stablecoin, not a Top-100 watchlist member
+     - Price in (0, 20] and 24h volume > 100K
+     - Real CoinGecko market cap in [$1M, $50M] when known
+       (when MC is missing, we KEEP the candidate — better than
+       blocking the whole feature on a cold start)
+     - Rugpull risk < 70 via getRugPullRisk(d, FR, bookTickers)
+
+   Per-survivor scoring (kline + V3, top 25 only to bound API calls):
+     vol-spike multiplier on 1h klines  +15..+45
+     timing (early / still / late)      +30 / +15 / 0
+     position-in-range (bottom 30%)     +10
+     V3 — Iceberg BUY                   +20
+     V3 — VPIN > 0.6 / 0.4              +15 / +8
+     V3 — Whale P&L > +1%               +10
+     V3 — CVD bullish divergence        +15
+     24h change in (0, 3] / [3, 8)      +20 / +10
+
+   Results with score >= 25 are returned, sorted desc. The renderer
+   shows the top 20. */
+async function loadSmallCaps2(){
+  if(!Object.keys(T).length)await loadTk();
+  var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD'];
+  var cands=Object.entries(T).filter(function(e){
+    var s=e[0],d=e[1];
+    if(STABLES.indexOf(s)!==-1)return false;
+    if(TIER1.has(s))return false;
+    if(!d.p||d.p<=0||d.p>20)return false;
+    if(d.v<100000)return false;
+    /* Market-cap window — only enforce when the data is loaded. */
+    var mc=marketCapData[s];
+    if(mc!=null&&mc>0&&(mc<1000000||mc>50000000))return false;
+    /* Rugpull risk gate — pure helper from src/scanner-helpers.js. */
+    var rug=getRugPullRisk(d,FR[s],bookTickers[s]);
+    if(rug>=70)return false;
+    return true;
+  }).sort(function(a,b){return b[1].v-a[1].v}).slice(0,50);
+  var res=[];
+  var proms=cands.slice(0,25).map(function(e){
+    var s=e[0];
+    return fj(BN+'/klines?symbol='+s+'USDT&interval=1h&limit=12').then(function(kl){
+      if(!kl||kl.length<6)return;
+      var vols=kl.map(function(k){return+k[5]});
+      var cls=kl.map(function(k){return+k[4]});
+      var avgV=vols.slice(0,-2).reduce(function(a,b){return a+b},0)/Math.max(1,vols.length-2);
+      var recV=(vols[vols.length-1]+vols[vols.length-2])/2;
+      var vx=avgV>0?recV/avgV:1;
+      /* Walk back to find where the volume spike began for "% from spike". */
+      var sI=vols.length-1;
+      for(var i=vols.length-1;i>=1;i--){if(vols[i]>avgV*1.5)sI=i;else break}
+      var pS=+kl[sI][1];
+      var pN=cls[cls.length-1];
+      var gain=pS>0?((pN-pS)/pS*100):0;
+      var timing,tBadge;
+      if(gain<3){timing='early';tBadge={ic:'🟢',l:lang==='ar'?'مبكر — ادخل!':'Early — Enter!',col:'var(--up)'}}
+      else if(gain<8){timing='still';tBadge={ic:'🟡',l:lang==='ar'?'فيه فرصة — حذر':'Still time — Caution',col:'var(--warn)'}}
+      else{timing='late';tBadge={ic:'🔴',l:lang==='ar'?'متأخر — راقب':'Late — Watch',col:'var(--dn)'}}
+      var d=T[s];if(!d)return;
+      var sc=0;var tags=[];
+      /* Volume-spike score */
+      if(vx>=4){sc+=45;tags.push('🔥VOL '+vx.toFixed(1)+'x')}
+      else if(vx>=3){sc+=40;tags.push('📊VOL '+vx.toFixed(1)+'x')}
+      else if(vx>=2){sc+=30;tags.push('📊VOL '+vx.toFixed(1)+'x')}
+      else if(vx>=1.5){sc+=15;tags.push('vol '+vx.toFixed(1)+'x')}
+      /* Timing score */
+      if(timing==='early')sc+=30;else if(timing==='still')sc+=15;
+      /* Bottom-of-range bonus */
+      if(d.h&&d.l&&d.h!==d.l){
+        var posInRange=(d.p-d.l)/(d.h-d.l);
+        if(posInRange<0.3){sc+=10;tags.push('📉LOW')}
+      }
+      /* V3 boosts — wrap each in try/catch since they may throw on
+         small caps with sparse microstructure data. */
+      try{var ice=detectIceberg(s);if(ice&&ice.signal==='ICEBERG_BUY'){sc+=20;tags.push('🧊ICE')}}catch(e){}
+      try{var vp=calcVPIN(s);if(vp&&vp.vpin>0.6){sc+=15;tags.push('🧪VPIN')}else if(vp&&vp.vpin>0.4){sc+=8;tags.push('🧪vp')}}catch(e){}
+      try{var wPnL=calcWhalePnL(s);if(wPnL&&wPnL.pct>1){sc+=10;tags.push('🐋PRO')}}catch(e){}
+      try{var cvd=analyzeCVD(s);if(cvd&&cvd.divergence==='BULLISH'){sc+=15;tags.push('📈CVD')}}catch(e){}
+      /* 24h change kicker */
+      if(d.c>0&&d.c<3)sc+=20;else if(d.c>=3&&d.c<8)sc+=10;
+      var target=timing!=='late'?pN*(timing==='early'?1.30:1.25):null;
+      var stop=timing!=='late'?pN*(timing==='early'?0.90:0.88):null;
+      var rugRisk=getRugPullRisk(d,FR[s],bookTickers[s]);
+      var mc=marketCapData[s]||0;
+      if(sc>=25)res.push({s:s,p:d.p,c:d.c,v:d.v,mc:mc,rugRisk:rugRisk,vx:vx,gain:gain,timing:timing,tBadge:tBadge,sc:sc,tags:tags,target:target,stop:stop});
+    }).catch(function(){});
+  });
+  await Promise.all(proms);
+  res.sort(function(a,b){return b.sc-a.sc});
+  return res;
+}
 function filterSmall(f,btn){curSmallFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadSmallCapsUI()}
-function renderSmallCaps(res){var f=res;if(curSmallFilter!=='all')f=res.filter(function(x){return x.timing===curSmallFilter});
+function renderSmallCaps(res){
+  var f=res;
+  if(curSmallFilter!=='all')f=res.filter(function(x){return x.timing===curSmallFilter});
   var slEl=document.getElementById('smallList');if(!slEl)return;
   if(!f.length){slEl.innerHTML='<div class="empty"><div class="empty-ic">💎</div><div class="empty-tx">'+(lang==='ar'?'لا جواهر حالياً':'No gems now')+'</div></div>';return}
-  var h='';f.slice(0,15).forEach(function(g){
+  var h='';
+  f.slice(0,20).forEach(function(g){
+    /* Rug-risk pill: visible reassurance that we filtered, not just guessed. */
+    var rugCol=g.rugRisk<30?'var(--up)':g.rugRisk<60?'var(--warn)':'var(--dn)';
+    var rugTxt=g.rugRisk<30?(lang==='ar'?'🛡 آمن':'🛡 Safe'):g.rugRisk<60?(lang==='ar'?'⚠ متوسط':'⚠ Medium'):(lang==='ar'?'🚨 خطر':'🚨 Risk');
+    var mcDisplay=g.mc>0?fmt(g.mc):(lang==='ar'?'MC ?':'MC ?');
     h+='<div class="whale-card" style="border-left:3px solid '+g.tBadge.col+';margin-bottom:8px" onclick="openCoin(\''+g.s+'\')">'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px"><div style="display:flex;align-items:center;gap:6px"><span style="font-weight:800;font-size:14px">💎 '+g.s+'</span><span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+g.tBadge.col+';font-weight:700">'+g.tBadge.ic+' '+g.tBadge.l+'</span></div><span style="font-family:var(--fm);font-size:12px;font-weight:800;color:var(--neon)">'+g.vx.toFixed(1)+'x vol</span></div>'
-      +'<div style="display:flex;justify-content:space-between;font-family:var(--fm);font-size:10px;margin-bottom:4px"><span>'+fP(g.p)+'</span><span style="color:'+(g.c>=0?'var(--up)':'var(--dn)')+'">'+(g.c>=0?'+':'')+g.c.toFixed(1)+'%</span><span>Vol:'+fmt(g.v)+'</span><span style="color:var(--warn)">+'+g.gain.toFixed(1)+'% from spike</span></div>'
-      +(g.target?'<div style="display:flex;gap:8px;font-size:8px;font-family:var(--fm);margin-bottom:4px"><span style="color:var(--up)">🎯 '+fP(g.target)+'</span><span style="color:var(--dn)">🛑 '+fP(g.stop)+'</span></div>':'')
-      +'<div style="height:4px;background:var(--bg2);border-radius:2px;overflow:hidden"><div style="width:'+Math.min(100,g.sc)+'%;height:100%;background:'+(g.timing==='early'?'var(--up)':g.timing==='still'?'var(--warn)':'var(--dn)')+';border-radius:2px"></div></div></div>'});
-  slEl.innerHTML=h}
+      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+      +'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
+      +'<span style="font-weight:800;font-size:14px">💎 '+g.s+'</span>'
+      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+g.tBadge.col+';font-weight:700">'+g.tBadge.ic+' '+g.tBadge.l+'</span>'
+      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+rugCol+';font-weight:700">'+rugTxt+'</span>'
+      +'</div>'
+      +'<span style="font-family:var(--fm);font-size:12px;font-weight:800;color:var(--neon)">'+g.vx.toFixed(1)+'x vol</span>'
+      +'</div>'
+      +'<div style="display:flex;justify-content:space-between;font-family:var(--fm);font-size:10px;margin-bottom:4px;flex-wrap:wrap;gap:4px">'
+      +'<span>'+fP(g.p)+'</span>'
+      +'<span style="color:'+(g.c>=0?'var(--up)':'var(--dn)')+'">'+(g.c>=0?'+':'')+g.c.toFixed(1)+'%</span>'
+      +'<span>Vol:'+fmt(g.v)+'</span>'
+      +'<span style="color:var(--t2)">'+(lang==='ar'?'سوق:':'MC:')+mcDisplay+'</span>'
+      +'<span style="color:var(--warn)">+'+g.gain.toFixed(1)+'% '+(lang==='ar'?'من القفزة':'from spike')+'</span>'
+      +'</div>';
+    /* V3 confirmation chips — only when we have 1+ */
+    if(g.tags&&g.tags.length){
+      h+='<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px">';
+      g.tags.slice(0,6).forEach(function(t){
+        h+='<span style="font-size:8px;padding:2px 5px;border-radius:4px;background:var(--bg2);color:var(--t1);font-family:var(--fm)">'+t+'</span>';
+      });
+      h+='</div>';
+    }
+    if(g.target)h+='<div style="display:flex;gap:8px;font-size:8px;font-family:var(--fm);margin-bottom:4px"><span style="color:var(--up)">🎯 '+fP(g.target)+'</span><span style="color:var(--dn)">🛑 '+fP(g.stop)+'</span></div>';
+    h+='<div style="height:4px;background:var(--bg2);border-radius:2px;overflow:hidden"><div style="width:'+Math.min(100,g.sc)+'%;height:100%;background:'+(g.timing==='early'?'var(--up)':g.timing==='still'?'var(--warn)':'var(--dn)')+';border-radius:2px"></div></div>'
+      +'</div>';
+  });
+  slEl.innerHTML=h;
+}
 function onSrch(v){var el=document.getElementById('sRes');if(!v){el.classList.remove('show');return}v=v.toUpperCase();var m=Object.entries(T).filter(function(e){return e[0].includes(v)}).slice(0,8);if(!m.length){el.classList.remove('show');return}el.innerHTML=m.map(function(e){var s=e[0],d=e[1];return'<div class="sr-i" onclick="openCoin(\''+s+'\')"><span style="font-weight:700">'+s+'</span><span style="font-family:var(--fm);font-size:10px">'+fP(d.p)+' <span class="cr-ch '+(d.c>=0?'up':'dn')+'">'+(d.c>=0?'+':'')+d.c.toFixed(1)+'%</span></span></div>'}).join('');el.classList.add('show')}
 document.addEventListener('click',function(e){if(!e.target.closest('.srch'))document.getElementById('sRes').classList.remove('show')});
 /* WS */

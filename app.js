@@ -2358,23 +2358,17 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,300);
     recSig(c.s,'trade',c.p);
     /* ═══ Cross-module sync: PROVEN tag ═══
        The Monitor (Smart Supervisor) tracks per-coin win rates in
-       monitorState.coinStats. If this coin has a real track record
-       with the user — at least 5 closed trades and >= 60% win rate —
-       reward the signal: +10 score and a 🏅PROVEN tag. The threshold
-       is intentionally strict (5 trades minimum) so we don't lock
-       in noise from a 2-of-3 lucky streak. The user-specific signal
-       (their own history) compounds with the global signal (whale
-       activity, microstructure) instead of being ignored. */
-    var _proven=false;
-    var _coinWinRate=0;
-    if(monitorState&&monitorState.coinStats&&monitorState.coinStats[c.s]){
-      var _cs=monitorState.coinStats[c.s];
-      if(_cs.total>=5&&_cs.rate>=60){
-        _proven=true;
-        _coinWinRate=_cs.rate;
-        ds+=10;
-        dt.push('🏅PROVEN:'+_cs.rate+'%');
-      }
+       monitorState.coinStats. evaluateProvenStatus (pure helper in
+       scanner-helpers.js) checks the threshold contract — at least
+       5 closed trades AND >= 60% win rate — so the policy is
+       machine-verified instead of an inline if-condition. */
+    var _coinStat=monitorState&&monitorState.coinStats?monitorState.coinStats[c.s]:null;
+    var _provenStatus=evaluateProvenStatus(_coinStat);
+    var _proven=_provenStatus.proven;
+    var _coinWinRate=_provenStatus.rate;
+    if(_proven){
+      ds+=10;
+      dt.push('🏅PROVEN:'+_coinWinRate+'%');
     }
     /* Build result with new + old fields */
     var sigInfo=sigHist[c.s+'_trade'];

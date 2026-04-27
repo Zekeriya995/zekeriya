@@ -174,6 +174,62 @@ test('atrZones — partial mults object falls back to defaults for missing keys'
 
 /* ─── countWavesInWindow ──────────────────────────────────────────── */
 
+/* ─── evaluateProvenStatus ──────────────────────────────────────── */
+
+test('evaluateProvenStatus — missing coinStat returns false + rate 0', () => {
+  assert.deepEqual(evaluateProvenStatus(null), { proven: false, rate: 0 });
+  assert.deepEqual(evaluateProvenStatus(undefined), { proven: false, rate: 0 });
+});
+
+test('evaluateProvenStatus — missing total or rate field returns false + rate 0', () => {
+  assert.deepEqual(evaluateProvenStatus({}), { proven: false, rate: 0 });
+  assert.deepEqual(evaluateProvenStatus({ total: 10 }), { proven: false, rate: 0 });
+  assert.deepEqual(evaluateProvenStatus({ rate: 70 }), { proven: false, rate: 0 });
+});
+
+test('evaluateProvenStatus — too few trades blocks proven (contract: 5 min)', () => {
+  /* 4 trades is below the threshold even at 100% win rate. */
+  assert.deepEqual(evaluateProvenStatus({ total: 4, rate: 100 }), { proven: false, rate: 100 });
+  assert.deepEqual(evaluateProvenStatus({ total: 1, rate: 100 }), { proven: false, rate: 100 });
+});
+
+test('evaluateProvenStatus — exactly 5 trades crosses the boundary (contract: >= 5)', () => {
+  /* The contract is >=, not >. At total === 5 with rate >= 60, proven. */
+  assert.deepEqual(evaluateProvenStatus({ total: 5, rate: 60 }), { proven: true, rate: 60 });
+});
+
+test('evaluateProvenStatus — too low win rate blocks proven (contract: 60 min)', () => {
+  /* 59% with plenty of samples is still below the threshold. */
+  assert.deepEqual(evaluateProvenStatus({ total: 50, rate: 59 }), { proven: false, rate: 59 });
+});
+
+test('evaluateProvenStatus — exactly 60% win rate crosses the boundary (contract: >= 60)', () => {
+  assert.deepEqual(evaluateProvenStatus({ total: 5, rate: 60 }), { proven: true, rate: 60 });
+});
+
+test('evaluateProvenStatus — strong record clears both thresholds', () => {
+  assert.deepEqual(evaluateProvenStatus({ total: 20, rate: 75 }), { proven: true, rate: 75 });
+});
+
+test('evaluateProvenStatus — custom thresholds override defaults', () => {
+  /* If the platform tunes thresholds (10 trades, 70%), the helper
+     respects the new values. This is the seam a future calibration
+     layer or A/B test would attach to. */
+  assert.deepEqual(
+    evaluateProvenStatus({ total: 8, rate: 80 }, 10, 70),
+    { proven: false, rate: 80 }
+  );
+  assert.deepEqual(
+    evaluateProvenStatus({ total: 12, rate: 80 }, 10, 70),
+    { proven: true, rate: 80 }
+  );
+});
+
+test('evaluateProvenStatus — defends against rate=0 with total>=5 (zero division avoidance)', () => {
+  /* A losing streak shouldn't produce a noisy "proven" via stale data. */
+  assert.deepEqual(evaluateProvenStatus({ total: 10, rate: 0 }), { proven: false, rate: 0 });
+});
+
 /* ─── pickCardVisualTier ────────────────────────────────────────── */
 
 test('pickCardVisualTier — null signal falls to default tier', () => {

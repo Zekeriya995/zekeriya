@@ -211,6 +211,38 @@ function computePerformanceReport(preds, trades) {
   return out;
 }
 
+/* Decide whether a coin's user-history qualifies as PROVEN. Pure:
+   takes the coinStats entry from monitorState.coinStats[sym] plus
+   optional thresholds, returns { proven, rate }.
+
+   Thresholds (defaults match the live scoring engine):
+     minTrades = 5    — fewer samples are too noisy to trust
+     minRate   = 60   — comfortably above coin-flip; matches the
+                        platform's pre-pump alpha threshold
+
+   This is a CONTRACT test, not a backtest. It verifies that the
+   thresholds we ship match the documented values — it does NOT
+   prove that 5/60 are the *optimal* values. Determining optimum
+   requires historical replay over real predictions data, which is
+   the unbuilt backtest harness mentioned in earlier reviews.
+
+   Behavior:
+     - missing coinStat              → { proven: false, rate: 0 }
+     - missing total or rate field   → { proven: false, rate: 0 }
+     - total < minTrades             → { proven: false, rate: <as-is> }
+     - rate  < minRate               → { proven: false, rate: <as-is> }
+     - both meet threshold           → { proven: true,  rate: <as-is> } */
+function evaluateProvenStatus(coinStat, minTrades, minRate) {
+  if (minTrades == null) minTrades = 5;
+  if (minRate == null) minRate = 60;
+  if (!coinStat || coinStat.total == null || coinStat.rate == null) {
+    return { proven: false, rate: 0 };
+  }
+  if (coinStat.total < minTrades) return { proven: false, rate: coinStat.rate };
+  if (coinStat.rate < minRate) return { proven: false, rate: coinStat.rate };
+  return { proven: true, rate: coinStat.rate };
+}
+
 /* Pick the visual tier for a scanner signal card. Pure: takes the
    signal object (the rendered shape, with .tags, .proven, .ultra,
    .confirmed, .type) and returns the bar gradient + symbol marker

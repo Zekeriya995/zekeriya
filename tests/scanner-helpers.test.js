@@ -174,6 +174,69 @@ test('atrZones — partial mults object falls back to defaults for missing keys'
 
 /* ─── countWavesInWindow ──────────────────────────────────────────── */
 
+/* ─── getRugPullRisk ─────────────────────────────────────────────── */
+
+test('getRugPullRisk — missing ticker returns max risk (100)', () => {
+  assert.equal(getRugPullRisk(null), 100);
+  assert.equal(getRugPullRisk(undefined), 100);
+});
+
+test('getRugPullRisk — clean coin: high vol, narrow spread, futures, calm = 0', () => {
+  const d = { v: 5000000, c: 2 };
+  const fr = { rate: 0.0001 };
+  const book = { spread: 0.05, bidQty: 5000, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, fr, book), 0);
+});
+
+test('getRugPullRisk — wide spread alone adds 30', () => {
+  const d = { v: 5000000, c: 2 };
+  const fr = { rate: 0.0001 };
+  const book = { spread: 2, bidQty: 5000, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, fr, book), 30);
+});
+
+test('getRugPullRisk — thin bid book adds 20', () => {
+  const d = { v: 5000000, c: 2 };
+  const fr = { rate: 0.0001 };
+  const book = { spread: 0.1, bidQty: 50, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, fr, book), 20);
+});
+
+test('getRugPullRisk — low volume adds 25', () => {
+  const d = { v: 100000, c: 2 };
+  const fr = { rate: 0.0001 };
+  const book = { spread: 0.1, bidQty: 5000, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, fr, book), 25);
+});
+
+test('getRugPullRisk — extreme price move adds 15', () => {
+  const d = { v: 5000000, c: 45 };
+  const fr = { rate: 0.0001 };
+  const book = { spread: 0.1, bidQty: 5000, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, fr, book), 15);
+});
+
+test('getRugPullRisk — no futures market adds 10', () => {
+  const d = { v: 5000000, c: 2 };
+  const book = { spread: 0.1, bidQty: 5000, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, null, book), 10);
+});
+
+test('getRugPullRisk — multiple red flags stack and cap at 100', () => {
+  /* Worst-case shitcoin: wide spread, thin book, low vol, big move,
+     no futures. Sum: 30 + 20 + 25 + 15 + 10 = 100 (no cap-bend needed). */
+  const d = { v: 100000, c: 60 };
+  const book = { spread: 5, bidQty: 10, askQty: 10 };
+  assert.equal(getRugPullRisk(d, null, book), 100);
+});
+
+test('getRugPullRisk — missing book ticker contributes nothing (gap, not risk)', () => {
+  const d = { v: 5000000, c: 2 };
+  const fr = { rate: 0.0001 };
+  /* No book ticker passed — risk should be 0, not 50 */
+  assert.equal(getRugPullRisk(d, fr, null), 0);
+});
+
 /* ─── evaluateSignalOutcome ───────────────────────────────────────── */
 
 test('evaluateSignalOutcome — missing or zero entry returns neutral', () => {

@@ -211,6 +211,38 @@ function computePerformanceReport(preds, trades) {
   return out;
 }
 
+/* Rugpull risk score (0-100) for the Gem Hunter — coins with high
+   risk are filtered out before the user ever sees them. Pure: takes
+   a ticker snapshot, optional funding-rate object, optional book
+   ticker (best bid/ask + qty + spread). Returns a number; the
+   Gem Hunter rejects anything above 70.
+
+   Risk factors (additive, capped at 100):
+     +30  bid/ask spread > 1%        (illiquid market)
+     +20  bid OR ask qty < 100        (thin order book)
+     +25  24h volume < $500K          (very low turnover)
+     +15  abs(24h change) > 30%       (manipulation suspicion)
+     +10  no futures market exists    (no institutional interest)
+
+   Missing inputs are treated as "data unavailable" and contribute 0
+   to risk — we don't penalize a coin for our own data gaps. The
+   exception is `d` itself: if no ticker snapshot, return 100 (max
+   risk) because we can't make any safety claim. */
+function getRugPullRisk(d, fr, bookTicker) {
+  if (!d) return 100;
+  var risk = 0;
+  if (bookTicker) {
+    if (bookTicker.spread != null && bookTicker.spread > 1) risk += 30;
+    if (bookTicker.bidQty != null && bookTicker.bidQty < 100) risk += 20;
+    else if (bookTicker.askQty != null && bookTicker.askQty < 100) risk += 20;
+  }
+  if (d.v != null && d.v < 500000) risk += 25;
+  if (d.c != null && Math.abs(d.c) > 30) risk += 15;
+  if (!fr) risk += 10;
+  if (risk > 100) risk = 100;
+  return risk;
+}
+
 /* Evaluate a signal's outcome by comparing entry price to current
    price. Used by the per-tag performance tracker so we can answer
    "which tags actually predict winners?" Pure: takes prices and

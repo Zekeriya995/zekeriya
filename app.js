@@ -388,7 +388,12 @@ function processTradeOutcome(trade) {
   cs.rate = cs.total > 0 ? Math.round((cs.wins / cs.total) * 100) : 0;
 
   var bl = monitorState.coinBlacklist;
-  if (cs.total >= 3 && cs.rate < 30 && bl.indexOf(coinKey) === -1) {
+  /* Blacklist threshold aligned with signalQualityGate Gate 4 (line ~707):
+     5+ trades AND <25% win rate. Previously this used a looser 3/30
+     threshold that put coins on the user-visible blacklist UI even
+     though Gate 4 wouldn't actually block their signals — a UX
+     contradiction surfaced in the scanner audit. */
+  if (cs.total >= 5 && cs.rate < 25 && bl.indexOf(coinKey) === -1) {
     bl.push(coinKey);
   }
   if (cs.rate >= 55 && bl.indexOf(coinKey) !== -1) {
@@ -699,9 +704,10 @@ function signalQualityGate(sym, type, score) {
   results.push({name: lang === 'ar' ? 'السوق آمن' : 'Market safe', pass: g3, detail: mkt.level});
   if (!g3) pass = false;
 
-  /* Gate 4 — Blacklist: only block after 5+ trades AND <25% win rate.
-     The legacy monitorState.coinBlacklist (populated by runAutoImprove with a
-     looser 3-trade/30% threshold) is intentionally NOT consulted here. */
+  /* Gate 4 — Blacklist: block after 5+ trades AND <25% win rate.
+     This same threshold now drives monitorState.coinBlacklist
+     (recordTradeOutcome + runAutoImprove), so the user-visible
+     blacklist UI matches what's actually blocked here. */
   var g4 = true;
   var coinStat = monitorState && monitorState.coinStats ? monitorState.coinStats[sym] : null;
   if (coinStat && coinStat.total >= 5 && coinStat.rate < 25) {
@@ -795,7 +801,9 @@ function runAutoImprove() {
   Object.keys(monitorState.coinStats).forEach(function(coin) {
     var cs = monitorState.coinStats[coin];
     var inBL = monitorState.coinBlacklist.indexOf(coin) !== -1;
-    if (cs.total >= 3 && cs.rate < 30 && !inBL) {
+    /* Aligned with signalQualityGate Gate 4 — see comment in
+       recordTradeOutcome above. Add at 5/25, remove at 5/55. */
+    if (cs.total >= 5 && cs.rate < 25 && !inBL) {
       monitorState.coinBlacklist.push(coin);
       addedToBL.push(coin);
     }

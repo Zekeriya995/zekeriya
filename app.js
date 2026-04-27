@@ -3,18 +3,28 @@
    pure helpers (esc/fmt/fP/safeC/calcRSI/calcMACD/calcEMA) in src/utils.js —
    both are loaded before this file by index.html. */
 var tg=window.Telegram&&window.Telegram.WebApp?window.Telegram.WebApp:null;if(tg){tg.ready();tg.expand();tg.setHeaderColor('#060b14');tg.setBackgroundColor('#020408')}
+/* Per-symbol market cap from CoinGecko — populated as a side effect
+   of the hourly updateTop100() call below (no extra API request).
+   Used by the Gem Hunter to filter the small-cap range honestly
+   instead of the previous d.v * 10 approximation, which is just
+   ten times daily volume and has nothing to do with market cap. */
+var marketCapData={};
 /* ═══ 🏆 AUTO TOP 100 — updates every hour from CoinGecko + trending from exchanges ═══ */
 async function updateTop100(){
   try{
     var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD','USD','UST'];
     var newWL=[];
-    /* Part 1: Top 100 by market cap from CoinGecko */
-    var data=await fj(CG+'/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=120&page=1');
+    /* Part 1: Top 100 by market cap from CoinGecko (250 rows so we
+       reach further into the long tail for marketCapData coverage). */
+    var data=await fj(CG+'/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=250&page=1');
     if(data&&data.length){
       data.forEach(function(c){
         if(!c.symbol)return;
         var sym=c.symbol.toUpperCase();
         if(STABLES.includes(sym))return;
+        /* Capture the real market cap for every row (not just top 100)
+           so the Gem Hunter can filter mid/small caps too. */
+        if(c.market_cap!=null&&c.market_cap>0)marketCapData[sym]=c.market_cap;
         if(newWL.length<100&&newWL.indexOf(sym)===-1)newWL.push(sym);
       });
     }

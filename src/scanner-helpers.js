@@ -211,6 +211,91 @@ function computePerformanceReport(preds, trades) {
   return out;
 }
 
+/* Pick the visual tier for a scanner signal card. Pure: takes the
+   signal object (the rendered shape, with .tags, .proven, .ultra,
+   .confirmed, .type) and returns the bar gradient + symbol marker
+   + outer card style + whether to render the DOUBLE CONFIRMED
+   banner above the card body.
+
+   Tier ladder (highest priority first):
+     'double'    — WHALE_TARGET tag AND proven === true
+                   purple-gold gradient, 🌟 marker, banner above body
+     'whale'     — WHALE_TARGET tag (whaleConf >= 60 from PR #14)
+                   gold gradient, 🐋✨ marker, gold border + glow
+     'ultra'     — signal.ultra === true (legacy ULTRA flag)
+                   ultra color, ⭐ marker
+     'confirmed' — signal.confirmed === true
+                   up color, 🟢 marker
+     'default'   — none of the above
+                   blue if type 'fast' else up; no marker
+
+   Extracted from renderTrading() so the visual logic can be unit
+   tested without spinning up a DOM. All CSS strings preserved
+   verbatim; the renderer composes them into HTML. */
+function pickCardVisualTier(signal) {
+  if (!signal) {
+    return {
+      tier: 'default',
+      barColor: 'var(--up)',
+      marker: '',
+      cardStyle: '',
+      hasBanner: false,
+    };
+  }
+  var tags = signal.tags || [];
+  var isWhaleTarget = false;
+  for (var i = 0; i < tags.length; i++) {
+    if (tags[i] && tags[i].indexOf('WHALE_TARGET') >= 0) {
+      isWhaleTarget = true;
+      break;
+    }
+  }
+  var isDouble = isWhaleTarget && signal.proven === true;
+  if (isDouble) {
+    return {
+      tier: 'double',
+      barColor: 'linear-gradient(90deg,#ffd700,#b07cff)',
+      marker: '🌟 ',
+      cardStyle: ' style="border:2px solid #b07cff;box-shadow:0 0 14px rgba(176,124,255,.4),0 0 6px rgba(255,215,0,.3)"',
+      hasBanner: true,
+    };
+  }
+  if (isWhaleTarget) {
+    return {
+      tier: 'whale',
+      barColor: 'linear-gradient(90deg,#ffd700,#ff8c00)',
+      marker: '🐋✨ ',
+      cardStyle: ' style="border:2px solid #ffd700;box-shadow:0 0 12px rgba(255,215,0,.3)"',
+      hasBanner: false,
+    };
+  }
+  if (signal.ultra) {
+    return {
+      tier: 'ultra',
+      barColor: 'var(--ultra)',
+      marker: '⭐ ',
+      cardStyle: '',
+      hasBanner: false,
+    };
+  }
+  if (signal.confirmed) {
+    return {
+      tier: 'confirmed',
+      barColor: 'var(--up)',
+      marker: '🟢 ',
+      cardStyle: '',
+      hasBanner: false,
+    };
+  }
+  return {
+    tier: 'default',
+    barColor: signal.type === 'fast' ? 'var(--blue)' : 'var(--up)',
+    marker: '',
+    cardStyle: '',
+    hasBanner: false,
+  };
+}
+
 /* Score a Gem-Hunter candidate from already-computed inputs.
    Pure: takes the ticker snapshot, kline-derived stats, and V3
    technique results — no globals, no fetches, deterministic.

@@ -174,6 +174,97 @@ test('atrZones — partial mults object falls back to defaults for missing keys'
 
 /* ─── countWavesInWindow ──────────────────────────────────────────── */
 
+/* ─── pickCardVisualTier ────────────────────────────────────────── */
+
+test('pickCardVisualTier — null signal falls to default tier', () => {
+  const v = pickCardVisualTier(null);
+  assert.equal(v.tier, 'default');
+  assert.equal(v.marker, '');
+  assert.equal(v.hasBanner, false);
+});
+
+test('pickCardVisualTier — bare signal with no flags = default + up bar', () => {
+  const v = pickCardVisualTier({ tags: [], type: 'daily' });
+  assert.equal(v.tier, 'default');
+  assert.equal(v.barColor, 'var(--up)');
+  assert.equal(v.marker, '');
+  assert.equal(v.cardStyle, '');
+  assert.equal(v.hasBanner, false);
+});
+
+test('pickCardVisualTier — fast type changes default bar to blue', () => {
+  const v = pickCardVisualTier({ tags: [], type: 'fast' });
+  assert.equal(v.barColor, 'var(--blue)');
+});
+
+test('pickCardVisualTier — confirmed flag = green tier', () => {
+  const v = pickCardVisualTier({ tags: [], confirmed: true });
+  assert.equal(v.tier, 'confirmed');
+  assert.equal(v.marker, '🟢 ');
+});
+
+test('pickCardVisualTier — ultra flag outranks confirmed', () => {
+  const v = pickCardVisualTier({ tags: [], ultra: true, confirmed: true });
+  assert.equal(v.tier, 'ultra');
+  assert.equal(v.marker, '⭐ ');
+});
+
+test('pickCardVisualTier — WHALE_TARGET tag elevates to whale tier', () => {
+  const v = pickCardVisualTier({ tags: ['🐋✨WHALE_TARGET:75'], ultra: false });
+  assert.equal(v.tier, 'whale');
+  assert.equal(v.marker, '🐋✨ ');
+  assert.ok(v.cardStyle.indexOf('#ffd700') >= 0, 'whale card style should include gold border');
+  assert.equal(v.hasBanner, false, 'whale tier alone does NOT show the banner');
+});
+
+test('pickCardVisualTier — WHALE_TARGET + proven = double tier (the killer combo)', () => {
+  const v = pickCardVisualTier({
+    tags: ['🐋✨WHALE_TARGET:75'],
+    proven: true,
+  });
+  assert.equal(v.tier, 'double');
+  assert.equal(v.marker, '🌟 ');
+  assert.ok(v.cardStyle.indexOf('#b07cff') >= 0, 'double card style should include purple');
+  assert.ok(v.cardStyle.indexOf('#ffd700') < 0, 'double does NOT include the gold-border style');
+  assert.equal(v.hasBanner, true, 'double tier must render the banner');
+});
+
+test('pickCardVisualTier — proven without WHALE_TARGET = NO double (must be both)', () => {
+  /* Defensive: a proven coin without whale activity is just confirmed
+     or ultra at most — never double. The banner should NOT show. */
+  const v = pickCardVisualTier({
+    tags: [],
+    proven: true,
+    ultra: true,
+  });
+  assert.equal(v.tier, 'ultra');
+  assert.equal(v.hasBanner, false);
+});
+
+test('pickCardVisualTier — WHALE_TARGET + proven=false = whale tier (not double)', () => {
+  /* Explicit false should NOT activate double — strict equality with
+     true is the correct check. */
+  const v = pickCardVisualTier({
+    tags: ['🐋✨WHALE_TARGET:75'],
+    proven: false,
+  });
+  assert.equal(v.tier, 'whale');
+});
+
+test('pickCardVisualTier — tier ladder priority: double > whale > ultra > confirmed > default', () => {
+  /* All flags set — the highest tier should win and the banner should
+     show because double is at the top of the ladder. */
+  const v = pickCardVisualTier({
+    tags: ['🐋✨WHALE_TARGET:80'],
+    proven: true,
+    ultra: true,
+    confirmed: true,
+    type: 'fast',
+  });
+  assert.equal(v.tier, 'double');
+  assert.equal(v.hasBanner, true);
+});
+
 /* ─── scoreGemCandidate ─────────────────────────────────────────── */
 
 test('scoreGemCandidate — null ticker = zero score', () => {

@@ -2228,6 +2228,25 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,100);
   var byMissing=top.filter(function(c){return!klData[c.s]&&T[c.s]&&T[c.s].src==='BY'}).slice(0,10);
   if(byMissing.length){var byProms=byMissing.map(function(c){return fj('https://api.bybit.com/v5/market/kline?category=spot&symbol='+c.s+'USDT&interval=60&limit=30').then(function(d){if(d&&d.result&&d.result.list){klData[c.s]=d.result.list.reverse().map(function(k){return[+k[0],+k[1],+k[2],+k[3],+k[4],+k[5]]})}}).catch(function(){})});
     await Promise.all(byProms)}
+  /* Pre-warm wCache for the top30 candidates by calling the layer
+     functions directly (whaleL1, whaleL2, whaleL3, analyzeOIDelta).
+     The per-coin loop's `await whaleEngine(c.s)` then hits the warm
+     wCache instead of stacking sequential API roundtrips — this turns
+     a ~6s serial chain into one ~200ms parallel batch.
+
+     We deliberately do NOT pre-call whaleEngine itself: it has
+     side-effects (wlRecordSignal pushes a learning prediction when
+     confidence>=30, wlVerify mutates whaleLearning) that must only
+     fire once per coin, on the real per-coin pass — not during
+     cache warming. */
+  var weWarm=[];
+  top30.forEach(function(c){
+    weWarm.push(whaleL1(c.s).catch(function(){}));
+    weWarm.push(whaleL2(c.s).catch(function(){}));
+    weWarm.push(whaleL3(c.s).catch(function(){}));
+    weWarm.push(analyzeOIDelta(c.s).catch(function(){}));
+  });
+  await Promise.all(weWarm);
   for(var ci=0;ci<top.length;ci++){try{var c=top[ci];var ds=c.score,dt=c.tags.slice();
     var checks={vol:false,ob:false,rsi:false,macd:false,fr:false,oi:false};var passed=0;
     /* ═══ CHECK 1: VOL Acceleration (5m klines preferred, fallback 1h) ═══

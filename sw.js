@@ -2,7 +2,7 @@
    the previous generation atomically. The old string ('nexus-v10-v14-modules')
    was static, which meant a hot-fix to app.js was never fetched from the
    network until users hard-refreshed. */
-var CACHE_VERSION = 'v10.1.1-2026-04-19';
+var CACHE_VERSION = 'v10.2.0-scanner-v4-2026-04-27';
 var CACHE_NAME = 'nexus-' + CACHE_VERSION;
 /* Critical assets — install fails if any fail */
 var CRITICAL_ASSETS = [

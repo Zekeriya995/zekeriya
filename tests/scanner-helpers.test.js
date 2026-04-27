@@ -174,6 +174,78 @@ test('atrZones — partial mults object falls back to defaults for missing keys'
 
 /* ─── countWavesInWindow ──────────────────────────────────────────── */
 
+/* ─── scoreGemCandidate ─────────────────────────────────────────── */
+
+test('scoreGemCandidate — null ticker = zero score', () => {
+  const r = scoreGemCandidate(null, { vx: 5, timing: 'early' }, {});
+  assert.equal(r.score, 0);
+  assert.deepEqual(r.tags, []);
+});
+
+test('scoreGemCandidate — vol multiplier ladder hits each rung', () => {
+  const t = { p: 1, c: 1, v: 1e6, h: 1, l: 1 };
+  /* Position-in-range guard: h===l means no bottom-of-range bonus,
+     so each call below ONLY gets the vx bonus + the c-in-(0,3) +20. */
+  assert.equal(scoreGemCandidate(t, { vx: 5, timing: null }, null).score, 45 + 20);
+  assert.equal(scoreGemCandidate(t, { vx: 3.5, timing: null }, null).score, 40 + 20);
+  assert.equal(scoreGemCandidate(t, { vx: 2.5, timing: null }, null).score, 30 + 20);
+  assert.equal(scoreGemCandidate(t, { vx: 1.7, timing: null }, null).score, 15 + 20);
+  assert.equal(scoreGemCandidate(t, { vx: 1.0, timing: null }, null).score, 0 + 20);
+});
+
+test('scoreGemCandidate — timing buckets', () => {
+  const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
+  assert.equal(scoreGemCandidate(t, { vx: 1, timing: 'early' }, null).score, 30);
+  assert.equal(scoreGemCandidate(t, { vx: 1, timing: 'still' }, null).score, 15);
+  assert.equal(scoreGemCandidate(t, { vx: 1, timing: 'late' }, null).score, 0);
+});
+
+test('scoreGemCandidate — bottom-of-range adds 10 only when in lower 30%', () => {
+  /* Range: 100 to 110 (span 10). Below 103 = lower 30% -> bonus. */
+  const inLow = { p: 102, c: 0, v: 1e6, h: 110, l: 100 };
+  const middle = { p: 105, c: 0, v: 1e6, h: 110, l: 100 };
+  assert.equal(scoreGemCandidate(inLow, null, null).score, 10);
+  assert.equal(scoreGemCandidate(middle, null, null).score, 0);
+});
+
+test('scoreGemCandidate — V3 boosts compose correctly', () => {
+  const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
+  const v3 = {
+    iceberg: { signal: 'ICEBERG_BUY' },        // +20
+    vpin: { vpin: 0.7 },                        // +15
+    whalePnL: { pct: 2 },                       // +10
+    cvd: { divergence: 'BULLISH' },             // +15
+  };
+  /* No klineStats, no c-bonus. Only V3 contributes. */
+  assert.equal(scoreGemCandidate(t, null, v3).score, 60);
+  assert.deepEqual(
+    scoreGemCandidate(t, null, v3).tags.sort(),
+    ['🐋PRO', '🧊ICE', '🧪VPIN', '📈CVD'].sort()
+  );
+});
+
+test('scoreGemCandidate — VPIN rung is exclusive (high or moderate, not both)', () => {
+  const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
+  assert.equal(scoreGemCandidate(t, null, { vpin: { vpin: 0.65 } }).score, 15);
+  assert.equal(scoreGemCandidate(t, null, { vpin: { vpin: 0.5 } }).score, 8);
+  assert.equal(scoreGemCandidate(t, null, { vpin: { vpin: 0.3 } }).score, 0);
+});
+
+test('scoreGemCandidate — c kicker buckets', () => {
+  const t1 = { p: 1, c: 1.5, v: 1e6, h: 1, l: 1 };  // (0,3)
+  const t2 = { p: 1, c: 5, v: 1e6, h: 1, l: 1 };    // [3,8)
+  const t3 = { p: 1, c: 10, v: 1e6, h: 1, l: 1 };   // out
+  assert.equal(scoreGemCandidate(t1, null, null).score, 20);
+  assert.equal(scoreGemCandidate(t2, null, null).score, 10);
+  assert.equal(scoreGemCandidate(t3, null, null).score, 0);
+});
+
+test('scoreGemCandidate — ICEBERG_SELL does NOT trigger the buy boost', () => {
+  /* Defensive: only ICEBERG_BUY is bullish; SELL must not be rewarded. */
+  const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
+  assert.equal(scoreGemCandidate(t, null, { iceberg: { signal: 'ICEBERG_SELL' } }).score, 0);
+});
+
 /* ─── getRugPullRisk ─────────────────────────────────────────────── */
 
 test('getRugPullRisk — missing ticker returns max risk (100)', () => {

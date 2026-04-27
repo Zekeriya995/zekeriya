@@ -211,6 +211,69 @@ function computePerformanceReport(preds, trades) {
   return out;
 }
 
+/* Score a Gem-Hunter candidate from already-computed inputs.
+   Pure: takes the ticker snapshot, kline-derived stats, and V3
+   technique results — no globals, no fetches, deterministic.
+   Returns { score, tags }.
+
+   Inputs:
+     ticker      { p, c, v, h, l }     — current ticker snapshot
+     klineStats  { vx, timing }        — vx = vol multiplier vs avg,
+                                         timing in {'early','still','late'}
+     v3          { iceberg, vpin,
+                   whalePnL, cvd }     — outputs of the V3 functions
+                                         (any field may be null/undefined)
+
+   Scoring contract (must match the live Gem Hunter):
+     vx in [4, ∞)      +45  '🔥VOL <vx>x'
+     vx in [3, 4)      +40  '📊VOL <vx>x'
+     vx in [2, 3)      +30  '📊VOL <vx>x'
+     vx in [1.5, 2)    +15  'vol <vx>x'
+     timing 'early'    +30
+     timing 'still'    +15
+     bottom-of-range   +10  '📉LOW'   (price in lower 30% of h-l band)
+     iceberg BUY       +20  '🧊ICE'
+     vpin > 0.6        +15  '🧪VPIN'
+     vpin in (0.4, 0.6] +8  '🧪vp'
+     whalePnL > +1%    +10  '🐋PRO'
+     cvd BULLISH       +15  '📈CVD'
+     c in (0, 3)       +20
+     c in [3, 8)       +10 */
+function scoreGemCandidate(ticker, klineStats, v3) {
+  if (!ticker) return { score: 0, tags: [] };
+  var sc = 0;
+  var tags = [];
+  if (klineStats && klineStats.vx != null) {
+    var vx = klineStats.vx;
+    if (vx >= 4) { sc += 45; tags.push('🔥VOL ' + vx.toFixed(1) + 'x'); }
+    else if (vx >= 3) { sc += 40; tags.push('📊VOL ' + vx.toFixed(1) + 'x'); }
+    else if (vx >= 2) { sc += 30; tags.push('📊VOL ' + vx.toFixed(1) + 'x'); }
+    else if (vx >= 1.5) { sc += 15; tags.push('vol ' + vx.toFixed(1) + 'x'); }
+  }
+  if (klineStats && klineStats.timing === 'early') sc += 30;
+  else if (klineStats && klineStats.timing === 'still') sc += 15;
+  if (ticker.h != null && ticker.l != null && ticker.h !== ticker.l) {
+    var posInRange = (ticker.p - ticker.l) / (ticker.h - ticker.l);
+    if (posInRange < 0.3) { sc += 10; tags.push('📉LOW'); }
+  }
+  if (v3) {
+    if (v3.iceberg && v3.iceberg.signal === 'ICEBERG_BUY') { sc += 20; tags.push('🧊ICE'); }
+    if (v3.vpin && v3.vpin.vpin != null) {
+      if (v3.vpin.vpin > 0.6) { sc += 15; tags.push('🧪VPIN'); }
+      else if (v3.vpin.vpin > 0.4) { sc += 8; tags.push('🧪vp'); }
+    }
+    if (v3.whalePnL && v3.whalePnL.pct != null && v3.whalePnL.pct > 1) {
+      sc += 10; tags.push('🐋PRO');
+    }
+    if (v3.cvd && v3.cvd.divergence === 'BULLISH') { sc += 15; tags.push('📈CVD'); }
+  }
+  if (ticker.c != null) {
+    if (ticker.c > 0 && ticker.c < 3) sc += 20;
+    else if (ticker.c >= 3 && ticker.c < 8) sc += 10;
+  }
+  return { score: sc, tags: tags };
+}
+
 /* Rugpull risk score (0-100) for the Gem Hunter — coins with high
    risk are filtered out before the user ever sees them. Pure: takes
    a ticker snapshot, optional funding-rate object, optional book

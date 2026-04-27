@@ -1592,27 +1592,16 @@ async function loadSmallCaps2(){
       else if(gain<8){timing='still';tBadge={ic:'🟡',l:lang==='ar'?'فيه فرصة — حذر':'Still time — Caution',col:'var(--warn)'}}
       else{timing='late';tBadge={ic:'🔴',l:lang==='ar'?'متأخر — راقب':'Late — Watch',col:'var(--dn)'}}
       var d=T[s];if(!d)return;
-      var sc=0;var tags=[];
-      /* Volume-spike score */
-      if(vx>=4){sc+=45;tags.push('🔥VOL '+vx.toFixed(1)+'x')}
-      else if(vx>=3){sc+=40;tags.push('📊VOL '+vx.toFixed(1)+'x')}
-      else if(vx>=2){sc+=30;tags.push('📊VOL '+vx.toFixed(1)+'x')}
-      else if(vx>=1.5){sc+=15;tags.push('vol '+vx.toFixed(1)+'x')}
-      /* Timing score */
-      if(timing==='early')sc+=30;else if(timing==='still')sc+=15;
-      /* Bottom-of-range bonus */
-      if(d.h&&d.l&&d.h!==d.l){
-        var posInRange=(d.p-d.l)/(d.h-d.l);
-        if(posInRange<0.3){sc+=10;tags.push('📉LOW')}
-      }
-      /* V3 boosts — wrap each in try/catch since they may throw on
-         small caps with sparse microstructure data. */
-      try{var ice=detectIceberg(s);if(ice&&ice.signal==='ICEBERG_BUY'){sc+=20;tags.push('🧊ICE')}}catch(e){}
-      try{var vp=calcVPIN(s);if(vp&&vp.vpin>0.6){sc+=15;tags.push('🧪VPIN')}else if(vp&&vp.vpin>0.4){sc+=8;tags.push('🧪vp')}}catch(e){}
-      try{var wPnL=calcWhalePnL(s);if(wPnL&&wPnL.pct>1){sc+=10;tags.push('🐋PRO')}}catch(e){}
-      try{var cvd=analyzeCVD(s);if(cvd&&cvd.divergence==='BULLISH'){sc+=15;tags.push('📈CVD')}}catch(e){}
-      /* 24h change kicker */
-      if(d.c>0&&d.c<3)sc+=20;else if(d.c>=3&&d.c<8)sc+=10;
+      /* Look up V3 results — each call can throw on small caps with
+         sparse data, so wrap individually. */
+      var _ice=null,_vp=null,_wPnL=null,_cvd=null;
+      try{_ice=detectIceberg(s)}catch(e){}
+      try{_vp=calcVPIN(s)}catch(e){}
+      try{_wPnL=calcWhalePnL(s)}catch(e){}
+      try{_cvd=analyzeCVD(s)}catch(e){}
+      var _scored=scoreGemCandidate(d,{vx:vx,timing:timing},{iceberg:_ice,vpin:_vp,whalePnL:_wPnL,cvd:_cvd});
+      var sc=_scored.score;
+      var tags=_scored.tags;
       var target=timing!=='late'?pN*(timing==='early'?1.30:1.25):null;
       var stop=timing!=='late'?pN*(timing==='early'?0.90:0.88):null;
       var rugRisk=getRugPullRisk(d,FR[s],bookTickers[s]);

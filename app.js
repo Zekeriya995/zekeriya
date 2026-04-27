@@ -882,6 +882,24 @@ var _scanInFlight=null;
    otherwise starts a new analysis and shares it with anyone who calls
    while it's running. The lock auto-clears in finally so a thrown
    deepAnalyze can't deadlock the app. */
+/* ─── throttled dev warn for silent scanner catches ───────────────
+   The scanner pipeline used to swallow per-coin / per-stage errors
+   in `try{...}catch(e){}` blocks so a single malformed kline or a
+   helper that returned an unexpected shape would silently drop a
+   whole signal — with no signal in the console to debug from.
+   _scWarn surfaces those failures to console.warn, throttled to
+   one entry per (area, message) pair every 60s so a recurring
+   bug doesn't flood DevTools. Wrapped in try{} so a host without
+   console (rare) can't break the catch path itself. */
+var _scWarnSeen={};
+function _scWarn(area,e){
+  var msg=e&&e.message?e.message:String(e);
+  var key=area+'|'+msg;
+  var now=Date.now();
+  if(_scWarnSeen[key]&&now-_scWarnSeen[key]<60000)return;
+  _scWarnSeen[key]=now;
+  try{console.warn('[scanner:'+area+']',msg)}catch(_){}
+}
 function getScanResults(forceFresh){
   if(_scanInFlight)return _scanInFlight;
   if(!forceFresh&&cache.scan&&Date.now()-cache.scanTime<CACHE_TTL){
@@ -1212,11 +1230,11 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
      history — which broke the 3-waves-in-30-min consensus that ULTRA
      and Confirmed depend on. Fire-and-forget so the first render isn't
      delayed; the results feed into the *next* scan (cache TTL = 60s). */
-  try{detectWhaleWaves(r)}catch(e){}
+  try{detectWhaleWaves(r)}catch(e){_scWarn('detectWhaleWaves',e)}
   /* Tag performance tracking: record fresh high-score signals and
      evaluate any pending entries old enough (>12h) to have a verdict. */
-  try{r.forEach(function(_x){recordSignalForTracking(_x)})}catch(e){}
-  try{checkPendingTagOutcomes()}catch(e){}
+  try{r.forEach(function(_x){recordSignalForTracking(_x)})}catch(e){_scWarn('recordSignalForTracking',e)}
+  try{checkPendingTagOutcomes()}catch(e){_scWarn('checkPendingTagOutcomes',e)}
   var sigs=[];
   /* Hold-duration label tracks the user's selected timeframe so the
      trade plan on each card matches the timeframe they're hunting on. */
@@ -2453,7 +2471,7 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,100);
     var _freshness='fresh';
     if(_ageMins>60||Math.abs(_changeDet)>5)_freshness='old';
     else if(_ageMins>15||Math.abs(_changeDet)>2)_freshness='warm';
-    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,pdFlags:c.pdFlags||0,proven:_proven,coinWinRate:_coinWinRate,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}catch(_perCoinErr){/* one coin's analysis blew up — skip it so the whole scan doesn't fail */ continue}}
+    results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,pdFlags:c.pdFlags||0,proven:_proven,coinWinRate:_coinWinRate,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}catch(_perCoinErr){/* one coin's analysis blew up — skip it so the whole scan doesn't fail. Symbol-tagged warn so a recurring bug on the same coin surfaces in DevTools. */ _scWarn('deepAnalyze:'+(top[ci]&&top[ci].s||'?'),_perCoinErr); continue}}
   return results.sort(function(a,b){return b.score-a.score})}
 /* ═══ QUALITY FILTER v3 — strict gate before rendering ═══ */
 function qualityFilter(results){
@@ -6012,7 +6030,7 @@ function renderTop3(){
     if(rr<1.5){_diag.lowRR++;return}
 
     /* ═══ SIGNAL QUALITY GATE ═══ */
-    try{var gate=signalQualityGate(r.s,'top3',r.score);if(!gate.pass){_diag.gateFail++;return}}catch(e){}
+    try{var gate=signalQualityGate(r.s,'top3',r.score);if(!gate.pass){_diag.gateFail++;return}}catch(e){_scWarn('signalQualityGate:'+r.s,e)}
 
     /* ═══ Classify type ═══ */
     var type='';var icon='';

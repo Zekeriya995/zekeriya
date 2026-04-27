@@ -162,6 +162,25 @@ if (monitorState && !monitorState.lastTuneTradeCount) {
   saveMonitor();
 }
 
+/* One-time migration: the blacklist threshold was tightened from
+   "3 trades / <30% win rate" to "5 trades / <25% win rate" so it
+   matches what signalQualityGate Gate 4 actually enforces. Coins
+   added under the looser rule would otherwise stay stuck on the
+   user-visible blacklist until their rate climbed to >=55%, even
+   though Gate 4 wouldn't block them. Re-evaluate the list once
+   under the new add threshold and drop anything that no longer
+   qualifies. Flag-gated so subsequent loads skip the work. */
+if (monitorState && !monitorState.blMigratedAt5_25) {
+  if (Array.isArray(monitorState.coinBlacklist) && monitorState.coinStats) {
+    monitorState.coinBlacklist = monitorState.coinBlacklist.filter(function (c) {
+      var cs = monitorState.coinStats[c];
+      return cs && cs.total >= 5 && cs.rate < 25;
+    });
+  }
+  monitorState.blMigratedAt5_25 = true;
+  saveMonitor();
+}
+
 /* ─── supervisorData ───────────────────────────────────────────── */
 var supervisorData = {};
 try {

@@ -1,15 +1,21 @@
 node_modules/
 coverage/
 dist/
+build/
+.tmp/
+.cache/
 
-# Local env
+# Local env (every variant)
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 
 # Editor / OS
 .vscode/
 .idea/
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
 
@@ -18,6 +24,10 @@ Thumbs.db
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+lerna-debug.log*
+.npm/
 
-# ESLint cache
+# Tooling caches
 .eslintcache
+.prettiercache
+*.tsbuildinfo

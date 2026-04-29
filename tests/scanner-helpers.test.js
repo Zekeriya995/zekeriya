@@ -215,14 +215,14 @@ test('evaluateProvenStatus — custom thresholds override defaults', () => {
   /* If the platform tunes thresholds (10 trades, 70%), the helper
      respects the new values. This is the seam a future calibration
      layer or A/B test would attach to. */
-  assert.deepEqual(
-    evaluateProvenStatus({ total: 8, rate: 80 }, 10, 70),
-    { proven: false, rate: 80 }
-  );
-  assert.deepEqual(
-    evaluateProvenStatus({ total: 12, rate: 80 }, 10, 70),
-    { proven: true, rate: 80 }
-  );
+  assert.deepEqual(evaluateProvenStatus({ total: 8, rate: 80 }, 10, 70), {
+    proven: false,
+    rate: 80,
+  });
+  assert.deepEqual(evaluateProvenStatus({ total: 12, rate: 80 }, 10, 70), {
+    proven: true,
+    rate: 80,
+  });
 });
 
 test('evaluateProvenStatus — defends against rate=0 with total>=5 (zero division avoidance)', () => {
@@ -358,10 +358,10 @@ test('scoreGemCandidate — bottom-of-range adds 10 only when in lower 30%', () 
 test('scoreGemCandidate — V3 boosts compose correctly', () => {
   const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
   const v3 = {
-    iceberg: { signal: 'ICEBERG_BUY' },        // +20
-    vpin: { vpin: 0.7 },                        // +15
-    whalePnL: { pct: 2 },                       // +10
-    cvd: { divergence: 'BULLISH' },             // +15
+    iceberg: { signal: 'ICEBERG_BUY' }, // +20
+    vpin: { vpin: 0.7 }, // +15
+    whalePnL: { pct: 2 }, // +10
+    cvd: { divergence: 'BULLISH' }, // +15
   };
   /* No klineStats, no c-bonus. Only V3 contributes. */
   assert.equal(scoreGemCandidate(t, null, v3).score, 60);
@@ -379,9 +379,9 @@ test('scoreGemCandidate — VPIN rung is exclusive (high or moderate, not both)'
 });
 
 test('scoreGemCandidate — c kicker buckets', () => {
-  const t1 = { p: 1, c: 1.5, v: 1e6, h: 1, l: 1 };  // (0,3)
-  const t2 = { p: 1, c: 5, v: 1e6, h: 1, l: 1 };    // [3,8)
-  const t3 = { p: 1, c: 10, v: 1e6, h: 1, l: 1 };   // out
+  const t1 = { p: 1, c: 1.5, v: 1e6, h: 1, l: 1 }; // (0,3)
+  const t2 = { p: 1, c: 5, v: 1e6, h: 1, l: 1 }; // [3,8)
+  const t3 = { p: 1, c: 10, v: 1e6, h: 1, l: 1 }; // out
   assert.equal(scoreGemCandidate(t1, null, null).score, 20);
   assert.equal(scoreGemCandidate(t2, null, null).score, 10);
   assert.equal(scoreGemCandidate(t3, null, null).score, 0);
@@ -574,7 +574,7 @@ test('countWavesInWindow — only waves inside the window are counted', () => {
     { time: now - 45 * 60 * 1000 }, // 45 min ago — outside 30-min window
     { time: now - 20 * 60 * 1000 }, // 20 min ago — inside
     { time: now - 10 * 60 * 1000 }, // 10 min ago — inside
-    { time: now - 1 * 60 * 1000 },  // 1 min ago  — inside
+    { time: now - 1 * 60 * 1000 }, // 1 min ago  — inside
   ];
   assert.equal(countWavesInWindow(waves, 30 * 60 * 1000), 3);
 });
@@ -695,11 +695,17 @@ test('computePerformanceReport — groups closed trades by exit reason', () => {
 
 test('computePerformanceReport — recent trend emitted only at 50+ samples', () => {
   const few = Array.from({ length: 40 }, (_, i) => ({
-    checked: true, hit: i % 2 === 0, score: 50, pnl: i % 2 === 0 ? 2 : -1,
+    checked: true,
+    hit: i % 2 === 0,
+    score: 50,
+    pnl: i % 2 === 0 ? 2 : -1,
   }));
   assert.equal(computePerformanceReport(few, []).recentTrend.length, 0);
   const plenty = Array.from({ length: 75 }, (_, i) => ({
-    checked: true, hit: i % 2 === 0, score: 50, pnl: i % 2 === 0 ? 2 : -1,
+    checked: true,
+    hit: i % 2 === 0,
+    score: 50,
+    pnl: i % 2 === 0 ? 2 : -1,
   }));
   const r = computePerformanceReport(plenty, []);
   /* 75 predictions, window=25 → buckets at 25, 50, 75 */
@@ -749,20 +755,36 @@ test('evaluateBlacklistAdd — null / missing stats never adds', () => {
 test('evaluateBlacklistAdd — boundary: 5 trades + <25% adds, exactly 25% does not', () => {
   /* The interesting cases live around the two boundaries (5 trades, 25%). */
   assert.equal(evaluateBlacklistAdd({ total: 4, rate: 0 }), false, '4 trades is not enough sample');
-  assert.equal(evaluateBlacklistAdd({ total: 5, rate: 24 }), true,  '5 trades + 24% adds');
-  assert.equal(evaluateBlacklistAdd({ total: 5, rate: 25 }), false, 'exactly 25% is the cutoff (strict <)');
-  assert.equal(evaluateBlacklistAdd({ total: 5, rate: 0 }), true,   '5 trades + 0% adds');
+  assert.equal(evaluateBlacklistAdd({ total: 5, rate: 24 }), true, '5 trades + 24% adds');
+  assert.equal(
+    evaluateBlacklistAdd({ total: 5, rate: 25 }),
+    false,
+    'exactly 25% is the cutoff (strict <)'
+  );
+  assert.equal(evaluateBlacklistAdd({ total: 5, rate: 0 }), true, '5 trades + 0% adds');
   assert.equal(evaluateBlacklistAdd({ total: 100, rate: 24 }), true, 'high sample + low rate adds');
-  assert.equal(evaluateBlacklistAdd({ total: 100, rate: 25 }), false, 'high sample at boundary still excluded');
+  assert.equal(
+    evaluateBlacklistAdd({ total: 100, rate: 25 }),
+    false,
+    'high sample at boundary still excluded'
+  );
 });
 
 test('evaluateBlacklistRemove — needs 5 trades AND >=55% (wide hysteresis vs add)', () => {
   /* Add fires below 25, remove fires at 55+ — leaves a 25–55% gap so
      a marginal recovery can't immediately un-blacklist a coin. */
   assert.equal(evaluateBlacklistRemove(null), false);
-  assert.equal(evaluateBlacklistRemove({ total: 4, rate: 99 }), false, '4 trades insufficient even at 99%');
-  assert.equal(evaluateBlacklistRemove({ total: 5, rate: 54 }), false, 'in hysteresis gap stays blacklisted');
-  assert.equal(evaluateBlacklistRemove({ total: 5, rate: 55 }), true,  'exactly 55% removes');
+  assert.equal(
+    evaluateBlacklistRemove({ total: 4, rate: 99 }),
+    false,
+    '4 trades insufficient even at 99%'
+  );
+  assert.equal(
+    evaluateBlacklistRemove({ total: 5, rate: 54 }),
+    false,
+    'in hysteresis gap stays blacklisted'
+  );
+  assert.equal(evaluateBlacklistRemove({ total: 5, rate: 55 }), true, 'exactly 55% removes');
   assert.equal(evaluateBlacklistRemove({ total: 5, rate: 99 }), true);
 });
 
@@ -787,7 +809,11 @@ test('blacklist contract — monotonic-total invariant: any coin reachable on bl
      symmetry — even if some bad data path put it on the list,
      remove won't fire until total reaches 5). */
   for (let total = 0; total < 5; total++) {
-    assert.equal(evaluateBlacklistRemove({ total, rate: 99 }), false, `total=${total} can't be removed even at 99%`);
+    assert.equal(
+      evaluateBlacklistRemove({ total, rate: 99 }),
+      false,
+      `total=${total} can't be removed even at 99%`
+    );
   }
 });
 
@@ -817,14 +843,28 @@ test('qualityFilterRejectReason — null / empty result rejects', () => {
 test('qualityFilterRejectReason — late-entry gate (c >= 5)', () => {
   /* Pre-built passing baseline: clear all the other gates so we can
      isolate one boundary at a time. */
-  const base = { c: 0, passed: 5, smartEntry: { rr: 3 }, pdFlags: 0, p: 100, tfAlign: { bearish4h: false } };
+  const base = {
+    c: 0,
+    passed: 5,
+    smartEntry: { rr: 3 },
+    pdFlags: 0,
+    p: 100,
+    tfAlign: { bearish4h: false },
+  };
   assert.equal(qualityFilterRejectReason({ ...base, c: 4.99 }), null);
   assert.equal(qualityFilterRejectReason({ ...base, c: 5 }), 'late');
   assert.equal(qualityFilterRejectReason({ ...base, c: 8 }), 'late');
 });
 
 test('qualityFilterRejectReason — passed-checks gate (passed < 4)', () => {
-  const base = { c: 0, passed: 4, smartEntry: { rr: 3 }, pdFlags: 0, p: 100, tfAlign: { bearish4h: false } };
+  const base = {
+    c: 0,
+    passed: 4,
+    smartEntry: { rr: 3 },
+    pdFlags: 0,
+    p: 100,
+    tfAlign: { bearish4h: false },
+  };
   assert.equal(qualityFilterRejectReason({ ...base, passed: 4 }), null);
   assert.equal(qualityFilterRejectReason({ ...base, passed: 3 }), 'low-passed');
   assert.equal(qualityFilterRejectReason({ ...base, passed: 0 }), 'low-passed');
@@ -832,20 +872,38 @@ test('qualityFilterRejectReason — passed-checks gate (passed < 4)', () => {
 
 test('qualityFilterRejectReason — risk/reward gate (smartEntry.rr < 2.0)', () => {
   const base = { c: 0, passed: 5, pdFlags: 0, p: 100, tfAlign: { bearish4h: false } };
-  assert.equal(qualityFilterRejectReason({ ...base, smartEntry: { rr: 2.0 } }), null,    'rr=2.0 passes');
+  assert.equal(
+    qualityFilterRejectReason({ ...base, smartEntry: { rr: 2.0 } }),
+    null,
+    'rr=2.0 passes'
+  );
   assert.equal(qualityFilterRejectReason({ ...base, smartEntry: { rr: 1.99 } }), 'low-rr');
   assert.equal(qualityFilterRejectReason({ ...base, smartEntry: { rr: 1.5 } }), 'low-rr');
 });
 
 test('qualityFilterRejectReason — funding-rate gate (FR > 5%)', () => {
-  const base = { c: 0, passed: 5, smartEntry: { rr: 3 }, pdFlags: 0, p: 100, tfAlign: { bearish4h: false } };
-  assert.equal(qualityFilterRejectReason(base, { fr: { rate: 0.05 } }), null,    'rate=5% passes');
+  const base = {
+    c: 0,
+    passed: 5,
+    smartEntry: { rr: 3 },
+    pdFlags: 0,
+    p: 100,
+    tfAlign: { bearish4h: false },
+  };
+  assert.equal(qualityFilterRejectReason(base, { fr: { rate: 0.05 } }), null, 'rate=5% passes');
   assert.equal(qualityFilterRejectReason(base, { fr: { rate: 0.0501 } }), 'high-fr');
-  assert.equal(qualityFilterRejectReason(base, { fr: { rate: 0.10 } }), 'high-fr');
+  assert.equal(qualityFilterRejectReason(base, { fr: { rate: 0.1 } }), 'high-fr');
 });
 
 test('qualityFilterRejectReason — BTC-crash gate (BTC.c < -3)', () => {
-  const base = { c: 0, passed: 5, smartEntry: { rr: 3 }, pdFlags: 0, p: 100, tfAlign: { bearish4h: false } };
+  const base = {
+    c: 0,
+    passed: 5,
+    smartEntry: { rr: 3 },
+    pdFlags: 0,
+    p: 100,
+    tfAlign: { bearish4h: false },
+  };
   assert.equal(qualityFilterRejectReason(base, { btc: { c: -3 } }), null);
   assert.equal(qualityFilterRejectReason(base, { btc: { c: -3.01 } }), 'btc-crash');
   assert.equal(qualityFilterRejectReason(base, { btc: { c: -10 } }), 'btc-crash');
@@ -857,9 +915,13 @@ test('qualityFilterRejectReason — HTF-bear gate only fires when c >= 2', () =>
      Already-running candidates (c >= 2) on a bearish 4h ARE rejected. */
   const tfBear = { tfAlign: { bearish4h: true } };
   const base = { passed: 5, smartEntry: { rr: 3 }, pdFlags: 0, p: 100 };
-  assert.equal(qualityFilterRejectReason({ ...base, c: 1.5, ...tfBear }), null,    'c=1.5 + 4h bear is fine');
-  assert.equal(qualityFilterRejectReason({ ...base, c: 2,   ...tfBear }), 'htf-bear');
-  assert.equal(qualityFilterRejectReason({ ...base, c: 4,   ...tfBear }), 'htf-bear');
+  assert.equal(
+    qualityFilterRejectReason({ ...base, c: 1.5, ...tfBear }),
+    null,
+    'c=1.5 + 4h bear is fine'
+  );
+  assert.equal(qualityFilterRejectReason({ ...base, c: 2, ...tfBear }), 'htf-bear');
+  assert.equal(qualityFilterRejectReason({ ...base, c: 4, ...tfBear }), 'htf-bear');
 });
 
 test('qualityFilterRejectReason — pump-and-dump gate (pdFlags >= 3)', () => {
@@ -871,9 +933,22 @@ test('qualityFilterRejectReason — pump-and-dump gate (pdFlags >= 3)', () => {
 
 test('qualityFilterRejectReason — drift-from-detection gate (>8%)', () => {
   /* Stale signal: caught at $100, now $109 = +9% drift, reject. */
-  const base = { c: 0, passed: 5, smartEntry: { rr: 3 }, pdFlags: 0, tfAlign: { bearish4h: false } };
-  assert.equal(qualityFilterRejectReason({ ...base, p: 108 }, { priceAtDetection: 100 }), null,    '+8% is the cutoff');
-  assert.equal(qualityFilterRejectReason({ ...base, p: 108.01 }, { priceAtDetection: 100 }), 'drift');
+  const base = {
+    c: 0,
+    passed: 5,
+    smartEntry: { rr: 3 },
+    pdFlags: 0,
+    tfAlign: { bearish4h: false },
+  };
+  assert.equal(
+    qualityFilterRejectReason({ ...base, p: 108 }, { priceAtDetection: 100 }),
+    null,
+    '+8% is the cutoff'
+  );
+  assert.equal(
+    qualityFilterRejectReason({ ...base, p: 108.01 }, { priceAtDetection: 100 }),
+    'drift'
+  );
   assert.equal(qualityFilterRejectReason({ ...base, p: 110 }, { priceAtDetection: 100 }), 'drift');
 });
 
@@ -886,7 +961,10 @@ test('qualityFilterRejectReason — drift-from-detection gate (>8%)', () => {
 
 test('qualityFilterRejectReason — known-good signal passes all gates', () => {
   const good = {
-    s: 'GOOD', p: 100, c: 1, passed: 5,
+    s: 'GOOD',
+    p: 100,
+    c: 1,
+    passed: 5,
     smartEntry: { rr: 2.5 },
     pdFlags: 0,
     tfAlign: { bearish4h: false },
@@ -901,8 +979,13 @@ test('qualityFilterRejectReason — survivor batch matches expected', () => {
      exactly the 'pass' rows in order. */
   const ctx = { fr: { rate: 0.01 }, btc: { c: 0.5 }, priceAtDetection: 100 };
   const baseGood = {
-    s: 'BTC', p: 100, c: 1, passed: 5,
-    smartEntry: { rr: 2.5 }, pdFlags: 0, tfAlign: { bearish4h: false },
+    s: 'BTC',
+    p: 100,
+    c: 1,
+    passed: 5,
+    smartEntry: { rr: 2.5 },
+    pdFlags: 0,
+    tfAlign: { bearish4h: false },
   };
   const batch = [
     { tag: 'pass', sig: { ...baseGood, s: 'A' } },
@@ -939,7 +1022,7 @@ test('coinbasePremiumPct — positive premium returns positive percentage', () =
   /* No premium */
   assert.equal(coinbasePremiumPct(100, 100), 0);
   /* Coinbase discount = negative percentage */
-  assert.ok(Math.abs(coinbasePremiumPct(99, 100) - (-1)) < 1e-9);
+  assert.ok(Math.abs(coinbasePremiumPct(99, 100) - -1) < 1e-9);
 });
 
 test('coinbasePremiumPct — matches the boundary thresholds in both scoring policies', () => {
@@ -955,7 +1038,11 @@ test('topTraderLatestLong — missing entry / arrays return null', () => {
   assert.equal(topTraderLatestLong({ accounts: [] }), null, 'empty array');
   assert.equal(topTraderLatestLong({ positions: [] }, 'positions'), null);
   assert.equal(topTraderLatestLong({ accounts: [{}] }), null, 'latest entry missing .long');
-  assert.equal(topTraderLatestLong({ accounts: [{ long: 'high' }] }), null, '.long must be numeric');
+  assert.equal(
+    topTraderLatestLong({ accounts: [{ long: 'high' }] }),
+    null,
+    '.long must be numeric'
+  );
 });
 
 test('topTraderLatestLong — picks the FRESHEST entry (last in array)', () => {

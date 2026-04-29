@@ -21,6 +21,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const compression = require('compression');
 const axios = require('axios');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
@@ -105,6 +106,12 @@ app.use(
     crossOriginEmbedderPolicy: false,
   })
 );
+
+/* gzip JSON responses. /api/all is the largest payload (50-200 KB once
+   the cache is warm) and compresses ~75 %, every 5-second poll from
+   every connected client benefits. The default 1 KB threshold means
+   small responses (/api/health, /notify ack) skip the cost. */
+app.use(compression());
 
 /* CORS — restrict to your app's domain */
 app.use(

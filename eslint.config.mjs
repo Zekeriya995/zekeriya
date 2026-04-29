@@ -72,6 +72,8 @@ export default [
         qualityFilterRejectReason: 'readonly',
         coinbasePremiumPct: 'readonly',
         topTraderLatestLong: 'readonly',
+        /* Declared in src/monitor-step.js */
+        monitorTradeDecision: 'readonly',
         /* Declared in src/storage.js */
         safeGetJSON: 'readonly',
         safeGet: 'readonly',
@@ -253,6 +255,8 @@ export default [
         qualityFilterRejectReason: 'readonly',
         coinbasePremiumPct: 'readonly',
         topTraderLatestLong: 'readonly',
+        /* From src/monitor-step.js */
+        monitorTradeDecision: 'readonly',
         /* From src/storage.js */
         safeGet: 'readonly',
         safeGetJSON: 'readonly',
@@ -267,11 +271,35 @@ export default [
         startPriceStream: 'readonly',
         stopPriceStream: 'readonly',
         priceStreamState: 'writable',
+        /* From src/whale-state.js (loaded in tests/whale-state.test.js) */
+        calcRealTotalBuy: 'readonly',
+        calcWhaleAvgEntry: 'readonly',
+        calcWhalePnL: 'readonly',
+        calcFlowRate: 'readonly',
+        /* From src/portfolio.js (loaded in tests/portfolio.test.js) */
+        recSig: 'readonly',
+        getSigTime: 'readonly',
+        savePred: 'readonly',
+        getAcc: 'readonly',
+        predictions: 'writable',
+        sigHist: 'writable',
+        portfolio: 'writable',
+        activeTrades: 'writable',
+        /* From src/connection.js (loaded in tests/connection.test.js) */
+        fj: 'readonly',
+        applyBackoff: 'readonly',
+        getConnQuality: 'readonly',
+        apiCooldown: 'writable',
+        connMetrics: 'writable',
+        lastDataTime: 'writable',
         /* Other globals seeded by tests for the cross-file flow check */
         whaleWaves: 'writable',
         signalQualityGate: 'writable',
         openTrade: 'writable',
         T: 'writable',
+        COL: 'writable',
+        t: 'writable',
+        closeMo: 'writable',
         document: 'writable',
         fetch: 'writable',
         /* Test fixtures from tests/_setup.js */

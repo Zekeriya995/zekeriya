@@ -2,7 +2,7 @@
    the previous generation atomically. The old string ('nexus-v10-v14-modules')
    was static, which meant a hot-fix to app.js was never fetched from the
    network until users hard-refreshed. */
-var CACHE_VERSION = 'v10.2.1-scanner-stuck-fix-2026-04-27';
+var CACHE_VERSION = 'v10.2.2-monitor-step-2026-04-29';
 var CACHE_NAME = 'nexus-' + CACHE_VERSION;
 /* Critical assets — install fails if any fail */
 var CRITICAL_ASSETS = [
@@ -20,6 +20,7 @@ var CRITICAL_ASSETS = [
   './src/whale-state.js',
   './src/portfolio.js',
   './src/notifications.js',
+  './src/monitor-step.js',
 ];
 /* Optional assets — best-effort cache, failure does not block install */
 var OPTIONAL_ASSETS = [

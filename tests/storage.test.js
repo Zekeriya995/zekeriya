@@ -89,11 +89,18 @@ test('makeDebouncedSaver — flush() runs immediately and cancels the timer', as
 
 test('makeDebouncedSaver — saveFn that throws does not crash the caller', async () => {
   reset();
+  let attempts = 0;
   const saver = makeDebouncedSaver(() => {
+    attempts++;
     throw new Error('boom');
   }, 5);
   saver.schedule();
   await new Promise((r) => setTimeout(r, 30));
-  /* If we reach here, the throw was caught by the saver wrapper. */
-  assert.ok(true);
+  /* The wrapper must invoke saveFn (so the throw really happened) and must
+     swallow the exception (test process is still alive to reach this line). */
+  assert.equal(attempts, 1, 'saveFn must run exactly once even when it throws');
+  /* Subsequent schedules still work — wrapper state was not corrupted. */
+  saver.schedule();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(attempts, 2, 'wrapper must remain usable after a thrown save');
 });

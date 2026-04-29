@@ -2477,17 +2477,33 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,100);
    qualityFilterRejectReason() in src/scanner-helpers.js so it can be
    unit-tested. This wrapper just feeds the per-symbol globals
    (FR, T.BTC, sigHist) into the helper as ctx and slices to
-   the top 7 survivors. See helper for gate rationale. */
+   the top 7 survivors.
+
+   When the gate filters everything out (e.g., the user sees
+   "السوق هادئ — لا فرص قوية" with 800+ coins loaded), we log
+   the rejection breakdown to the console so it's possible to
+   see *which* gate is doing the blocking. Silent on successful
+   filters so DevTools doesn't get spammed. */
 function qualityFilter(results){
-  return results.filter(function(r){
+  var _qfDiag={total:results.length,byReason:{}};
+  var passed=results.filter(function(r){
     var sig=sigHist[r.s+'_trade'];
     var priceAtDetection=(sig&&typeof sig==='object'&&sig.priceAtDetection>0)?sig.priceAtDetection:0;
-    return qualityFilterRejectReason(r,{
+    var reason=qualityFilterRejectReason(r,{
       fr:FR[r.s]||null,
       btc:T.BTC||null,
       priceAtDetection:priceAtDetection,
-    })===null;
-  }).slice(0,7);
+    });
+    if(reason!==null){
+      _qfDiag.byReason[reason]=(_qfDiag.byReason[reason]||0)+1;
+      return false;
+    }
+    return true;
+  });
+  if(passed.length===0&&_qfDiag.total>0){
+    try{console.log('[qualityFilter] 🎯 0/'+_qfDiag.total+' passed — rejections:',_qfDiag.byReason)}catch(_e){}
+  }
+  return passed.slice(0,7);
 }
 /* MARKET HEALTH */
 function calcHealth(){var sc=0,f=[];sc+=fgValue<25?5:fgValue<40?10:fgValue<60?15:fgValue<75?18:12;f.push({l:'Fear/Greed',v:fgValue,c:fgValue<30?'dn':fgValue>70?'up':'warn'});sc+=btcDom>60?8:btcDom>50?12:btcDom>40?15:10;f.push({l:'BTC Dom',v:btcDom.toFixed(1)+'%',c:btcDom>55?'warn':'neon'});var bk=Object.values(T).filter(function(x){return x.c>=8}).length;sc+=bk>20?15:bk>10?12:bk>5?10:5;f.push({l:lang==='ar'?'انفجارات':'Breakouts',v:bk,c:bk>15?'up':bk>5?'warn':'dn'});var rs=Object.values(T).filter(function(x){return x.c>0}).length,tt=Object.keys(T).length,bp=tt>0?Math.round(rs/tt*100):50;sc+=bp>60?15:bp>45?10:5;f.push({l:lang==='ar'?'صاعدة':'Bullish',v:bp+'%',c:bp>60?'up':bp>40?'warn':'dn'});var af=Object.values(FR).reduce(function(s,x){return s+x.rate},0)/Math.max(1,Object.keys(FR).length);sc+=af>0.05?5:af>0.02?10:af<-0.01?18:15;f.push({l:'Avg FR',v:(af>=0?'+':'')+af.toFixed(4)+'%',c:af>0.05?'dn':af<-0.01?'up':'warn'});var vc=Object.values(T).filter(function(x){return x.v>1e8}).length;sc+=vc>15?15:vc>8?10:5;f.push({l:'Vol>$100M',v:vc,c:vc>10?'up':'warn'});return{score:Math.min(100,sc),factors:f}}

@@ -85,6 +85,12 @@ function calcRSI(c, p) {
     avgG = (avgG * (p - 1) + g) / p;
     avgL = (avgL * (p - 1) + l) / p;
   }
+  /* Flat series — both gains and losses zero — produced 100 in the
+     previous version because the early `avgL === 0` branch fired
+     before the symmetric check. RSI on a perfectly flat series is
+     undefined; the convention used by TradingView (and the natural
+     mid-point) is 50. AUDIT-F6. */
+  if (avgG === 0 && avgL === 0) return 50;
   if (avgL === 0) return 100;
   return 100 - 100 / (1 + avgG / avgL);
 }
@@ -116,10 +122,15 @@ function calcMACD(c) {
   var curSig = sig[sig.length - 1];
   var prevSig = sig[sig.length - 2];
   var prevMacd = dense[dense.length - 2];
+  /* Strict comparators on both sides. The earlier `<=`/`>=` fired a
+     spurious cross when prevMacd === prevSig exactly (touch the line
+     without crossing) — flat-signal sections produced phantom bull
+     signals. A real cross requires prev strictly on the wrong side.
+     AUDIT-MACD. */
   var cross = 'none';
   if (curSig != null && prevSig != null) {
-    if (curMacd > curSig && prevMacd <= prevSig) cross = 'bull';
-    else if (curMacd < curSig && prevMacd >= prevSig) cross = 'bear';
+    if (curMacd > curSig && prevMacd < prevSig) cross = 'bull';
+    else if (curMacd < curSig && prevMacd > prevSig) cross = 'bear';
   }
   return { h: curMacd, signal: curSig, cross: cross };
 }

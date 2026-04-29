@@ -60,24 +60,20 @@ test('recSig — within 1 h: increments count and updates lastSeen, keeps priceA
   assert.equal(e2.count, 2);
 });
 
-test('recSig — quiet for >1 h resets the entry (AUDIT: drift gate impact)', () => {
-  /* Documents current behaviour: priceAtDetection is overwritten with
-     the new price after a 1 h gap. The qualityFilter drift gate reads
-     this field, so it can never fire after a 1 h dormancy. The fix
-     (preserve original detection price across resets) updates this
-     test alongside the source change. */
+test('recSig — quiet for >1 h resets count + firstSeen, KEEPS priceAtDetection (AUDIT-recSig)', () => {
+  /* Fixed: the original detection price now survives across the 1 h
+     reset. The qualityFilter drift gate (current/detection - 1) needs
+     the original price to make sense across the lifetime of a signal.
+     count and firstSeen still reset because a re-emerging signal is
+     conceptually a new one. */
   reset();
   const e1 = recSig('BTC', 'breakout', 50000);
   e1.lastSeen = Date.now() - 60 * 60 * 1000 - 1000; /* >1 h ago */
   sigHist['BTC_breakout'] = e1;
   const e2 = recSig('BTC', 'breakout', 70000);
-  assert.equal(e2.priceAtDetection, 70000, 'TODAY: detection price is overwritten');
-  assert.equal(e2.count, 1, 'reset path resets count too');
-  assert.equal(
-    e2.firstSeen,
-    e2.lastSeen,
-    'reset path stamps firstSeen and lastSeen to the same now()'
-  );
+  assert.equal(e2.priceAtDetection, 50000, 'detection price preserved across reset');
+  assert.equal(e2.count, 1, 'count resets on re-emergence');
+  assert.equal(e2.firstSeen, e2.lastSeen, 'firstSeen and lastSeen stamped to the same now()');
 });
 
 test('recSig — migrates legacy numeric entry into the rich shape', () => {

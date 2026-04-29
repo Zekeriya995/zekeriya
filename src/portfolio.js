@@ -43,8 +43,22 @@ function recSig(sym, type, price) {
     existing = { firstSeen: existing, lastSeen: now, priceAtDetection: price || 0, count: 1 };
     sigHist[k] = existing;
   }
-  if (!existing || now - existing.lastSeen > 3600000) {
+  if (!existing) {
     sigHist[k] = { firstSeen: now, lastSeen: now, priceAtDetection: price || 0, count: 1 };
+  } else if (now - existing.lastSeen > 3600000) {
+    /* AUDIT-recSig: a 1 h dormancy used to overwrite priceAtDetection
+       with the current price, which broke the qualityFilter drift gate
+       (`r.curPrice / r.priceAtDetection - 1`) — after any quiet hour
+       the gate compared the price to itself. Preserve the original
+       detection price across resets so the drift gate survives the
+       lifetime of the signal. firstSeen and count still reset because
+       a re-emerging signal is conceptually new. */
+    sigHist[k] = {
+      firstSeen: now,
+      lastSeen: now,
+      priceAtDetection: existing.priceAtDetection || price || 0,
+      count: 1,
+    };
   } else {
     existing.lastSeen = now;
     existing.count++;

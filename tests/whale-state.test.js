@@ -184,20 +184,20 @@ test('calcFlowRate — units / minute against the oldest in-window wave', () => 
   assert.ok(r > 29 && r < 31, `expected ~30/min, got ${r}`);
 });
 
-test('calcFlowRate — TODAY: explodes when two waves are seconds apart (AUDIT-F7)', () => {
-  /* Documents the current bug: when oldest in-window wave is ~now,
-     the divisor (timeSpan in minutes) collapses toward 0 and the
-     returned rate balloons. The fix lands as a separate change that
-     floors timeSpan; this assertion is updated alongside it. */
+test('calcFlowRate — clusters of waves within 1 minute do NOT explode (AUDIT-F7)', () => {
+  /* Fixed: timeSpan is now floored at 1 minute, so two waves seconds
+     apart produce `totalAmount / 1` instead of `totalAmount / (1/60)`.
+     200 / 1 = 200, which sits well under the 50,000 alert threshold
+     in app.js — no more false aggressive-flow alerts on clustered
+     events. */
   reset();
   const now = Date.now();
   whaleWaves.BTC = {
     waves: [
-      { amount: 100, time: now - 1000 } /* 1 s ago = 1/60 min */,
+      { amount: 100, time: now - 1000 } /* 1 s ago */,
       { amount: 100, time: now },
     ],
   };
-  /* 200 / (1/60) = 12000-ish; with jitter we just assert "absurdly high" */
   const r = calcFlowRate('BTC');
-  assert.ok(r > 1000, `current behaviour explodes when waves cluster; got ${r}`);
+  assert.equal(r, 200, 'sub-minute cluster is rate-limited to total/1min');
 });

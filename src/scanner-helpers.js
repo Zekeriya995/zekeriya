@@ -89,8 +89,19 @@ function atrZones(price, atr, support, resistance, mults) {
     target1 = Math.min(target1, resistance);
   }
   var target2 = price + t2Mult * atr;
+  /* AUDIT-atrZones: caller-supplied negative `mults`, an `atr` that
+     somehow slipped past the > 0 guard, or a `resistance` clamp that
+     pulls target1 onto entry would yield risk <= 0 or no upside.
+     The risk = price - stop calculation then went negative, rr
+     silently became 0, and downstream consumers had no way to tell a
+     degenerate setup from a low-quality one. Reject explicitly so the
+     caller short-circuits. (target1 <= target2 is intentionally NOT
+     required here — a `mults` override that bumps t1 above t2 is a
+     legitimate configuration choice; the order is enforced upstream
+     where it matters.) */
+  if (!(stop < price && price < target1)) return null;
   var risk = price - stop;
-  var rr = risk > 0 ? +((target1 - price) / risk).toFixed(2) : 0;
+  var rr = +((target1 - price) / risk).toFixed(2);
   return {
     entry: price,
     stop: stop,

@@ -69,7 +69,14 @@ function calcWhalePnL(sym) {
 }
 
 /* Inflow rate over the last 15 minutes (units / minute). Returns 0 if
-   there isn't enough data to span more than a single sample. */
+   there isn't enough data to span more than a single sample.
+
+   AUDIT-F7: when two waves arrive seconds apart, the divisor (timeSpan
+   in minutes) collapses toward 0 and the returned rate balloons by
+   60x or more — the alert threshold (flowRate>50000) tripped on
+   noise. The fix floors timeSpan at 1 minute, which is the smallest
+   window the metric can meaningfully describe given a 15-minute
+   sliding bucket and waves-per-minute units. */
 function calcFlowRate(sym) {
   var ww = whaleWaves[sym];
   if (!ww || !ww.waves || ww.waves.length < 2) return 0;
@@ -80,6 +87,7 @@ function calcFlowRate(sym) {
   var totalAmount = recent.reduce(function (s, w) {
     return s + w.amount;
   }, 0);
-  var timeSpan = (Date.now() - recent[0].time) / 60000;
-  return timeSpan > 0 ? totalAmount / timeSpan : 0;
+  var rawSpan = (Date.now() - recent[0].time) / 60000;
+  var timeSpan = Math.max(rawSpan, 1);
+  return totalAmount / timeSpan;
 }

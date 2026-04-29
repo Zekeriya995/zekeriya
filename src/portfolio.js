@@ -96,26 +96,54 @@ function savePred(sym, p, tgt, sc) {
 }
 
 /* Resolve all unchecked predictions older than 12 h, then return
-   { total, hits, partials, rate } across the resolved set.
+   { total, hits, partials, rate, stale } across the resolved set.
    Hit:  >= 5 % gain.   Partial:  2-5 % gain.   Otherwise: miss.
-   Partials count as 0.5 of a hit in the rate calculation. */
-function getAcc() {
+   Partials count as 0.5 of a hit in the rate calculation.
+
+   AUDIT-F2: the previous version resolved an unchecked prediction
+   using the CURRENT T[sym].p, regardless of how long after the
+   12 h mark `getAcc` was called. A user reloading two days later
+   silently rescored every pending prediction against today's price,
+   making the historical accuracy non-stationary.
+
+   The fix bounds the resolution window. A prediction is scored only
+   if the helper observes it WITHIN PRED_FRESH_WINDOW_MS of its
+   target time (12 h after creation). Outside that window the
+   prediction is marked `stale` and excluded from the rate — its
+   outcome cannot be honestly reconstructed without backfill from
+   historical klines, which is a separate concern from this helper.
+   The 1-min `bgInterval` registered in app.js init() catches the
+   common case where the user is online around T+12h. */
+var PRED_FRESH_WINDOW_MS = 5 * 60 * 1000;
+
+function _resolveDuePredictions(now) {
   var changed = false;
   predictions.forEach(function (p) {
-    if (!p.checked && Date.now() - p.time > 12 * 3600 * 1000) {
-      var cur = T[p.sym];
-      if (cur) {
-        p.checked = true;
-        var gain = ((cur.p - p.price) / p.price) * 100;
-        p.hit = gain >= 5;
-        p.partial = gain >= 2 && gain < 5;
-        p.finalPrice = cur.p;
-        p.pnl = gain;
-        changed = true;
-      }
+    if (p.checked || p.stale) return;
+    var resolveAt = p.time + 12 * 3600 * 1000;
+    if (now < resolveAt) return; /* not yet due */
+    if (now - resolveAt > PRED_FRESH_WINDOW_MS) {
+      /* Window missed — refuse to fabricate an outcome. */
+      p.stale = true;
+      changed = true;
+      return;
     }
+    var cur = T[p.sym];
+    if (!cur) return; /* no ticker yet — try again on the next tick */
+    p.checked = true;
+    var gain = ((cur.p - p.price) / p.price) * 100;
+    p.hit = gain >= 5;
+    p.partial = gain >= 2 && gain < 5;
+    p.finalPrice = cur.p;
+    p.pnl = gain;
+    changed = true;
   });
   if (changed) safeSetJSON('nxpred10', predictions);
+  return changed;
+}
+
+function getAcc() {
+  _resolveDuePredictions(Date.now());
   var c = predictions.filter(function (p) {
     return p.checked;
   });
@@ -125,10 +153,14 @@ function getAcc() {
   var partials = c.filter(function (p) {
     return p.partial;
   }).length;
+  var stale = predictions.filter(function (p) {
+    return p.stale;
+  }).length;
   return {
     total: c.length,
     hits: hits,
     partials: partials,
+    stale: stale,
     rate: c.length > 0 ? Math.round(((hits + partials * 0.5) / c.length) * 100) : 0,
   };
 }

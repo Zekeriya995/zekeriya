@@ -46,7 +46,9 @@ function isConfirmedBreakout(kl15, lookback, volMult) {
 function tfAlignment(kl15, kl1h, kl4h) {
   function bullish(kl) {
     if (!kl || kl.length < 50) return null;
-    var closes = kl.map(function (k) { return +k[4]; });
+    var closes = kl.map(function (k) {
+      return +k[4];
+    });
     var e20 = calcEMA(closes, 20);
     var e50 = calcEMA(closes, 50);
     if (e20 == null || e50 == null) return null;
@@ -143,7 +145,9 @@ function computePerformanceReport(preds, trades) {
     byExitReason: {},
     recentTrend: [],
   };
-  var checked = (preds || []).filter(function (p) { return p && p.checked; });
+  var checked = (preds || []).filter(function (p) {
+    return p && p.checked;
+  });
   out.totalChecked = checked.length;
   /* Tier buckets from predictions. Score thresholds mirror the ones
      used elsewhere in the app (acc panel, win-rate badge). */
@@ -168,7 +172,7 @@ function computePerformanceReport(preds, trades) {
     if (b.samples < 3) return null;
     var rate = Math.round(((b.wins + b.partials * 0.5) / b.samples) * 100);
     var avgPnl = +(b.pnlSum / b.samples).toFixed(2);
-    var pf = b.losses_abs > 0 ? +(b.gains / b.losses_abs).toFixed(2) : (b.gains > 0 ? Infinity : 0);
+    var pf = b.losses_abs > 0 ? +(b.gains / b.losses_abs).toFixed(2) : b.gains > 0 ? Infinity : 0;
     return {
       rate: rate,
       wins: b.wins,
@@ -184,7 +188,9 @@ function computePerformanceReport(preds, trades) {
   out.byTier.breakout = finalize(buckets.breakout);
   /* Closed-trade breakdown by exit reason. Useful for answering "am I
      mostly getting stopped out, or hitting targets?" */
-  var closed = (trades || []).filter(function (t) { return t && t.status === 'CLOSED'; });
+  var closed = (trades || []).filter(function (t) {
+    return t && t.status === 'CLOSED';
+  });
   out.totalClosed = closed.length;
   for (var j = 0; j < closed.length; j++) {
     var reason = closed[j].exitReason || 'unknown';
@@ -288,7 +294,8 @@ function pickCardVisualTier(signal) {
       tier: 'double',
       barColor: 'linear-gradient(90deg,#ffd700,#b07cff)',
       marker: '🌟 ',
-      cardStyle: ' style="border:2px solid #b07cff;box-shadow:0 0 14px rgba(176,124,255,.4),0 0 6px rgba(255,215,0,.3)"',
+      cardStyle:
+        ' style="border:2px solid #b07cff;box-shadow:0 0 14px rgba(176,124,255,.4),0 0 6px rgba(255,215,0,.3)"',
       hasBanner: true,
     };
   }
@@ -362,27 +369,51 @@ function scoreGemCandidate(ticker, klineStats, v3) {
   var tags = [];
   if (klineStats && klineStats.vx != null) {
     var vx = klineStats.vx;
-    if (vx >= 4) { sc += 45; tags.push('🔥VOL ' + vx.toFixed(1) + 'x'); }
-    else if (vx >= 3) { sc += 40; tags.push('📊VOL ' + vx.toFixed(1) + 'x'); }
-    else if (vx >= 2) { sc += 30; tags.push('📊VOL ' + vx.toFixed(1) + 'x'); }
-    else if (vx >= 1.5) { sc += 15; tags.push('vol ' + vx.toFixed(1) + 'x'); }
+    if (vx >= 4) {
+      sc += 45;
+      tags.push('🔥VOL ' + vx.toFixed(1) + 'x');
+    } else if (vx >= 3) {
+      sc += 40;
+      tags.push('📊VOL ' + vx.toFixed(1) + 'x');
+    } else if (vx >= 2) {
+      sc += 30;
+      tags.push('📊VOL ' + vx.toFixed(1) + 'x');
+    } else if (vx >= 1.5) {
+      sc += 15;
+      tags.push('vol ' + vx.toFixed(1) + 'x');
+    }
   }
   if (klineStats && klineStats.timing === 'early') sc += 30;
   else if (klineStats && klineStats.timing === 'still') sc += 15;
   if (ticker.h != null && ticker.l != null && ticker.h !== ticker.l) {
     var posInRange = (ticker.p - ticker.l) / (ticker.h - ticker.l);
-    if (posInRange < 0.3) { sc += 10; tags.push('📉LOW'); }
+    if (posInRange < 0.3) {
+      sc += 10;
+      tags.push('📉LOW');
+    }
   }
   if (v3) {
-    if (v3.iceberg && v3.iceberg.signal === 'ICEBERG_BUY') { sc += 20; tags.push('🧊ICE'); }
+    if (v3.iceberg && v3.iceberg.signal === 'ICEBERG_BUY') {
+      sc += 20;
+      tags.push('🧊ICE');
+    }
     if (v3.vpin && v3.vpin.vpin != null) {
-      if (v3.vpin.vpin > 0.6) { sc += 15; tags.push('🧪VPIN'); }
-      else if (v3.vpin.vpin > 0.4) { sc += 8; tags.push('🧪vp'); }
+      if (v3.vpin.vpin > 0.6) {
+        sc += 15;
+        tags.push('🧪VPIN');
+      } else if (v3.vpin.vpin > 0.4) {
+        sc += 8;
+        tags.push('🧪vp');
+      }
     }
     if (v3.whalePnL && v3.whalePnL.pct != null && v3.whalePnL.pct > 1) {
-      sc += 10; tags.push('🐋PRO');
+      sc += 10;
+      tags.push('🐋PRO');
     }
-    if (v3.cvd && v3.cvd.divergence === 'BULLISH') { sc += 15; tags.push('📈CVD'); }
+    if (v3.cvd && v3.cvd.divergence === 'BULLISH') {
+      sc += 15;
+      tags.push('📈CVD');
+    }
   }
   if (ticker.c != null) {
     if (ticker.c > 0 && ticker.c < 3) sc += 20;
@@ -473,14 +504,20 @@ function classifySetup(r, d, btcChange, cvdDivergence) {
   /* Accumulation has highest priority — it's the killer pre-pump tag. */
   var hasAccTag = false;
   for (var i = 0; i < tags.length; i++) {
-    if (tags[i] && tags[i].indexOf('ACC') >= 0) { hasAccTag = true; break; }
+    if (tags[i] && tags[i].indexOf('ACC') >= 0) {
+      hasAccTag = true;
+      break;
+    }
   }
   if (hasAccTag) return 'accumulation';
   if (d.v > 5e7 && Math.abs(d.c) < 1.5) return 'accumulation';
   /* Reversal — bottom of range with bullish CVD divergence. */
   var hasBottomTag = false;
   for (var j = 0; j < tags.length; j++) {
-    if (tags[j] && tags[j].indexOf('BOTTOM') >= 0) { hasBottomTag = true; break; }
+    if (tags[j] && tags[j].indexOf('BOTTOM') >= 0) {
+      hasBottomTag = true;
+      break;
+    }
   }
   if (hasBottomTag && cvdDivergence === 'BULLISH') return 'reversal';
   /* Early breakout — near the high but hasn't run yet. The c bounds
@@ -506,7 +543,10 @@ function rollingOBIFromArr(arr, windowMs) {
   if (!arr || arr.length < 5) return null;
   var now = Date.now();
   var cutoff = now - windowMs;
-  var sum = 0, n = 0, spanMs = 0, first = null;
+  var sum = 0,
+    n = 0,
+    spanMs = 0,
+    first = null;
   for (var i = 0; i < arr.length; i++) {
     if (arr[i].t < cutoff) continue;
     if (first == null) first = arr[i].t;

@@ -59,6 +59,12 @@ const CONFIG = {
   TG_BOT_TOKEN: process.env.TG_BOT_TOKEN || '',
   TG_CHAT_ID: process.env.TG_CHAT_ID || '',
 
+  /* Optional shared secret for /notify. When set, callers must include it
+     via the `X-Notify-Secret` header. Empty string disables the check
+     (rate-limit + CORS still apply). Intended for deployments where the
+     PWA client is configured at build-time with a non-public secret. */
+  NOTIFY_SECRET: process.env.NEXUS_NOTIFY_SECRET || '',
+
   /* Allowed origins for CORS — default empty (same-origin / server-to-server only).
      Must be an explicit comma-separated list of origins. A literal `*` is
      intentionally NOT accepted: wildcard-with-credentials is unsafe and there
@@ -154,12 +160,44 @@ const cache = {
 };
 
 /* ═══ SAFE FETCH — with timeout and error handling ═══ */
-async function safeFetch(url, label) {
+
+/* Allowlist of upstream hosts. Any URL we fetch must resolve to one of these
+   so a compromised symbol/argument can't steer requests to internal IPs. */
+const FETCH_HOST_ALLOWLIST = new Set([
+  'api.binance.com',
+  'fapi.binance.com',
+  'api.bybit.com',
+  'api.coingecko.com',
+  'api.coinbase.com',
+  'api.alternative.me',
+]);
+
+function isAllowedFetchUrl(url) {
   try {
-    const res = await axios.get(url, { timeout: CONFIG.TIMEOUT });
+    const u = new URL(url);
+    return u.protocol === 'https:' && FETCH_HOST_ALLOWLIST.has(u.hostname);
+  } catch {
+    return false;
+  }
+}
+
+async function safeFetch(url, label) {
+  if (!isAllowedFetchUrl(url)) {
+    console.error(`[${label}] Blocked: host not in allowlist`);
+    return null;
+  }
+  try {
+    const res = await axios.get(url, {
+      timeout: CONFIG.TIMEOUT,
+      /* Disable redirects so a 30x can't bounce us to an internal host. */
+      maxRedirects: 0,
+    });
     return res.data;
   } catch (err) {
-    console.error(`[${label}] Failed: ${err.message}`);
+    /* Avoid leaking the URL (which may carry tokens) — only the upstream
+       status code if the error came from a response. */
+    const status = err && err.response && err.response.status;
+    console.error(`[${label}] Failed${status ? ` (HTTP ${status})` : ''}`);
     return null;
   }
 }
@@ -517,9 +555,28 @@ function sanitizeTelegramHtml(raw) {
   return out;
 }
 
+/* Constant-time string comparison to defeat timing oracles on the secret. */
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) {
+    return false;
+  }
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 app.post('/notify', async (req, res) => {
   if (!CONFIG.TG_BOT_TOKEN || !CONFIG.TG_CHAT_ID) {
     return res.status(503).json({ ok: false, error: 'Telegram not configured' });
+  }
+
+  if (CONFIG.NOTIFY_SECRET) {
+    const provided = req.get('X-Notify-Secret') || '';
+    if (!safeEqual(provided, CONFIG.NOTIFY_SECRET)) {
+      return res.status(401).json({ ok: false, error: 'Unauthorized' });
+    }
   }
 
   try {
@@ -588,16 +645,21 @@ async function startDataLoops() {
   console.log(`[INIT] ✅ Ready — ${Object.keys(cache.tickers).length} coins loaded`);
 
   /* Set up refresh intervals — kept in a list so we can tear them down
-     on shutdown instead of leaking timers into the container runtime. */
+     on shutdown instead of leaking timers into the container runtime.
+     Jitter (±10%) avoids synchronised bursts to upstream APIs across
+     multiple replicas, which can trip rate limits. */
+  function jitter(base) {
+    return base + Math.floor((Math.random() - 0.5) * 0.2 * base);
+  }
   refreshTimers.push(
-    setInterval(fetchTickers, CONFIG.TICKER_INTERVAL),
-    setInterval(fetchFundingRates, CONFIG.FR_INTERVAL),
-    setInterval(fetchOpenInterest, CONFIG.OI_INTERVAL),
-    setInterval(fetchLongShort, CONFIG.LS_INTERVAL),
-    setInterval(fetchTaker, CONFIG.TAKER_INTERVAL),
-    setInterval(fetchDepth, CONFIG.DEPTH_INTERVAL),
-    setInterval(fetchLiquidations, CONFIG.LIQ_INTERVAL),
-    setInterval(fetchMarket, CONFIG.MARKET_INTERVAL)
+    setInterval(fetchTickers, jitter(CONFIG.TICKER_INTERVAL)),
+    setInterval(fetchFundingRates, jitter(CONFIG.FR_INTERVAL)),
+    setInterval(fetchOpenInterest, jitter(CONFIG.OI_INTERVAL)),
+    setInterval(fetchLongShort, jitter(CONFIG.LS_INTERVAL)),
+    setInterval(fetchTaker, jitter(CONFIG.TAKER_INTERVAL)),
+    setInterval(fetchDepth, jitter(CONFIG.DEPTH_INTERVAL)),
+    setInterval(fetchLiquidations, jitter(CONFIG.LIQ_INTERVAL)),
+    setInterval(fetchMarket, jitter(CONFIG.MARKET_INTERVAL))
   );
 }
 

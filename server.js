@@ -25,6 +25,13 @@ const axios = require('axios');
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
+const {
+  isAllowedFetchUrl,
+  createSafeAgent,
+  sanitizeTelegramHtml,
+  safeEqual,
+} = require('./src/server-helpers');
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -159,27 +166,18 @@ const cache = {
   lastUpdate: {},
 };
 
-/* ═══ SAFE FETCH — with timeout and error handling ═══ */
+/* ═══ SAFE FETCH — with timeout, allowlist, and DNS-rebinding guard ═══
 
-/* Allowlist of upstream hosts. Any URL we fetch must resolve to one of these
-   so a compromised symbol/argument can't steer requests to internal IPs. */
-const FETCH_HOST_ALLOWLIST = new Set([
-  'api.binance.com',
-  'fapi.binance.com',
-  'api.bybit.com',
-  'api.coingecko.com',
-  'api.coinbase.com',
-  'api.alternative.me',
-]);
-
-function isAllowedFetchUrl(url) {
-  try {
-    const u = new URL(url);
-    return u.protocol === 'https:' && FETCH_HOST_ALLOWLIST.has(u.hostname);
-  } catch {
-    return false;
-  }
-}
+   - isAllowedFetchUrl pins the protocol + hostname before we even open
+     a socket, mitigating SSRF via a compromised symbol/argument.
+   - safeAgent re-runs DNS at connect time and refuses any address that
+     resolves into a private range. This closes the DNS-rebinding gap
+     between the URL.parse() above and the actual TCP connect — an
+     attacker who controls DNS for an allowlisted host can no longer
+     point us at a private IP.
+   - maxRedirects: 0 stops a 30x reply from bouncing the request to an
+     unrelated host. */
+const safeAgent = createSafeAgent();
 
 async function safeFetch(url, label) {
   if (!isAllowedFetchUrl(url)) {
@@ -189,8 +187,8 @@ async function safeFetch(url, label) {
   try {
     const res = await axios.get(url, {
       timeout: CONFIG.TIMEOUT,
-      /* Disable redirects so a 30x can't bounce us to an internal host. */
       maxRedirects: 0,
+      httpsAgent: safeAgent,
     });
     return res.data;
   } catch (err) {
@@ -488,18 +486,25 @@ async function fetchMarket() {
 let apiAllSnapshot = null;
 let apiAllSnapshotAt = 0;
 function buildApiAllSnapshot() {
+  /* Shallow-clone every store. The previous version returned the live
+     cache.* objects by reference; while res.json() was serialising
+     them, a coincident fetcher tick (every 5-300 s) could mutate the
+     same object, producing TypeError("cyclic object") or half-written
+     responses. Cloning at snapshot time pays an O(coins) copy in the
+     refresh path (≤ 3 s, capped by API_ALL_TTL_MS) instead of risking
+     interleaved writes during JSON serialisation. */
   return {
-    tickers: cache.tickers,
-    fr: cache.fr,
-    oi: cache.oi,
-    ls: cache.ls,
-    taker: cache.taker,
-    liq: cache.liq,
-    depth: cache.depth,
-    market: cache.market,
+    tickers: { ...cache.tickers },
+    fr: { ...cache.fr },
+    oi: { ...cache.oi },
+    ls: { ...cache.ls },
+    taker: { ...cache.taker },
+    liq: cache.liq.slice(),
+    depth: { ...cache.depth },
+    market: { ...cache.market, cbp: { ...cache.market.cbp } },
     meta: {
       coins: Object.keys(cache.tickers).length,
-      lastUpdate: cache.lastUpdate,
+      lastUpdate: { ...cache.lastUpdate },
       uptime: Math.floor(process.uptime()),
       version: '10.1',
       snapshotAt: Date.now(),
@@ -530,46 +535,21 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-/* Telegram notification proxy — allowlist-based HTML sanitization.
-   Telegram accepts only a small HTML subset (b, strong, i, em, u, s, code, pre, a).
-   We escape everything, then re-introduce a controlled set of tags. */
-function sanitizeTelegramHtml(raw) {
-  if (typeof raw !== 'string') return '';
-  /* Cap length — Telegram's hard limit is 4096 */
-  const input = raw.slice(0, 4000);
-  /* 1. Escape all HTML-significant chars */
-  const escaped = input
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-  /* 2. Re-enable an allowlist of simple tags (no attributes accepted) */
-  const simpleTags = ['b', 'strong', 'i', 'em', 'u', 's', 'code', 'pre'];
-  let out = escaped;
-  simpleTags.forEach((tag) => {
-    const open = new RegExp('&lt;' + tag + '&gt;', 'gi');
-    const close = new RegExp('&lt;/' + tag + '&gt;', 'gi');
-    out = out.replace(open, '<' + tag + '>').replace(close, '</' + tag + '>');
-  });
-  return out;
-}
-
-/* Constant-time string comparison to defeat timing oracles on the secret. */
-function safeEqual(a, b) {
-  if (typeof a !== 'string' || typeof b !== 'string' || a.length !== b.length) {
-    return false;
-  }
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  }
-  return diff === 0;
-}
+/* sanitizeTelegramHtml + safeEqual now live in src/server-helpers.js so
+   they can be unit-tested without booting Express. */
 
 app.post('/notify', async (req, res) => {
   if (!CONFIG.TG_BOT_TOKEN || !CONFIG.TG_CHAT_ID) {
     return res.status(503).json({ ok: false, error: 'Telegram not configured' });
+  }
+
+  /* Reject requests with no Origin header. The CORS middleware allows
+     same-origin / server-to-server (Origin absent) for the /api/ data
+     endpoints, but /notify costs real money on every call and must be
+     called from a real browser context with a real Origin we can match
+     against ALLOWED_ORIGINS. */
+  if (!req.get('Origin')) {
+    return res.status(403).json({ ok: false, error: 'Origin header required' });
   }
 
   if (CONFIG.NOTIFY_SECRET) {

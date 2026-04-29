@@ -164,6 +164,23 @@ test('atrZones — accumulation multipliers widen targets but keep stop', () => 
   assert.ok(Math.abs(wide.rr - 3.33) < 0.01, `expected RR ≈ 3.33, got ${wide.rr}`);
 });
 
+test('atrZones — degenerate geometry returns null (AUDIT-atrZones)', () => {
+  /* Negative t1 multiplier makes target1 = price - t1*atr — i.e.
+     BELOW the entry. The earlier code returned a position object
+     with no upside (and rr silently 0), indistinguishable from a
+     low-quality but valid setup. Now the helper rejects it. */
+  const inverted = atrZones(100, 2, null, null, { t1: -3 });
+  assert.equal(inverted, null, 'target1 below price must reject');
+
+  /* Negative stop multiplier puts stop ABOVE entry — also rejected. */
+  const stopAbove = atrZones(100, 2, null, null, { stop: -1.5 });
+  assert.equal(stopAbove, null, 'stop above price must reject');
+
+  /* Sanity check: a valid setup still returns a result. */
+  const valid = atrZones(100, 2, null, 105);
+  assert.ok(valid && valid.target1 === 105);
+});
+
 test('atrZones — partial mults object falls back to defaults for missing keys', () => {
   /* Caller overrides only t1 — stop and t2 should keep the defaults. */
   const z = atrZones(100, 2, null, null, { t1: 7 });

@@ -95,10 +95,9 @@ test('calcWhaleAvgEntry — volume-weighted across confirmed priced waves', () =
   assert.equal(calcWhaleAvgEntry('BTC'), (1 * 100 + 3 * 200) / 4);
 });
 
-test('calcWhaleAvgEntry — does NOT yet net sells against buys (AUDIT-F4)', () => {
-  /* Current behaviour: every wave is treated as a buy. When a `side`
-     field is added (audit fix F4) this test gets updated together with
-     the source change. */
+test('calcWhaleAvgEntry — sells reduce held amount, avg of remaining stays at cost basis (AUDIT-F4)', () => {
+  /* Fixed: sells consume the position at the avg entry, leaving the
+     remaining 5 units at the original cost of 100 each. */
   reset();
   whaleWaves.BTC = {
     waves: [
@@ -106,8 +105,43 @@ test('calcWhaleAvgEntry — does NOT yet net sells against buys (AUDIT-F4)', () 
       { amount: 5, price: 200, source: 'CONFIRM', side: 'sell', time: Date.now() },
     ],
   };
-  /* Today the sell is still added as if it were a buy: (10*100 + 5*200) / 15 */
-  assert.equal(calcWhaleAvgEntry('BTC'), (10 * 100 + 5 * 200) / 15);
+  assert.equal(calcWhaleAvgEntry('BTC'), 100, 'avg of the 5 remaining units is 100');
+});
+
+test('calcWhaleAvgEntry — sells of the entire position return 0', () => {
+  reset();
+  whaleWaves.BTC = {
+    waves: [
+      { amount: 10, price: 100, source: 'CONFIRM', side: 'buy', time: Date.now() },
+      { amount: 10, price: 200, source: 'CONFIRM', side: 'sell', time: Date.now() },
+    ],
+  };
+  assert.equal(calcWhaleAvgEntry('BTC'), 0, 'fully closed position has no avg entry');
+});
+
+test('calcWhaleAvgEntry — sells that exceed held amount cap at zero (no negative)', () => {
+  reset();
+  whaleWaves.BTC = {
+    waves: [
+      { amount: 5, price: 100, source: 'CONFIRM', side: 'buy', time: Date.now() },
+      { amount: 100, price: 200, source: 'CONFIRM', side: 'sell', time: Date.now() },
+      { amount: 3, price: 150, source: 'CONFIRM', side: 'buy', time: Date.now() },
+    ],
+  };
+  /* The sell over-shoots; held drops to 0. The next buy starts a fresh
+     position of 3 units at 150. Avg = 150. */
+  assert.equal(calcWhaleAvgEntry('BTC'), 150);
+});
+
+test('calcWhaleAvgEntry — waves without `side` field default to buy (legacy data)', () => {
+  reset();
+  whaleWaves.BTC = {
+    waves: [
+      { amount: 1, price: 100, source: 'CONFIRM', time: Date.now() } /* no side */,
+      { amount: 3, price: 200, source: 'CONFIRM', time: Date.now() },
+    ],
+  };
+  assert.equal(calcWhaleAvgEntry('BTC'), (1 * 100 + 3 * 200) / 4);
 });
 
 /* ─── calcWhalePnL ───────────────────────────────────────────────── */
@@ -184,20 +218,20 @@ test('calcFlowRate — units / minute against the oldest in-window wave', () => 
   assert.ok(r > 29 && r < 31, `expected ~30/min, got ${r}`);
 });
 
-test('calcFlowRate — TODAY: explodes when two waves are seconds apart (AUDIT-F7)', () => {
-  /* Documents the current bug: when oldest in-window wave is ~now,
-     the divisor (timeSpan in minutes) collapses toward 0 and the
-     returned rate balloons. The fix lands as a separate change that
-     floors timeSpan; this assertion is updated alongside it. */
+test('calcFlowRate — clusters of waves within 1 minute do NOT explode (AUDIT-F7)', () => {
+  /* Fixed: timeSpan is now floored at 1 minute, so two waves seconds
+     apart produce `totalAmount / 1` instead of `totalAmount / (1/60)`.
+     200 / 1 = 200, which sits well under the 50,000 alert threshold
+     in app.js — no more false aggressive-flow alerts on clustered
+     events. */
   reset();
   const now = Date.now();
   whaleWaves.BTC = {
     waves: [
-      { amount: 100, time: now - 1000 } /* 1 s ago = 1/60 min */,
+      { amount: 100, time: now - 1000 } /* 1 s ago */,
       { amount: 100, time: now },
     ],
   };
-  /* 200 / (1/60) = 12000-ish; with jitter we just assert "absurdly high" */
   const r = calcFlowRate('BTC');
-  assert.ok(r > 1000, `current behaviour explodes when waves cluster; got ${r}`);
+  assert.equal(r, 200, 'sub-minute cluster is rate-limited to total/1min');
 });

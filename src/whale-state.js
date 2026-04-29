@@ -33,20 +33,46 @@ function calcRealTotalBuy(sym) {
   }, 0);
 }
 
-/* Volume-weighted average price across confirmed waves for a coin.
-   Returns 0 if no priced waves exist. */
+/* Volume-weighted average price across the OPEN whale position.
+   Buys add to the position; sells reduce the remaining size in
+   FIFO order at the average entry, leaving the avg unchanged
+   (sells realise PnL but don't alter the avg of the surviving
+   position).
+
+   AUDIT-F4: the previous version treated every wave as a buy
+   regardless of `side`, so any sell wave appended to whaleWaves
+   would inflate the position size and drag the average toward
+   the sell price — the resulting avgEntry was a fiction, and
+   calcWhalePnL reported PnL against a phantom long stack. The
+   fix consults `w.side` (default: 'buy', preserving today's
+   schema for callers that haven't started populating side).
+
+   Waves missing `side` are treated as buys for backward compat
+   with the existing whaleWaves payload — no migration needed. */
 function calcWhaleAvgEntry(sym) {
   var ww = whaleWaves[sym];
   if (!ww || !ww.waves || !ww.waves.length) return 0;
-  var totalAmount = 0;
-  var weightedPrice = 0;
+  var heldAmount = 0;
+  var weightedCost = 0;
   ww.waves.forEach(function (w) {
-    if (w.source !== 'ESTIMATE' && w.price > 0) {
-      totalAmount += w.amount;
-      weightedPrice += w.amount * w.price;
+    if (w.source === 'ESTIMATE' || !(w.price > 0)) return;
+    var side = w.side || 'buy';
+    if (side === 'sell') {
+      /* Sells reduce the remaining amount at the prevailing avg
+         (cost basis stays the same per remaining unit). Cap at 0
+         so an over-sold-then-rebought sequence doesn't go
+         negative — that would imply prior data we don't have. */
+      var sold = Math.min(heldAmount, w.amount);
+      if (heldAmount > 0) {
+        weightedCost -= sold * (weightedCost / heldAmount);
+      }
+      heldAmount -= sold;
+    } else {
+      heldAmount += w.amount;
+      weightedCost += w.amount * w.price;
     }
   });
-  return totalAmount > 0 ? weightedPrice / totalAmount : 0;
+  return heldAmount > 0 ? weightedCost / heldAmount : 0;
 }
 
 /* Mark-to-market view of the whale book for a coin:
@@ -69,7 +95,14 @@ function calcWhalePnL(sym) {
 }
 
 /* Inflow rate over the last 15 minutes (units / minute). Returns 0 if
-   there isn't enough data to span more than a single sample. */
+   there isn't enough data to span more than a single sample.
+
+   AUDIT-F7: when two waves arrive seconds apart, the divisor (timeSpan
+   in minutes) collapses toward 0 and the returned rate balloons by
+   60x or more — the alert threshold (flowRate>50000) tripped on
+   noise. The fix floors timeSpan at 1 minute, which is the smallest
+   window the metric can meaningfully describe given a 15-minute
+   sliding bucket and waves-per-minute units. */
 function calcFlowRate(sym) {
   var ww = whaleWaves[sym];
   if (!ww || !ww.waves || ww.waves.length < 2) return 0;
@@ -80,6 +113,7 @@ function calcFlowRate(sym) {
   var totalAmount = recent.reduce(function (s, w) {
     return s + w.amount;
   }, 0);
-  var timeSpan = (Date.now() - recent[0].time) / 60000;
-  return timeSpan > 0 ? totalAmount / timeSpan : 0;
+  var rawSpan = (Date.now() - recent[0].time) / 60000;
+  var timeSpan = Math.max(rawSpan, 1);
+  return totalAmount / timeSpan;
 }

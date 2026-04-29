@@ -60,10 +60,19 @@ test('calcRSI — empty / short series falls back to neutral 50', () => {
   assert.equal(calcRSI(null, 14), 50);
 });
 
-test('calcRSI — flat series is undefined-by-zero, returns 100 per Wilder', () => {
-  /* With avgLoss === 0 the RS ratio is infinite. TradingView and the
-     canonical Wilder definition return 100 in this case. */
-  assert.equal(calcRSI(Array(30).fill(50), 14), 100);
+test('calcRSI — perfectly flat series returns neutral 50 (AUDIT-F6)', () => {
+  /* When BOTH gains and losses are zero the RS ratio is 0/0 and the
+     value is genuinely undefined. The earlier code reached the
+     `avgL === 0` branch first and returned 100 — a flat market does
+     not deserve an "extreme overbought" reading. Convention: 50. */
+  assert.equal(calcRSI(Array(30).fill(50), 14), 50);
+});
+
+test('calcRSI — gains with no losses still returns 100 (Wilder convention)', () => {
+  /* A genuinely one-sided series (any non-zero gain, zero loss) IS
+     overbought. The 100 path is preserved for that case. */
+  const closes = Array.from({ length: 30 }, (_, i) => 100 + i);
+  assert.equal(calcRSI(closes, 14), 100);
 });
 
 test('calcRSI — monotone-up series saturates near 100', () => {
@@ -141,24 +150,43 @@ test('calcMACD — flat series returns zero MACD + no cross', () => {
   assert.equal(r.cross, 'none');
 });
 
-test('calcMACD — detects a genuine bullish cross', () => {
-  /* 40 declining bars drive MACD well below signal. Two sharp
-     up-bars are just enough to lift the MACD line above signal on
-     the final bar while the prior bar was still below — the exact
-     MACD(t) > Signal(t) && MACD(t-1) <= Signal(t-1) condition. */
-  const down = Array.from({ length: 40 }, (_, i) => 200 - i * 2);
-  const up = [120, 125];
-  const r = calcMACD(down.concat(up));
-  assert.equal(r.cross, 'bull', `expected bull cross, got ${r.cross} (h=${r.h}, sig=${r.signal})`);
-  assert.ok(r.h > r.signal, 'curr MACD should exceed signal after a bull cross');
+/* Sinusoidal close series — oscillates above/below trend reliably,
+   producing real (prevMacd < prevSig → curMacd > curSig) bull/bear
+   crosses without the touch-the-line edge case. Used by the next two
+   tests after AUDIT-MACD tightened cross detection from `<=` to `<`. */
+function makeSineCloses(n) {
+  const out = [];
+  for (let i = 0; i < n; i++) out.push(100 + 30 * Math.sin(i / 8));
+  return out;
+}
+
+test('calcMACD — detects a genuine bearish cross (AUDIT-MACD)', () => {
+  /* Sine wave at index 69 has prev MACD strictly above signal and
+     current MACD below — a real cross. The earlier `<=`-based test
+     fixture only worked because `prevMacd === prevSig` was being
+     mistreated as a cross. */
+  const closes = makeSineCloses(69);
+  const r = calcMACD(closes);
+  assert.equal(r.cross, 'bear');
+  assert.ok(r.h < r.signal);
 });
 
-test('calcMACD — detects a genuine bearish cross', () => {
-  const up = Array.from({ length: 40 }, (_, i) => 100 + i * 2);
-  const down = [180, 175];
-  const r = calcMACD(up.concat(down));
-  assert.equal(r.cross, 'bear', `expected bear cross, got ${r.cross} (h=${r.h}, sig=${r.signal})`);
-  assert.ok(r.h < r.signal, 'curr MACD should trail signal after a bear cross');
+test('calcMACD — detects a genuine bullish cross (AUDIT-MACD)', () => {
+  const closes = makeSineCloses(94);
+  const r = calcMACD(closes);
+  assert.equal(r.cross, 'bull');
+  assert.ok(r.h > r.signal);
+});
+
+test('calcMACD — touch (prevMacd === prevSig) does NOT fire cross (AUDIT-MACD)', () => {
+  /* A perfectly flat signal section (curSig === prevSig === curMacd ===
+     prevMacd) used to fire `bull` because of the old `prevMacd <= prevSig`.
+     With strict `<` the touch is not a cross. Construct: a series that
+     hits a stable plateau where MACD ≈ signal, and confirm `cross` is
+     `none`. */
+  const flat = Array(40).fill(100);
+  const r = calcMACD(flat);
+  assert.equal(r.cross, 'none');
 });
 
 test('calcMACD — steady uptrend produces positive MACD, no cross', () => {

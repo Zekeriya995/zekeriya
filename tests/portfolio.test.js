@@ -132,7 +132,7 @@ test('savePred — caps the journal at 100 entries (rolling window)', () => {
 
 test('getAcc — empty journal returns zero rate', () => {
   reset();
-  assert.deepEqual(getAcc(), { total: 0, hits: 0, partials: 0, rate: 0 });
+  assert.deepEqual(getAcc(), { total: 0, hits: 0, partials: 0, stale: 0, rate: 0 });
 });
 
 test('getAcc — does NOT score entries younger than 12 h', () => {
@@ -153,7 +153,7 @@ test('getAcc — gain ≥ 5 % counts as hit; 2-5 % as partial; <2 % as miss', ()
       price: 100,
       target: 110,
       score: 7,
-      time: 1,
+      time: Date.now() - 12 * 3600 * 1000 - 30_000,
       checked: false,
       hit: false,
       partial: false,
@@ -163,7 +163,7 @@ test('getAcc — gain ≥ 5 % counts as hit; 2-5 % as partial; <2 % as miss', ()
       price: 100,
       target: 110,
       score: 7,
-      time: 1,
+      time: Date.now() - 12 * 3600 * 1000 - 30_000,
       checked: false,
       hit: false,
       partial: false,
@@ -173,7 +173,7 @@ test('getAcc — gain ≥ 5 % counts as hit; 2-5 % as partial; <2 % as miss', ()
       price: 100,
       target: 110,
       score: 7,
-      time: 1,
+      time: Date.now() - 12 * 3600 * 1000 - 30_000,
       checked: false,
       hit: false,
       partial: false,
@@ -198,7 +198,7 @@ test('getAcc — partial counts as 0.5 in the rate calculation', () => {
       price: 100,
       target: 110,
       score: 7,
-      time: 1,
+      time: Date.now() - 12 * 3600 * 1000 - 30_000,
       checked: false,
       hit: false,
       partial: false,
@@ -208,7 +208,7 @@ test('getAcc — partial counts as 0.5 in the rate calculation', () => {
       price: 100,
       target: 110,
       score: 7,
-      time: 1,
+      time: Date.now() - 12 * 3600 * 1000 - 30_000,
       checked: false,
       hit: false,
       partial: false,
@@ -228,7 +228,7 @@ test('getAcc — leaves prediction unchecked if the ticker is missing', () => {
     price: 100,
     target: 110,
     score: 7,
-    time: 1,
+    time: Date.now() - 12 * 3600 * 1000 - 30_000,
     checked: false,
     hit: false,
     partial: false,
@@ -239,31 +239,72 @@ test('getAcc — leaves prediction unchecked if the ticker is missing', () => {
   assert.equal(predictions[0].checked, false);
 });
 
-test('getAcc — TODAY: rescores against current T[sym].p (AUDIT-F2)', () => {
-  /* Documents the audit bug: a prediction made days ago is scored
-     against the price of the ticker at THIS reload, not at T+12h.
-     Demonstrated by checking the same already-checked prediction
-     after T moves: today nothing re-runs because checked=true
-     guards re-evaluation, but a NEW prediction made now will be
-     scored against whatever T[sym].p is when getAcc() first
-     observes it >12 h later — not when 12 h actually elapsed.
-     The fix snapshots the resolution price on a real timer. */
+test('getAcc — predictions WAY past the resolution window are marked stale, NOT auto-scored (AUDIT-F2)', () => {
+  /* Fixed: a prediction with time=1 (epoch start) is years past
+     T+12h. Resolving it with TODAY's T.BTC would silently rescore
+     historical accuracy against an unrelated price. Now the helper
+     marks it stale and excludes it from the rate. */
   reset();
   predictions.push({
     sym: 'BTC',
     price: 100,
     target: 110,
     score: 7,
-    time: 1 /* >12 h old */,
+    time: 1 /* epoch start — way past resolution */,
     checked: false,
     hit: false,
     partial: false,
   });
   globalThis.T.BTC = { p: 200 };
+  const r = getAcc();
+  assert.equal(r.total, 0, 'stale predictions do not count toward total');
+  assert.equal(r.stale, 1);
+  assert.equal(predictions[0].checked, false, 'stale predictions stay unchecked');
+  assert.equal(predictions[0].stale, true);
+});
+
+test('getAcc — predictions resolved within the 5-min window snapshot the current price (AUDIT-F2)', () => {
+  /* The bgInterval-driven path: a prediction whose 12 h mark just
+     elapsed gets scored once, with the price observed within the
+     fresh window. */
+  reset();
+  const justResolved = Date.now() - 12 * 3600 * 1000 - 60_000; /* 12 h + 1 min */
+  predictions.push({
+    sym: 'BTC',
+    price: 100,
+    target: 110,
+    score: 7,
+    time: justResolved,
+    checked: false,
+    hit: false,
+    partial: false,
+  });
+  globalThis.T.BTC = { p: 106 }; /* +6 % → hit */
   const r1 = getAcc();
-  assert.equal(r1.hits, 1, 'first observation marks hit at +100 %');
-  /* Later the price collapses, but checked=true means we don't rescore. */
+  assert.equal(r1.hits, 1);
+  assert.equal(predictions[0].finalPrice, 106, 'price at resolution captured');
+  /* A subsequent T move must NOT re-score. */
   globalThis.T.BTC = { p: 50 };
   const r2 = getAcc();
-  assert.equal(r2.hits, 1, 'subsequent observations leave the hit alone');
+  assert.equal(r2.hits, 1, 'historical outcome preserved across reloads');
+  assert.equal(predictions[0].finalPrice, 106);
+});
+
+test('getAcc — predictions still inside their 12 h window are not scored', () => {
+  reset();
+  predictions.push({
+    sym: 'BTC',
+    price: 100,
+    target: 110,
+    score: 7,
+    time: Date.now() - 6 * 3600 * 1000 /* 6 h old */,
+    checked: false,
+    hit: false,
+    partial: false,
+  });
+  globalThis.T.BTC = { p: 200 };
+  const r = getAcc();
+  assert.equal(r.total, 0);
+  assert.equal(r.stale, 0);
+  assert.equal(predictions[0].checked, false);
 });

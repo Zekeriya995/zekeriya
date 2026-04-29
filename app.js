@@ -319,23 +319,43 @@ function captureFactorSnapshot(sym) {
   return snapshot;
 }
 
-/* Process trade outcome — called from closeTrade hook */
+/* Process trade outcome — called from closeTrade hook.
+
+   AUDIT-F3: the previous version bumped `wins` for both real wins
+   AND partials (0.5 % – 2 % gains). The displayed `winRate` was
+   therefore the rate of "wins or partials", not of wins. Every
+   downstream surface (factorStats, v3factorStats, confCalib,
+   hourStats, coinStats) inherited the same inflation, making the
+   monitor's per-factor edge look better than it was.
+
+   Each bucket now has a separate `partials` counter and exposes
+   `winRate` (strict: wins/total) plus `effectiveRate`
+   (wins+partials*0.5 / total) for downstream consumers that want
+   the weighted view. Old buckets without `partials` are migrated
+   on first touch — `partials` is initialised to 0 (a conservative
+   under-count of historical partial outcomes that we can't
+   reconstruct). */
+function _bumpStat(s, isWin, isPartial) {
+  if (typeof s.partials !== 'number') s.partials = 0;
+  s.total++;
+  if (isWin) s.wins++;
+  else if (isPartial) s.partials++;
+  else s.losses++;
+  s.winRate = s.total > 0 ? Math.round((s.wins / s.total) * 100) : 0;
+  s.effectiveRate = s.total > 0 ? Math.round(((s.wins + s.partials * 0.5) / s.total) * 100) : 0;
+}
+
 function processTradeOutcome(trade) {
   if (!trade || !trade.factorSnapshot) return;
   var isWin = trade.finalPnl >= 2;
   var isPartial = trade.finalPnl >= 0.5 && trade.finalPnl < 2;
-  var isLoss = trade.finalPnl < 0.5;
   var outcome = isWin ? 'win' : isPartial ? 'partial' : 'loss';
 
   var snap = trade.factorSnapshot;
   var factorKeys = Object.keys(monitorState.factorStats);
   factorKeys.forEach(function(key) {
     if (snap.factors[key]) {
-      var fs = monitorState.factorStats[key];
-      fs.total++;
-      if (isWin || isPartial) fs.wins++;
-      else fs.losses++;
-      fs.winRate = fs.total > 0 ? Math.round((fs.wins / fs.total) * 100) : 0;
+      _bumpStat(monitorState.factorStats[key], isWin, isPartial);
     }
   });
 
@@ -345,12 +365,10 @@ function processTradeOutcome(trade) {
     var v3Keys = Object.keys(snap.v3categories);
     v3Keys.forEach(function(key) {
       if (snap.v3categories[key]) {
-        if (!monitorState.v3factorStats[key]) monitorState.v3factorStats[key] = {wins:0, losses:0, total:0, winRate:0};
-        var v3fs = monitorState.v3factorStats[key];
-        v3fs.total++;
-        if (isWin || isPartial) v3fs.wins++;
-        else v3fs.losses++;
-        v3fs.winRate = v3fs.total > 0 ? Math.round((v3fs.wins / v3fs.total) * 100) : 0;
+        if (!monitorState.v3factorStats[key]) {
+          monitorState.v3factorStats[key] = {wins:0, partials:0, losses:0, total:0, winRate:0, effectiveRate:0};
+        }
+        _bumpStat(monitorState.v3factorStats[key], isWin, isPartial);
       }
     });
   }
@@ -362,30 +380,31 @@ function processTradeOutcome(trade) {
   var confBucket = Math.min(90, Math.floor(clampedConf / 10) * 10);
   var bucketKey = confBucket + '-' + (confBucket + 10);
   if (!monitorState.confCalib[bucketKey]) {
-    monitorState.confCalib[bucketKey] = {wins: 0, total: 0, realRate: 0};
+    monitorState.confCalib[bucketKey] = {wins: 0, partials: 0, total: 0, realRate: 0, effectiveRate: 0};
   }
   var cb = monitorState.confCalib[bucketKey];
+  if (typeof cb.partials !== 'number') cb.partials = 0;
   cb.total++;
-  if (isWin || isPartial) cb.wins++;
+  if (isWin) cb.wins++;
+  else if (isPartial) cb.partials++;
   cb.realRate = cb.total > 0 ? Math.round((cb.wins / cb.total) * 100) : 0;
+  cb.effectiveRate = cb.total > 0 ? Math.round(((cb.wins + cb.partials * 0.5) / cb.total) * 100) : 0;
 
   var hour = String(snap.hour);
   if (!monitorState.hourStats[hour]) {
-    monitorState.hourStats[hour] = {wins: 0, total: 0, rate: 0};
+    monitorState.hourStats[hour] = {wins: 0, partials: 0, losses: 0, total: 0, winRate: 0, effectiveRate: 0, rate: 0};
   }
-  var hs = monitorState.hourStats[hour];
-  hs.total++;
-  if (isWin || isPartial) hs.wins++;
-  hs.rate = hs.total > 0 ? Math.round((hs.wins / hs.total) * 100) : 0;
+  _bumpStat(monitorState.hourStats[hour], isWin, isPartial);
+  /* Legacy alias for downstream readers that still reference `rate`. */
+  monitorState.hourStats[hour].rate = monitorState.hourStats[hour].winRate;
 
   var coinKey = trade.sym;
   if (!monitorState.coinStats[coinKey]) {
-    monitorState.coinStats[coinKey] = {wins: 0, total: 0, rate: 0};
+    monitorState.coinStats[coinKey] = {wins: 0, partials: 0, losses: 0, total: 0, winRate: 0, effectiveRate: 0, rate: 0};
   }
   var cs = monitorState.coinStats[coinKey];
-  cs.total++;
-  if (isWin || isPartial) cs.wins++;
-  cs.rate = cs.total > 0 ? Math.round((cs.wins / cs.total) * 100) : 0;
+  _bumpStat(cs, isWin, isPartial);
+  cs.rate = cs.winRate;
 
   var bl = monitorState.coinBlacklist;
   /* Single source of truth for the blacklist contract — same helper

@@ -2662,23 +2662,36 @@ function monitorTrades(){
     var wSellVol=whaleWaves[tr.sym]?whaleWaves[tr.sym].totalBuy:0;
     if(wpt.taking&&tr.pnl>0&&wSellVol>=100000){showPopup('🐋🩸',tr.sym+' — '+(lang==='ar'?'حيتان تجني أرباح!':'Whales taking profit!'),'$'+fmt(wSellVol)+' | '+(tr.pnl>=0?'+':'')+tr.pnl.toFixed(1)+'%');addNotifHist('🐋🩸',tr.sym,lang==='ar'?'جني أرباح':'Profit Taking','$'+fmt(wSellVol));
       if(tr.pnl>=3){closeTrade(tr,d.p,lang==='ar'?'🐋🩸 حيتان تجني أرباح':'🐋🩸 Whale profit-taking');return}}
-    /* Exit 1: Target 1 hit → move stop to breakeven */
-    if(!tr.t1Hit&&d.p>=tr.target1){tr.t1Hit=true;tr.trailingStop=tr.entry*1.005;
-      showPopup('🎯',tr.sym+' '+(lang==='ar'?'وصل هدف 1!':'Target 1 hit!'),'+'+tr.pnl.toFixed(1)+'% — '+(lang==='ar'?'وقف → تعادل':'Stop → breakeven'))}
-    /* Exit 2: Target 2 hit → close */
-    if(d.p>=tr.target2){closeTrade(tr,d.p,lang==='ar'?'🎯 هدف كامل':'🎯 Full target');return}
-    /* Exit 3: Trailing stop (after T1, drop 2% from max) */
-    if(tr.t1Hit&&tr.maxGain>3){var trail=tr.maxGainPrice*0.98;if(d.p<=trail){closeTrade(tr,d.p,lang==='ar'?'🛡️ وقف متحرك — حماية ربح':'🛡️ Trailing stop — profit protected');return}}
-    /* Exit 4: Stop loss */
-    var stopLevel=tr.trailingStop||tr.stop;
-    if(d.p<=stopLevel){closeTrade(tr,d.p,tr.trailingStop?lang==='ar'?'🛡️ وقف تعادل':'🛡️ Breakeven stop':lang==='ar'?'🛑 وقف خسارة':'🛑 Stop loss');return}
-    /* Exit 5: Whale sell signal */
+    /* Exits 1, 2, 3, 4, 6, 7 are now centralised in monitorTradeDecision
+       (src/monitor-step.js). Worst-case candle resolution (AUDIT-F1)
+       and SHORT-side support (AUDIT-F5) live in there with full test
+       coverage. The whale-sell exit (5) stays inline because it
+       depends on detectWhaleProfitTaking + analyzeCVD which are not
+       pure. */
+    var btcCurrent=T.BTC?T.BTC.c:0;
+    var decision=monitorTradeDecision(tr,d.p,btcCurrent,Date.now());
+    if(decision.t1JustHit){
+      tr.t1Hit=true;
+      tr.trailingStop=decision.newBreakevenStop;
+      showPopup('🎯',tr.sym+' '+(lang==='ar'?'وصل هدف 1!':'Target 1 hit!'),'+'+tr.pnl.toFixed(1)+'% — '+(lang==='ar'?'وقف → تعادل':'Stop → breakeven'));
+    }
+    if(decision.close){
+      var reason;
+      switch(decision.close){
+        case 'TARGET_FULL': reason=lang==='ar'?'🎯 هدف كامل':'🎯 Full target';break;
+        case 'TRAILING_STOP': reason=lang==='ar'?'🛡️ وقف متحرك — حماية ربح':'🛡️ Trailing stop — profit protected';break;
+        case 'BREAKEVEN_STOP': reason=lang==='ar'?'🛡️ وقف تعادل':'🛡️ Breakeven stop';break;
+        case 'STOP_LOSS': reason=lang==='ar'?'🛑 وقف خسارة':'🛑 Stop loss';break;
+        case 'TIMEOUT': reason=lang==='ar'?'⏰ انتهى الوقت':'⏰ Timeout 24h';break;
+        case 'MARKET_CRASH': reason=lang==='ar'?'💥 انهيار السوق':'💥 Market crash';break;
+        default: reason=decision.close;
+      }
+      closeTrade(tr,d.p,reason);
+      return;
+    }
+    /* Exit 5: Whale sell signal — kept inline (impure deps). */
     var ww=whaleWaves[tr.sym];var cvd=analyzeCVD(tr.sym);
-    if(ww&&ww.engine&&ww.engine.confidence<10&&cvd.divergence==='BEARISH'){closeTrade(tr,d.p,lang==='ar'?'🐋🩸 حيتان تبيع':'🐋🩸 Whales selling');return}
-    /* Exit 6: Timeout 24h */
-    if(Date.now()-tr.entryTime>24*3600000){closeTrade(tr,d.p,lang==='ar'?'⏰ انتهى الوقت':'⏰ Timeout 24h');return}
-    /* Exit 7: Market crash (BTC -5% from entry) */
-    var btcNow=T.BTC?T.BTC.c:0;if(btcNow-tr.marketAtEntry.btc<-5){closeTrade(tr,d.p,lang==='ar'?'💥 انهيار السوق':'💥 Market crash');return}});
+    if(ww&&ww.engine&&ww.engine.confidence<10&&cvd.divergence==='BEARISH'){closeTrade(tr,d.p,lang==='ar'?'🐋🩸 حيتان تبيع':'🐋🩸 Whales selling');return}});
   try { trackWhaleOutcome(); } catch(e) {}
   saveTrades()}
 /* 💰 STABLECOIN FLOW INDICATOR — uses already-loaded T data (no extra API calls) */

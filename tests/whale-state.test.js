@@ -95,10 +95,9 @@ test('calcWhaleAvgEntry — volume-weighted across confirmed priced waves', () =
   assert.equal(calcWhaleAvgEntry('BTC'), (1 * 100 + 3 * 200) / 4);
 });
 
-test('calcWhaleAvgEntry — does NOT yet net sells against buys (AUDIT-F4)', () => {
-  /* Current behaviour: every wave is treated as a buy. When a `side`
-     field is added (audit fix F4) this test gets updated together with
-     the source change. */
+test('calcWhaleAvgEntry — sells reduce held amount, avg of remaining stays at cost basis (AUDIT-F4)', () => {
+  /* Fixed: sells consume the position at the avg entry, leaving the
+     remaining 5 units at the original cost of 100 each. */
   reset();
   whaleWaves.BTC = {
     waves: [
@@ -106,8 +105,43 @@ test('calcWhaleAvgEntry — does NOT yet net sells against buys (AUDIT-F4)', () 
       { amount: 5, price: 200, source: 'CONFIRM', side: 'sell', time: Date.now() },
     ],
   };
-  /* Today the sell is still added as if it were a buy: (10*100 + 5*200) / 15 */
-  assert.equal(calcWhaleAvgEntry('BTC'), (10 * 100 + 5 * 200) / 15);
+  assert.equal(calcWhaleAvgEntry('BTC'), 100, 'avg of the 5 remaining units is 100');
+});
+
+test('calcWhaleAvgEntry — sells of the entire position return 0', () => {
+  reset();
+  whaleWaves.BTC = {
+    waves: [
+      { amount: 10, price: 100, source: 'CONFIRM', side: 'buy', time: Date.now() },
+      { amount: 10, price: 200, source: 'CONFIRM', side: 'sell', time: Date.now() },
+    ],
+  };
+  assert.equal(calcWhaleAvgEntry('BTC'), 0, 'fully closed position has no avg entry');
+});
+
+test('calcWhaleAvgEntry — sells that exceed held amount cap at zero (no negative)', () => {
+  reset();
+  whaleWaves.BTC = {
+    waves: [
+      { amount: 5, price: 100, source: 'CONFIRM', side: 'buy', time: Date.now() },
+      { amount: 100, price: 200, source: 'CONFIRM', side: 'sell', time: Date.now() },
+      { amount: 3, price: 150, source: 'CONFIRM', side: 'buy', time: Date.now() },
+    ],
+  };
+  /* The sell over-shoots; held drops to 0. The next buy starts a fresh
+     position of 3 units at 150. Avg = 150. */
+  assert.equal(calcWhaleAvgEntry('BTC'), 150);
+});
+
+test('calcWhaleAvgEntry — waves without `side` field default to buy (legacy data)', () => {
+  reset();
+  whaleWaves.BTC = {
+    waves: [
+      { amount: 1, price: 100, source: 'CONFIRM', time: Date.now() } /* no side */,
+      { amount: 3, price: 200, source: 'CONFIRM', time: Date.now() },
+    ],
+  };
+  assert.equal(calcWhaleAvgEntry('BTC'), (1 * 100 + 3 * 200) / 4);
 });
 
 /* ─── calcWhalePnL ───────────────────────────────────────────────── */

@@ -6320,10 +6320,16 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   try{await loadDash()}catch(e){console.error('init loadDash:',e)}
   try{renderPort()}catch(e){}
   try{updateConnStatus()}catch(e){}
-  /* On-Chain + Wallet check */
-  setTimeout(fetchOnChainBTC,10000);setInterval(fetchOnChainBTC,120000);
+  /* On-Chain + Wallet check.
+     bgInterval (src/visibility-pause.js) replaces setInterval so the
+     timer is paused while the tab is in the background — saves the
+     biggest single chunk of mobile battery drain in the app. The
+     setTimeout-bootstrap fires ONCE on init regardless of visibility,
+     which is the right thing: we want the first sample even if the
+     user starts in another tab. */
+  setTimeout(fetchOnChainBTC,10000);bgInterval(fetchOnChainBTC,120000);
   /* Multi-Exchange data now comes via /api/all in loadTk — no separate fetch needed */
-  setTimeout(checkWallets,20000);setInterval(checkWallets,120000);
+  setTimeout(checkWallets,20000);bgInterval(checkWallets,120000);
   /* Delayed retry — if data still empty after 15s, refetch from proxy */
   setTimeout(async function(){
     try{
@@ -6331,10 +6337,10 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
     }catch(e){}
   },15000);
   /* ═══ TOP 100 AUTO-UPDATE: CoinGecko every hour ═══ */
-  setTimeout(updateTop100,5000);setInterval(updateTop100,3600000);
+  setTimeout(updateTop100,5000);bgInterval(updateTop100,3600000);
   /* ═══ MAIN POLLING: fetch /api/all every 5 seconds ═══ */
-  setInterval(async function(){try{await loadTk();checkWatchlistAlerts();updateConnStatus()}catch(e){connMetrics.apiFail++;updateConnStatus()}},5000);
-  setInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))try{await loadDash()}catch(e){}},120000);
+  bgInterval(async function(){try{await loadTk();checkWatchlistAlerts();updateConnStatus()}catch(e){connMetrics.apiFail++;updateConnStatus()}},5000);
+  bgInterval(async function(){if(document.getElementById('pg-dash').classList.contains('act'))try{await loadDash()}catch(e){}},120000);
   /* Smart Scanner auto-refresh — replaces the simple 2-min cadence
      from PR #13 with a more responsive trigger:
        1. Refresh immediately when BTC moves >= 1% since last refresh
@@ -6351,8 +6357,9 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   var _scanLastBTC=0;
   var SCAN_BTC_TRIGGER=1.0;       /* % move that forces an early refresh */
   var SCAN_TIME_TRIGGER=5*60*1000; /* fallback cadence when BTC is calm */
-  setInterval(async function(){
-    if(typeof document.visibilityState==='string'&&document.visibilityState==='hidden')return;
+  bgInterval(async function(){
+    /* visibility check now handled centrally by bgInterval — keep the
+       sub-tab guards below so a hidden Scanner page doesn't refresh. */
     var pgScan=document.getElementById('pg-scan');
     if(!pgScan||!pgScan.classList.contains('act'))return;
     if(curScanTab!==0)return;
@@ -6373,11 +6380,11 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
     }
     try{await loadTrading()}catch(e){}
   },60000);
-  setInterval(monitorTrades,10000);
-  setInterval(function(){try{renderTop3()}catch(e){}},60000); /* Auto-update VIP trades every minute */
-  setInterval(function(){notifiedSet={};safeSet('nxnot10','{}');tgSent={}},3600000);
+  bgInterval(monitorTrades,10000);
+  bgInterval(function(){try{renderTop3()}catch(e){}},60000); /* Auto-update VIP trades every minute */
+  bgInterval(function(){notifiedSet={};safeSet('nxnot10','{}');tgSent={}},3600000);
   setTimeout(function(){runValidator()},10000);
-  setInterval(function(){runValidator()},90000);
+  bgInterval(function(){runValidator()},90000);
   /* Open the Binance public ticker WebSocket. Once connected, price
      / 24h change / volume / high / low updates flow into T[sym] at
      sub-second latency. The 5-second loadTk() polling above keeps
@@ -6397,8 +6404,8 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
        then serves from cache if still warm, or refetches).
      * The visibilityState guard skips ticks while the browser tab
        is backgrounded — a hidden chart never needs refreshing. */
-  setInterval(function(){
-    if(typeof document.visibilityState==='string'&&document.visibilityState==='hidden')return;
+  bgInterval(function(){
+    /* visibility check now handled centrally by bgInterval. */
     var pgEl=document.getElementById('pg-market');
     if(pgEl&&pgEl.classList.contains('act')){
       if(curMktTab===0&&Date.now()-btcCache.t>=MKT_TTL)loadBTCChart();
@@ -6430,13 +6437,13 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
     }
   } catch(e) {}
   // === MONITOR: Run pattern detection every 6 hours ===
-  setInterval(function() {
+  bgInterval(function() {
     try { detectFailPatterns(); } catch(e) {}
   }, 6 * 3600000);
   // === SUPERVISOR: Hourly collection ===
-  setInterval(function() { try { supervisorCollect(); } catch(e) {} }, 3600000);
+  bgInterval(function() { try { supervisorCollect(); } catch(e) {} }, 3600000);
   // === SUPERVISOR: Daily report (every 24h) ===
-  setInterval(function() { try { supervisorDailyReport(); } catch(e) {} }, 86400000);
+  bgInterval(function() { try { supervisorDailyReport(); } catch(e) {} }, 86400000);
   // === SUPERVISOR: First collection after 30s ===
   setTimeout(function() { try { supervisorCollect(); } catch(e) {} }, 30000);
   // === SUPERVISOR: Generate first report after 60s if none exists ===

@@ -74,6 +74,10 @@ export default [
         topTraderLatestLong: 'readonly',
         /* Declared in src/monitor-step.js */
         monitorTradeDecision: 'readonly',
+        /* Declared in src/visibility-pause.js */
+        bgInterval: 'readonly',
+        bgClearAll: 'readonly',
+        bgIsVisible: 'readonly',
         /* Declared in src/storage.js */
         safeGetJSON: 'readonly',
         safeGet: 'readonly',
@@ -199,9 +203,11 @@ export default [
     },
   },
 
-  /* Node server */
+  /* Node server + Node-only helpers it requires (commonJS, not part of
+     the browser bundle). Anything under src/ that is `require`d by
+     server.js belongs in this file list. */
   {
-    files: ['server.js'],
+    files: ['server.js', 'src/server-helpers.js'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'commonjs',
@@ -257,6 +263,10 @@ export default [
         topTraderLatestLong: 'readonly',
         /* From src/monitor-step.js */
         monitorTradeDecision: 'readonly',
+        /* From src/visibility-pause.js */
+        bgInterval: 'readonly',
+        bgClearAll: 'readonly',
+        bgIsVisible: 'readonly',
         /* From src/storage.js */
         safeGet: 'readonly',
         safeGetJSON: 'readonly',

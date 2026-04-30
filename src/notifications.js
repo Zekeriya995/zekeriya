@@ -19,6 +19,15 @@ try {
   notifiedSet = JSON.parse(localStorage.getItem('nxnot10') || '{}');
 } catch (e) {}
 
+/* Telegram dedupe set — also persisted now (was in-memory only,
+   which made every page reload re-send the same Telegram for the
+   same signal/hour). Same key shape as notifiedSet so the bgInterval
+   reset can wipe both atomically. */
+var tgSent = {};
+try {
+  tgSent = JSON.parse(localStorage.getItem('nxtgs10') || '{}');
+} catch (e) {}
+
 /* ─── persisted notification history (last 50) ─────────────────── */
 var notifHist = [];
 try {
@@ -83,15 +92,18 @@ function renderNotifHist() {
 
 /* ─── watchlist alerts: ±3% triggers a notification per coin/hour ─ */
 function checkWatchlistAlerts() {
+  /* Honour the user's "Watchlist" toggle (default ON). */
+  if (!isAlertEnabled(alertPrefs, 'watchlist')) return;
   var wl = [];
   try {
     wl = JSON.parse(localStorage.getItem('nxwl10') || '[]');
   } catch (e) {}
+  var bucket = notifHourBucket();
   wl.forEach(function (sym) {
     var d = T[sym];
     if (!d) return;
     if (d.c >= 3) {
-      var k = 'wl_' + sym + '_' + new Date().getHours();
+      var k = 'wl_' + sym + '_' + bucket;
       if (!notifiedSet[k]) {
         notifiedSet[k] = true;
         try {
@@ -107,7 +119,7 @@ function checkWatchlistAlerts() {
       }
     }
     if (d.c <= -3) {
-      var kd = 'wl_dn_' + sym + '_' + new Date().getHours();
+      var kd = 'wl_dn_' + sym + '_' + bucket;
       if (!notifiedSet[kd]) {
         notifiedSet[kd] = true;
         try {
@@ -135,13 +147,16 @@ try {
   soundEnabled = localStorage.getItem('nxsndon10') !== 'off';
 } catch (e) {}
 
-/* Callers pass a tone name ('ultra' / 'whale' / 'bell' / ...). Earlier this
-   parameter was silently discarded because the function took no arguments,
-   so every notification played the global default regardless of importance.
-   tone === 'silent' is an explicit mute per-call. */
+/* Severity-style inputs ('ultra'/'whale'/'gem'/'breakout') are mapped
+   to the user's preferred tone via resolveNotifTone (pure helper in
+   src/scanner-helpers.js). The previous version forwarded 'ultra'
+   straight into previewTone which only knows 'bell'/'horn'/'pulse'
+   — every severity notification fell through every branch and played
+   nothing, so every ULTRA / whale signal was actually silent.
+   tone === 'silent' is still an explicit mute per-call. */
 function playSound(tone) {
-  var pick = tone || soundPref;
-  if (!soundEnabled || pick === 'silent') return;
+  var pick = resolveNotifTone(tone, soundPref, soundEnabled);
+  if (pick === 'silent') return;
   previewTone(pick);
 }
 
@@ -165,10 +180,42 @@ function selTone(el) {
   previewTone(soundPref);
 }
 
+/* Lazily-created shared AudioContext. Browsers cap concurrent
+   AudioContexts (~6) and never garbage-collect un-`close()`d ones
+   promptly — the previous code created one per call, so after ~6
+   notifications all subsequent sound silently broke. One context
+   for the lifetime of the page, with a resume() to undo the
+   user-gesture suspension Chrome applies before the first click. */
+var _notifAudioCtx = null;
+function _notifGetAudioCtx() {
+  if (!_notifAudioCtx) {
+    try {
+      var Ctor = window.AudioContext || window.webkitAudioContext;
+      if (!Ctor) return null;
+      _notifAudioCtx = new Ctor();
+    } catch (e) {
+      return null;
+    }
+  }
+  if (_notifAudioCtx.state === 'suspended') {
+    try {
+      _notifAudioCtx.resume();
+    } catch (e) {}
+  }
+  return _notifAudioCtx;
+}
+
 function previewTone(tone) {
   if (tone === 'silent') return;
+  /* selTone() and the tone-picker UI play a preview synchronously
+     in response to a user click. playSound() — invoked from notify() —
+     can fire when the page is in the background, where the user has
+     not yet clicked anything and AudioContext is suspended. The
+     resume() inside _notifGetAudioCtx covers both paths. */
+  if (soundEnabled === false) return;
   try {
-    var ac = new (window.AudioContext || window.webkitAudioContext)();
+    var ac = _notifGetAudioCtx();
+    if (!ac) return;
     var osc = ac.createOscillator();
     var gain = ac.createGain();
     osc.connect(gain);
@@ -237,9 +284,11 @@ function loadToneUI() {
   if (!soundEnabled) document.getElementById('tglSound').classList.remove('on');
 }
 
-/* ─── Telegram relay (via the secure proxy — token never client-side) ─ */
+/* ─── Telegram relay (via the secure proxy — token never client-side) ─
+   tgSent is now persisted (loaded near the top of the file via
+   safeGetJSON('nxtgs10', {})) so a page reload no longer re-sends
+   the same Telegram for the same signal. */
 var TG_PROXY = PROXY + '/notify';
-var tgSent = {};
 if (/your-nexus-proxy|placeholder|example\.com/i.test(TG_PROXY)) {
   console.warn(
     '[TG] TG_PROXY looks like a placeholder — Telegram notifications disabled:',
@@ -263,10 +312,13 @@ function sendTG(html) {
 }
 
 function tgNotify(sym, type, data) {
-  /* Dedup: same coin+type per hour */
-  var k = sym + '_' + type + '_' + new Date().getHours();
+  /* Dedup: same coin+type per hour-bucket (bucket = epoch_ms / 3600000). */
+  var k = notifDedupeKey(sym, type);
   if (tgSent[k]) return;
   tgSent[k] = true;
+  try {
+    localStorage.setItem('nxtgs10', JSON.stringify(tgSent));
+  } catch (e) {}
   var d = T[sym] || { p: 0, c: 0, v: 0 };
   var fr = FR[sym];
   var waves = whaleWaves[sym] ? whaleWaves[sym].waves : [];
@@ -393,17 +445,87 @@ function tgNotify(sym, type, data) {
   if (msg) sendTG(msg);
 }
 
-/* ─── on-screen popup (uses textContent — no XSS risk) ─────────── */
+/* ─── on-screen popup (uses textContent — no XSS risk) ─────────────
+   The popup is a single shared DOM element and a single visible-time
+   slot. Two notifications close together used to overwrite each
+   other mid-display because the hide timer was non-cancellable.
+
+   New contract:
+     - showPopup() during an active display queues the new entry
+     - the previously-scheduled hide timer is cancelled and
+       re-scheduled so the just-arrived popup gets its full 4000ms
+     - on hide, the queue's next entry slides in after a 350ms gap
+       to let the slide-out animation finish
+
+   Also gives the popup a polite aria-live region so screen readers
+   pick up each new title — `index.html:219` adds role="status" and
+   aria-live="polite" so the textContent updates announce. */
+var _popupVisible = false;
+var _popupHideTimer = null;
+var _popupQueue = [];
+var _POPUP_VISIBLE_MS = 4000;
+var _POPUP_GAP_MS = 350;
+
+/* Defensive document lookup — returns null if `document` is missing
+   (test harness with stubbed/replaced globals) or the element isn't
+   in the DOM yet. Both paths are non-fatal; the popup just no-ops. */
+function _popupGetEl(id) {
+  try {
+    if (typeof document === 'undefined' || !document || !document.getElementById) return null;
+    return document.getElementById(id);
+  } catch (e) {
+    return null;
+  }
+}
+
+function _popupApply(icon, title, body) {
+  var el = _popupGetEl('notifPopup');
+  if (!el) return false;
+  var ic = _popupGetEl('npIcon');
+  var ti = _popupGetEl('npTitle');
+  var bd = _popupGetEl('npBody');
+  var tm = _popupGetEl('npTime');
+  if (ic) ic.textContent = icon;
+  if (ti) ti.textContent = title;
+  if (bd) bd.textContent = body;
+  if (tm) tm.textContent = '🆕';
+  if (el.style) el.style.top = '12px';
+  return true;
+}
+
+function _popupHideAndDrain() {
+  var el = _popupGetEl('notifPopup');
+  if (el && el.style) el.style.top = '-80px';
+  _popupVisible = false;
+  _popupHideTimer = null;
+  if (_popupQueue.length) {
+    /* Tiny gap so the slide-out animation reads as a transition,
+       not a flicker. Then the next entry slides in. */
+    setTimeout(function () {
+      var next = _popupQueue.shift();
+      if (next) _popupShowNow(next.icon, next.title, next.body);
+    }, _POPUP_GAP_MS);
+  }
+}
+
+function _popupShowNow(icon, title, body) {
+  if (!_popupApply(icon, title, body)) return;
+  _popupVisible = true;
+  if (_popupHideTimer) clearTimeout(_popupHideTimer);
+  _popupHideTimer = setTimeout(_popupHideAndDrain, _POPUP_VISIBLE_MS);
+}
+
 function showPopup(icon, title, body) {
-  var el = document.getElementById('notifPopup');
-  document.getElementById('npIcon').textContent = icon;
-  document.getElementById('npTitle').textContent = title;
-  document.getElementById('npBody').textContent = body;
-  document.getElementById('npTime').textContent = '🆕';
-  el.style.top = '12px';
-  setTimeout(function () {
-    el.style.top = '-80px';
-  }, 4000);
+  if (_popupVisible) {
+    /* Bound the queue so a notification storm doesn't grow it
+       unbounded. 5 queued is enough to cover a typical scanner
+       burst; older entries are dropped (they'd be stale by the time
+       they showed anyway). */
+    if (_popupQueue.length >= 5) _popupQueue.shift();
+    _popupQueue.push({ icon: icon, title: title, body: body });
+    return;
+  }
+  _popupShowNow(icon, title, body);
 }
 
 /* ─── per-page alert preferences (toggle list in settings) ─────── */
@@ -424,16 +546,31 @@ function saveAlertPref(key, val) {
 /* ─── public entry point: route a signal through the gate, dedupe,
        trigger sound + popup + history + Telegram + auto-trade ──── */
 function notify(sym, type, score, extra) {
-  var k = sym + '_' + type + '_' + new Date().getHours();
-  if (notifiedSet[k]) return;
-  /* Block small coin (gem) notifications */
+  /* Block small coin (gem) notifications first — even before
+     alertPrefs — because gems have their own dedicated UI panel
+     and must never spam the popup channel. */
   if (type === 'gem') return;
+  /* Per-type user toggle. Defaults ON so existing users see no
+     behavior change unless they explicitly disable a category in
+     settings. The toggle UI was decorative until this gate was
+     added — alertPrefs[key] was written but never read. */
+  if (!isAlertEnabled(alertPrefs, type)) return;
+  /* Hour-bucket dedupe key now uses a continuous bucket since epoch
+     (notifDedupeKey helper). The previous `new Date().getHours()`
+     suffix collided every 24h — a notification fired at 14:10 was
+     still being suppressed at 14:10 the next day. */
+  var k = notifDedupeKey(sym, type);
+  if (notifiedSet[k]) return;
   /* Whale: only notify if total buy volume > $100,000 */
   if (type === 'whale') {
     var ww = whaleWaves[sym];
     if (!ww || !ww.engine || !ww.totalBuy || ww.totalBuy < 100000) return;
   }
-  /* === QUALITY GATE === */
+  /* === QUALITY GATE ===
+     A throwing gate used to fall through to the success path (empty
+     catch + no return). Treat throws as "we cannot vouch for this
+     signal — drop it" and mark the key so we don't retry on the
+     next cycle. */
   try {
     var gate = signalQualityGate(sym, type, score);
     if (!gate.pass) {
@@ -443,7 +580,14 @@ function notify(sym, type, score, extra) {
       } catch (e) {}
       return;
     }
-  } catch (e) {}
+  } catch (gateErr) {
+    console.warn('[notify] quality gate threw — skipping signal:', gateErr);
+    notifiedSet[k] = true;
+    try {
+      localStorage.setItem('nxnot10', JSON.stringify(notifiedSet));
+    } catch (e) {}
+    return;
+  }
   notifiedSet[k] = true;
   try {
     localStorage.setItem('nxnot10', JSON.stringify(notifiedSet));

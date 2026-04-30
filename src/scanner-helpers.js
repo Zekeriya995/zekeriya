@@ -442,6 +442,69 @@ function isValidGemSymbol(s) {
   return /^[A-Z0-9]{1,15}$/.test(s);
 }
 
+/* ─── Notification helpers ────────────────────────────────────────
+   Three pure helpers extracted from src/notifications.js so the
+   notification orchestrator can be tested without booting the DOM
+   or the Web Audio API. */
+
+/* Resolve a `playSound(input)` argument into a concrete tone the
+   audio engine knows how to play. `previewTone` only branches on
+   'bell'/'horn'/'pulse'/'silent'; an earlier refactor changed
+   `playSound` to accept severity-style arguments ('ultra', 'whale',
+   'gem', 'breakout') without growing matching audio branches, so
+   callers got SILENCE for every notification. This helper bridges
+   the two vocabularies:
+
+     - silentSafe (sound disabled or input === 'silent') → 'silent'
+     - severity input → user's preferred tone (or 'bell' default)
+     - direct tone input ('bell'/'horn'/'pulse') → passes through
+     - anything else → soundPref fallback
+
+   Returns one of: 'silent', 'bell', 'horn', 'pulse'. */
+function resolveNotifTone(input, soundPref, soundEnabled) {
+  if (soundEnabled === false) return 'silent';
+  if (input === 'silent') return 'silent';
+  var pref = soundPref || 'bell';
+  var directTones = ['bell', 'horn', 'pulse'];
+  if (directTones.indexOf(input) !== -1) return input;
+  /* Severity inputs and unknown values map to the user's preference. */
+  return directTones.indexOf(pref) !== -1 ? pref : 'bell';
+}
+
+/* Read the user's per-type alert preference. The settings UI stores
+   { ultra: true|false, whale: true|false, breakout: ..., warning: ...,
+   watchlist: ... } — defaults are ON, so missing keys return true.
+   Centralising the default-ON contract here means the orchestrator
+   and the UI can never disagree about what an unset key means. */
+function isAlertEnabled(prefs, key) {
+  if (!prefs || typeof prefs !== 'object') return true;
+  if (!key) return true;
+  return prefs[key] !== false;
+}
+
+/* Compute a continuous hour bucket since the Unix epoch. Used as the
+   suffix on dedupe keys so two notifications of the same kind in the
+   same calendar hour collide (intended) but two notifications in
+   adjacent hours never share a bucket — eliminating the wall-clock
+   misalignment where a notification fired at 14:10 was still being
+   suppressed at 15:10 because both share `getHours() === 14` after
+   the day rolls over.
+
+   Pure: takes an optional epoch ms (defaults to Date.now()). Returns
+   an integer that monotonically increases by 1 every hour. */
+function notifHourBucket(now) {
+  var t = now == null ? Date.now() : now;
+  return Math.floor(t / 3600000);
+}
+
+/* Build the dedupe key used by notifiedSet / tgSent. The shape
+   (`sym + '_' + type + '_' + bucket`) is preserved from the original
+   string concatenation so existing localStorage entries from prior
+   sessions still parse. */
+function notifDedupeKey(sym, type, now) {
+  return sym + '_' + type + '_' + notifHourBucket(now);
+}
+
 /* Find the index in `vols` where the active volume spike *began*.
    Walks back from the most recent candle while each prior candle
    was also "spiking" (vol > avgV * multiplier). Returns the index

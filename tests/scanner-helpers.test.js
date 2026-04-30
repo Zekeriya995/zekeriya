@@ -778,6 +778,117 @@ test('gemTrackFirstSeen — empty / falsy symbols skipped, valid ones still trac
   assert.equal(state[''], undefined);
 });
 
+/* ─── resolveNotifTone ────────────────────────────────────────────── */
+
+test('resolveNotifTone — soundEnabled=false short-circuits to silent', () => {
+  /* Mute is global — it must beat any input, including direct user tones. */
+  assert.equal(resolveNotifTone('ultra', 'bell', false), 'silent');
+  assert.equal(resolveNotifTone('bell', 'horn', false), 'silent');
+  assert.equal(resolveNotifTone(undefined, 'pulse', false), 'silent');
+});
+
+test("resolveNotifTone — explicit 'silent' input is silent", () => {
+  assert.equal(resolveNotifTone('silent', 'bell', true), 'silent');
+});
+
+test('resolveNotifTone — severity inputs map to user soundPref', () => {
+  /* This is the headline fix: 'ultra'/'whale'/'gem'/'breakout' used to
+     fall through every previewTone branch and play NOTHING. Now they
+     resolve to whatever tone the user picked in settings. */
+  assert.equal(resolveNotifTone('ultra', 'horn', true), 'horn');
+  assert.equal(resolveNotifTone('whale', 'pulse', true), 'pulse');
+  assert.equal(resolveNotifTone('gem', 'bell', true), 'bell');
+  assert.equal(resolveNotifTone('breakout', 'horn', true), 'horn');
+});
+
+test('resolveNotifTone — direct tone inputs pass through unchanged', () => {
+  /* selTone() previews the tile the user just clicked — it must play
+     THAT tone, not the saved preference. */
+  assert.equal(resolveNotifTone('bell', 'horn', true), 'bell');
+  assert.equal(resolveNotifTone('horn', 'bell', true), 'horn');
+  assert.equal(resolveNotifTone('pulse', 'bell', true), 'pulse');
+});
+
+test('resolveNotifTone — unknown input + bad pref defaults to bell', () => {
+  /* Defensive: a future caller introducing a new severity name should
+     play SOMETHING audible rather than silently breaking. */
+  assert.equal(resolveNotifTone('unknown_type', 'pulse', true), 'pulse');
+  assert.equal(resolveNotifTone('unknown_type', 'invalid_pref', true), 'bell');
+  assert.equal(resolveNotifTone('unknown_type', null, true), 'bell');
+  assert.equal(resolveNotifTone(undefined, undefined, true), 'bell');
+});
+
+/* ─── isAlertEnabled ──────────────────────────────────────────────── */
+
+test('isAlertEnabled — defaults ON for unset / null / non-object prefs', () => {
+  /* Settings UI starts empty; users opting in to a key explicitly sets
+     true; users opting out sets false. Anything else is treated as
+     "user has not decided" → fire the alert. */
+  assert.equal(isAlertEnabled(null, 'ultra'), true);
+  assert.equal(isAlertEnabled(undefined, 'ultra'), true);
+  assert.equal(isAlertEnabled({}, 'ultra'), true);
+  assert.equal(isAlertEnabled('not-an-object', 'ultra'), true);
+});
+
+test('isAlertEnabled — false explicitly disables; true and missing enable', () => {
+  assert.equal(isAlertEnabled({ ultra: false }, 'ultra'), false);
+  assert.equal(isAlertEnabled({ ultra: true }, 'ultra'), true);
+  assert.equal(isAlertEnabled({ ultra: false }, 'whale'), true);
+  /* Subtle: only literal `false` disables. Truthy-coerce gotchas:
+     0 / '' / null / undefined for the value all enable. The settings
+     toggle only ever stores boolean true/false, so this matches the
+     UI contract exactly. */
+  assert.equal(isAlertEnabled({ ultra: 0 }, 'ultra'), true);
+  assert.equal(isAlertEnabled({ ultra: null }, 'ultra'), true);
+});
+
+test('isAlertEnabled — missing key returns true (default ON)', () => {
+  assert.equal(isAlertEnabled({ whale: false }, undefined), true);
+  assert.equal(isAlertEnabled({ whale: false }, ''), true);
+  assert.equal(isAlertEnabled({ whale: false }, null), true);
+});
+
+/* ─── notifHourBucket / notifDedupeKey ────────────────────────────── */
+
+test('notifHourBucket — monotonic, increments by 1 per hour', () => {
+  /* The bucket is Math.floor(epoch_ms / 3_600_000). Two timestamps
+     in the same hour share a bucket; one hour apart, buckets differ
+     by exactly 1. This is what eliminates the wall-clock collision
+     bug where new Date().getHours() repeated every 24h. */
+  const t = 1_700_000_000_000;
+  const b0 = notifHourBucket(t);
+  assert.equal(notifHourBucket(t + 60_000), b0, 'within hour same bucket');
+  assert.equal(notifHourBucket(t + 3_600_000), b0 + 1, 'next hour +1');
+  assert.equal(notifHourBucket(t + 24 * 3_600_000), b0 + 24, '24 hours +24');
+});
+
+test('notifHourBucket — defaults to Date.now() when called with no args', () => {
+  /* Sanity: production callers omit `now`. Verify the helper returns
+     a number close to "now" rather than throwing or returning 0. */
+  const a = notifHourBucket();
+  const b = notifHourBucket(Date.now());
+  assert.ok(Math.abs(a - b) <= 1);
+});
+
+test('notifDedupeKey — shape is sym_type_bucket, deterministic', () => {
+  const t = 1_700_000_000_000;
+  const expectedBucket = Math.floor(t / 3_600_000);
+  assert.equal(notifDedupeKey('BTC', 'ultra', t), 'BTC_ultra_' + expectedBucket);
+  assert.equal(notifDedupeKey('BTC', 'whale', t), 'BTC_whale_' + expectedBucket);
+});
+
+test("notifDedupeKey — same coin/type within an hour collide; across hours don't", () => {
+  const t = 1_700_000_000_000;
+  assert.equal(notifDedupeKey('BTC', 'ultra', t), notifDedupeKey('BTC', 'ultra', t + 60_000));
+  assert.notEqual(notifDedupeKey('BTC', 'ultra', t), notifDedupeKey('BTC', 'ultra', t + 3_600_000));
+});
+
+test('notifDedupeKey — different coins / types never collide in the same hour', () => {
+  const t = 1_700_000_000_000;
+  assert.notEqual(notifDedupeKey('BTC', 'ultra', t), notifDedupeKey('ETH', 'ultra', t));
+  assert.notEqual(notifDedupeKey('BTC', 'ultra', t), notifDedupeKey('BTC', 'whale', t));
+});
+
 /* ─── evaluateSignalOutcome ───────────────────────────────────────── */
 
 test('evaluateSignalOutcome — missing or zero entry returns neutral', () => {

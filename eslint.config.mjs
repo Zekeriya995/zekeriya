@@ -80,6 +80,13 @@ export default [
         bgInterval: 'readonly',
         bgClearAll: 'readonly',
         bgIsVisible: 'readonly',
+        /* Declared in src/source-health.js */
+        NEXUS_SOURCES: 'readonly',
+        sourceHealth: 'writable',
+        pingSource: 'readonly',
+        pingAllSources: 'readonly',
+        nexusHealthCheck: 'readonly',
+        resetSourceHealth: 'readonly',
         /* Declared in src/storage.js */
         safeGetJSON: 'readonly',
         safeGet: 'readonly',
@@ -271,6 +278,18 @@ export default [
         bgInterval: 'readonly',
         bgClearAll: 'readonly',
         bgIsVisible: 'readonly',
+        /* From src/source-health.js */
+        NEXUS_SOURCES: 'readonly',
+        sourceHealth: 'writable',
+        pingSource: 'readonly',
+        pingAllSources: 'readonly',
+        nexusHealthCheck: 'readonly',
+        resetSourceHealth: 'readonly',
+        PROXY: 'writable',
+        BN: 'writable',
+        BF: 'writable',
+        CG: 'writable',
+        CB: 'writable',
         /* From src/storage.js */
         safeGet: 'readonly',
         safeGetJSON: 'readonly',

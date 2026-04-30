@@ -267,6 +267,19 @@
 </div>
 </div>
 
+<!-- DATA SOURCES HEALTH -->
+
+<div class="side-section">
+<div class="side-label">📡 <span data-t="data_sources">مصادر البيانات</span></div>
+<div class="side-row" style="padding:0">
+<button class="rfr" id="srcHealthRunBtn" type="button" style="width:100%;margin:0">🔍 <span data-t="check_sources">فحص المصادر الآن</span></button>
+</div>
+<div class="src-health-list" id="srcHealthList" role="list" aria-live="polite" aria-busy="false">
+<!-- populated by src/source-health-ui.js — one row per NEXUS_SOURCES entry -->
+</div>
+<div id="srcHealthSummary" style="font-size:10px;color:var(--t3);margin-top:6px;text-align:center"></div>
+</div>
+
 <!-- ABOUT -->
 
 <div class="side-section">
@@ -297,6 +310,7 @@
 <script defer src="src/monitor-step.js"></script>
 <script defer src="src/visibility-pause.js"></script>
 <script defer src="src/source-health.js"></script>
+<script defer src="src/source-health-ui.js"></script>
 <!-- First-visit disclaimer modal — surfaced by showDisclaimerModalIfNeeded() on first Market navigation. -->
 <div class="disclaimer-modal" id="disclaimerModal" style="display:none" role="dialog" aria-modal="true" aria-labelledby="disclaimerModalTitle" aria-describedby="disclaimerModalBody">
 <div class="disclaimer-modal-card" role="document">

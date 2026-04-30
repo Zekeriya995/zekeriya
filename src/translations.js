@@ -145,6 +145,12 @@ const TR = {
   t_silent: { ar: 'صامت', en: 'Silent' },
   about: { ar: 'عن المنصة', en: 'About' },
   clear_data: { ar: 'مسح البيانات', en: 'Clear Data' },
+  data_sources: { ar: 'مصادر البيانات', en: 'Data Sources' },
+  check_sources: { ar: 'فحص المصادر الآن', en: 'Check sources now' },
+  checking: { ar: 'جاري الفحص...', en: 'Checking...' },
+  critical_down: { ar: 'مصدر حرج معطّل', en: 'Critical source down' },
+  all_sources_ok: { ar: 'كل المصادر متصلة', en: 'All sources reachable' },
+  sources_reachable: { ar: 'متاح', en: 'reachable' },
 
   /* Market direction page */
   mkt_dir: { ar: 'اتجاه السوق', en: 'Market Direction' },

@@ -355,41 +355,57 @@ function pickCardVisualTier(signal) {
    call site instead of silently drifting the scoring contract. */
 const GEM_CONFIG = Object.freeze({
   /* Pre-filter (cheap, ticker-only) */
-  STABLES: ['USDT', 'USDC', 'TUSD', 'DAI', 'BUSD', 'FDUSD', 'USDP', 'PYUSD',
-            'USDE', 'USDD', 'GUSD', 'USTC', 'USDS', 'CRVUSD', 'LUSD', 'FRAX'],
-  PRICE_MAX: 20,            /* USDT — upper bound for "small cap" candidate */
-  VOL_MIN: 100000,          /* 24h quote-volume floor (Binance USD) */
-  MC_MIN: 1000000,          /* CoinGecko MC floor when MC is known */
-  MC_MAX: 50000000,         /* CoinGecko MC ceiling when MC is known */
+  STABLES: [
+    'USDT',
+    'USDC',
+    'TUSD',
+    'DAI',
+    'BUSD',
+    'FDUSD',
+    'USDP',
+    'PYUSD',
+    'USDE',
+    'USDD',
+    'GUSD',
+    'USTC',
+    'USDS',
+    'CRVUSD',
+    'LUSD',
+    'FRAX',
+  ],
+  PRICE_MAX: 20 /* USDT — upper bound for "small cap" candidate */,
+  VOL_MIN: 100000 /* 24h quote-volume floor (Binance USD) */,
+  MC_MIN: 1000000 /* CoinGecko MC floor when MC is known */,
+  MC_MAX: 50000000 /* CoinGecko MC ceiling when MC is known */,
 
   /* Risk / scoring gates */
-  RUG_MAX: 70,              /* getRugPullRisk gate — reject above this */
-  SCORE_MIN: 35,            /* loadSmallCaps2 gate — raised from 25 to
+  RUG_MAX: 70 /* getRugPullRisk gate — reject above this */,
+  SCORE_MIN: 35 /* loadSmallCaps2 gate — raised from 25 to
                                require timing+vol or score-stack, not
-                               timing alone */
+                               timing alone */,
 
   /* Spike walkback */
-  WALKBACK_VOL_MULT: 1.5,   /* a candle's vol > avgV*1.5 counts as part
-                               of the active spike */
+  WALKBACK_VOL_MULT: 1.5 /* a candle's vol > avgV*1.5 counts as part
+                               of the active spike */,
 
   /* Timing thresholds (gain% from spike start) */
-  EARLY_MAX: 3,             /* gain < 3% = early */
-  STILL_MAX: 8,             /* gain < 8% = still time */
-                            /* gain >= 8% = late */
+  EARLY_MAX: 3 /* gain < 3% = early */,
+  STILL_MAX: 8 /* gain < 8% = still time */,
+  /* gain >= 8% = late */
 
   /* Slice caps */
-  PREFILTER_LIMIT: 50,      /* survivors of pre-filter sorted by 24h vol */
-  SCORE_LIMIT: 25,          /* of those, top N actually fetched + scored */
-  RENDER_LIMIT: 20,         /* top N rendered as cards */
+  PREFILTER_LIMIT: 50 /* survivors of pre-filter sorted by 24h vol */,
+  SCORE_LIMIT: 25 /* of those, top N actually fetched + scored */,
+  RENDER_LIMIT: 20 /* top N rendered as cards */,
 
   /* Caching (orchestrator side) */
-  KLINE_TTL_MS: 90000,      /* per-symbol 1h klines TTL */
-  RES_TTL_MS: 90000,        /* full result set TTL — drives filter switching */
+  KLINE_TTL_MS: 90000 /* per-symbol 1h klines TTL */,
+  RES_TTL_MS: 90000 /* full result set TTL — drives filter switching */,
 
   /* Target/stop hints (display only — not used in scoring) */
-  TARGET_EARLY: 1.30,
+  TARGET_EARLY: 1.3,
   TARGET_STILL: 1.25,
-  STOP_EARLY: 0.90,
+  STOP_EARLY: 0.9,
   STOP_STILL: 0.88,
 });
 

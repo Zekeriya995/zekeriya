@@ -663,7 +663,7 @@ test('GEM_CONFIG — score gate raised to 35 (timing-alone-passes guard)', () =>
 
 test('GEM_CONFIG — stables list covers the major USD pegs', () => {
   /* Defensive list — additions are fine; removals are the worry. */
-  ['USDT', 'USDC', 'DAI', 'FDUSD', 'USDE'].forEach(s => {
+  ['USDT', 'USDC', 'DAI', 'FDUSD', 'USDE'].forEach((s) => {
     assert.ok(GEM_CONFIG.STABLES.indexOf(s) !== -1, s + ' missing from STABLES');
   });
 });

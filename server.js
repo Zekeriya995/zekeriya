@@ -663,11 +663,27 @@ process.on('uncaughtException', function (err) {
   process.exit(1);
 });
 
-/* Start server */
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`Server listening on port ${PORT}`);
-  startDataLoops();
-});
+/* Start server only when this file is run directly (`node server.js`).
+   When required from a test (`require('../server.js')`) we expose `app`
+   on module.exports so supertest-style suites can drive it without
+   spinning up a real listening socket or kicking off the data-refresh
+   loops. */
+let server;
+if (require.main === module) {
+  server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`Server listening on port ${PORT}`);
+    startDataLoops();
+  });
+}
+
+/* Test seam — invalidate the /api/all TTL cache so suites can stage
+   fresh inputs between requests without sleeping out the 3 s window. */
+function _resetApiAllSnapshot() {
+  apiAllSnapshot = null;
+  apiAllSnapshotAt = 0;
+}
+
+module.exports = { app, cache, _resetApiAllSnapshot };
 
 /* Graceful shutdown — stop accepting new connections, cancel all refresh
    timers, then exit. Gives in-flight requests a 10s grace window. */
@@ -675,10 +691,14 @@ function shutdown(signal) {
   console.log('[SHUTDOWN] Received ' + signal + ', draining...');
   refreshTimers.forEach(clearInterval);
   refreshTimers.length = 0;
-  server.close(function () {
-    console.log('[SHUTDOWN] HTTP server closed');
+  if (server) {
+    server.close(function () {
+      console.log('[SHUTDOWN] HTTP server closed');
+      process.exit(0);
+    });
+  } else {
     process.exit(0);
-  });
+  }
   setTimeout(function () {
     console.warn('[SHUTDOWN] Grace timeout reached, forcing exit');
     process.exit(1);

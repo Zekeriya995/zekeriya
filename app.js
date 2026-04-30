@@ -37,7 +37,7 @@ async function updateTop100(){
         return(d.c>=5&&d.v>=5000000)||(d.c>=3&&d.v>=50000000)||(d.v>=200000000);
       }).sort(function(a,b){return b[1].v-a[1].v}).slice(0,10);
       rising.forEach(function(e){
-        if(newWL.indexOf(e[0])===-1){newWL.push(e[0]);console.log('[TOP100] 🔥 Rising added: '+e[0]+' +'+e[1].c.toFixed(1)+'% Vol:'+fmt(e[1].v))}
+        if(newWL.indexOf(e[0])===-1){newWL.push(e[0]);dbg('[TOP100] 🔥 Rising added: '+e[0]+' +'+e[1].c.toFixed(1)+'% Vol:'+fmt(e[1].v))}
       });
     }
     /* Part 3: Coins with whale activity */
@@ -46,15 +46,15 @@ async function updateTop100(){
       var ww=whaleWaves[s];
       if(ww&&ww.totalBuy>=100000&&newWL.indexOf(s)===-1){
         newWL.push(s);
-        console.log('[TOP100] 🐋 Whale added: '+s+' $'+fmt(ww.totalBuy));
+        dbg('[TOP100] 🐋 Whale added: '+s+' $'+fmt(ww.totalBuy));
       }
     });
     if(newWL.length>=50){
       WL=newWL;
       TIER1=new Set(WL);
-      console.log('[TOP100] Updated: '+WL.length+' coins (100 mcap + '+Math.max(0,WL.length-100)+' rising/whale)');
+      dbg('[TOP100] Updated: '+WL.length+' coins (100 mcap + '+Math.max(0,WL.length-100)+' rising/whale)');
     }
-  }catch(e){console.log('[TOP100] Failed — using cached list')}
+  }catch(e){dbg('[TOP100] Failed — using cached list')}
 }
 /* ═══ 🏆 3-TIER SYSTEM — Smart Coin Focus ═══ */
 var TIER1=new Set(WL); /* Top 100 — Auto-updates hourly */
@@ -64,7 +64,7 @@ function getTierBadge(s){var t=getCoinTier(s);return t===1?'🏆':t===2?'🥈':t
 async function refreshTiers(){if(Date.now()-tierLastRefresh<4*3600000&&tier2Coins.length>0)return;tierLastRefresh=Date.now();
   var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD'];var ranked=Object.entries(T).filter(function(e){return!STABLES.includes(e[0])&&!TIER1.has(e[0])&&e[1].v>1000000}).sort(function(a,b){return b[1].v-a[1].v}).map(function(e){return e[0]});
   tier2Coins=ranked.slice(0,75);tier3Coins=ranked.slice(75,275);
-  console.log('[Tiers] T1:'+TIER1.size+' T2:'+tier2Coins.length+' T3:'+tier3Coins.length)}
+  dbg('[Tiers] T1:'+TIER1.size+' T2:'+tier2Coins.length+' T3:'+tier3Coins.length)}
 /* Volume-spike auto-promotion was disabled in a previous iteration
    (TOP-100 focus). The stubs are removed here to keep the call sites honest. */
 /* VPIN Calculator — simple version using REST trades */
@@ -1805,7 +1805,7 @@ async function loadTk(){
     /* ═══ 🔌 DIRECT API FALLBACK — Binance + CoinGecko ═══ */
     if(!_directFallbackRunning&&(Date.now()-_lastDirectFetch>15000||Object.keys(T).length<10)){
       _directFallbackRunning=true;_lastDirectFetch=Date.now();
-      console.log('[FALLBACK] ⚡ PROXY down — fetching direct from Binance...');
+      dbg('[FALLBACK] ⚡ PROXY down — fetching direct from Binance...');
       try{
         /* Binance spot 24h tickers */
         var bnTk=await fj(BN+'/ticker/24hr');
@@ -1819,7 +1819,7 @@ async function loadTk(){
             if(!(price>0))return;/* Skip zero prices on the direct-API path too. */
             T[sym]={p:price,c:+tk.priceChangePercent||0,v:+tk.quoteVolume||0,h:+tk.highPrice||0,l:+tk.lowPrice||0,src:'BN_DIRECT',loaded:true,t:Date.now()};
           });
-          console.log('[FALLBACK] ✅ Binance tickers loaded: '+Object.keys(T).length+' coins');
+          dbg('[FALLBACK] ✅ Binance tickers loaded: '+Object.keys(T).length+' coins');
           /* Update TIER1 from loaded data */
           if(Object.keys(T).length>50){
             var sorted=Object.entries(T).sort(function(a,b){return b[1].v-a[1].v});
@@ -1836,7 +1836,7 @@ async function loadTk(){
         /* Binance Futures OI — top coins */
         var oiProms=WL.slice(0,20).map(function(s){return fj(BF+'/openInterest?symbol='+s+'USDT').then(function(d){if(d&&d.openInterest)OI[s]=+d.openInterest}).catch(function(){})});
         await Promise.all(oiProms);
-      }catch(e){console.log('[FALLBACK] ❌ Direct API also failed:',e)}
+      }catch(e){dbg('[FALLBACK] ❌ Direct API also failed:',e)}
       _directFallbackRunning=false;
     }
   }
@@ -2520,7 +2520,7 @@ function qualityFilter(results){
     return true;
   });
   if(passed.length===0&&_qfDiag.total>0){
-    try{console.log('[qualityFilter] 🎯 0/'+_qfDiag.total+' passed — rejections:',_qfDiag.byReason)}catch(_e){}
+    try{dbg('[qualityFilter] 🎯 0/'+_qfDiag.total+' passed — rejections:',_qfDiag.byReason)}catch(_e){}
   }
   return passed.slice(0,7);
 }
@@ -6126,7 +6126,7 @@ function renderTop3(){
     try{
       var _bestPri=opps.length?+opps[0].priority.toFixed(1):null;
       var _bestSym=opps.length?opps[0].s:null;
-      console.log('[TOP3] 🎯 0 cards — diag:',
+      dbg('[TOP3] 🎯 0 cards — diag:',
         'scan='+_diag.candidates,'passed_inline='+opps.length,
         _bestPri!==null?('best='+_bestSym+' pri='+_bestPri+' (gate=25)'):'no candidate cleared inline filters',
         _diag);
@@ -6365,7 +6365,7 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   /* Delayed retry — if data still empty after 15s, refetch from proxy */
   setTimeout(async function(){
     try{
-      if(!Object.keys(FR).length||!Object.keys(OI).length||!Object.keys(takerData).length){console.log('Retry loadTk from proxy...');await loadTk()}
+      if(!Object.keys(FR).length||!Object.keys(OI).length||!Object.keys(takerData).length){dbg('Retry loadTk from proxy...');await loadTk()}
     }catch(e){}
   },15000);
   /* ═══ TOP 100 AUTO-UPDATE: CoinGecko every hour ═══ */

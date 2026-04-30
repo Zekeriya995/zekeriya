@@ -33,17 +33,36 @@ function addNotifHist(icon, sym, type, body) {
   } catch (e) {}
 }
 
+/* Delegated click handler — installed once on the list container so
+   it survives every innerHTML re-render of its children. Replaces the
+   inline `onclick="openCoin('SYM')"` attribute, which was both a CSP
+   liability and an attribute-injection sink (apostrophes in user-
+   sourced data could break out of the handler string). The data-sym
+   attribute is escape-friendly: textContent / setAttribute won't
+   collapse a malformed value into JS source. */
+function _attachNotifHistDelegate(el) {
+  if (!el || el._nxNotifBound) return;
+  el._nxNotifBound = true;
+  el.addEventListener('click', function (ev) {
+    var row = ev.target && ev.target.closest ? ev.target.closest('[data-sym]') : null;
+    if (!row) return;
+    var sym = row.getAttribute('data-sym');
+    if (sym && typeof openCoin === 'function') openCoin(sym);
+  });
+}
+
 function renderNotifHist() {
   var el = document.getElementById('notifHistList');
   if (!el) return;
+  _attachNotifHistDelegate(el);
   el.innerHTML = notifHist.length
     ? notifHist
         .slice(0, 20)
         .map(function (n) {
           return (
-            '<div class="al-i" style="cursor:pointer" onclick="openCoin(\'' +
+            '<div class="al-i" style="cursor:pointer" data-sym="' +
             esc(n.sym) +
-            '\')"><div class="al-l"><div style="font-size:18px">' +
+            '"><div class="al-l"><div style="font-size:18px">' +
             esc(n.icon) +
             '</div><div><div style="font-weight:600;font-size:11px">' +
             esc(n.sym) +

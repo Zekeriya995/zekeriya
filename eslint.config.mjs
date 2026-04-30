@@ -87,6 +87,9 @@ export default [
         pingAllSources: 'readonly',
         nexusHealthCheck: 'readonly',
         resetSourceHealth: 'readonly',
+        /* Declared in src/source-health-ui.js */
+        renderSourceHealth: 'readonly',
+        runSourceHealthCheck: 'readonly',
         /* Declared in src/storage.js */
         safeGetJSON: 'readonly',
         safeGet: 'readonly',
@@ -285,6 +288,8 @@ export default [
         pingAllSources: 'readonly',
         nexusHealthCheck: 'readonly',
         resetSourceHealth: 'readonly',
+        renderSourceHealth: 'readonly',
+        runSourceHealthCheck: 'readonly',
         PROXY: 'writable',
         BN: 'writable',
         BF: 'writable',

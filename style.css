@@ -645,3 +645,8 @@ canvas{width:100%!important;border-radius:4px}
 .sv-exchange-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;margin-bottom:8px}
 .sv-ex-item{display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:var(--glass);border:1px solid var(--bdr);border-radius:8px}
 .sv-empty{text-align:center;font-size:10px;color:var(--t3);padding:10px}
+.src-health-list{margin-top:8px;background:var(--glass);border:1px solid var(--bdr);border-radius:8px;max-height:280px;overflow-y:auto}
+.src-health-list:empty{display:none}
+.src-health-row{transition:background .15s}
+.src-health-row:hover{background:var(--bdr)}
+.src-health-row:last-child{border-bottom:none}

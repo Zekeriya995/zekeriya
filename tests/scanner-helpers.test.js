@@ -587,6 +587,29 @@ test('walkbackSpikeStart — multiplier override changes threshold', () => {
   assert.equal(walkbackSpikeStart(v, 1), 0);
 });
 
+test('walkbackSpikeStart — original-bug repro: trailing-calm hides earlier spike', () => {
+  /* Direct repro of the docstring bug: the most recent candle is calm,
+     but a real spike happened earlier. The corrected helper returns
+     N-1 (the calm tail) so callers measure gain from the latest close
+     rather than from a spike that has already cooled. The OLD in-place
+     loop would have set sI back at the spike index — masking the
+     real "we missed it" state. */
+  assert.equal(walkbackSpikeStart([5, 5, 1], 1), 2);
+  /* Real-world variant: spike, calm, calm, calm — same outcome. */
+  assert.equal(walkbackSpikeStart([5, 1, 1, 1], 1), 3);
+});
+
+test('walkbackSpikeStart — vol exactly equals threshold is NOT a spike (strict >)', () => {
+  /* Off-by-one mutation guard: the loop uses strict `> threshold`.
+     A bar at exactly avgV*mult must classify as calm. If a future
+     refactor flips to `>=`, this test fires immediately. */
+  /* avg=2, mult=1.5 -> threshold=3. Bar at 3 is calm; bar at 3.001 spikes. */
+  assert.equal(walkbackSpikeStart([3], 2), 0);
+  assert.equal(walkbackSpikeStart([3.001], 2), 0);
+  assert.equal(walkbackSpikeStart([3, 3, 3], 2), 2);
+  assert.equal(walkbackSpikeStart([3, 3, 3.001], 2), 2);
+});
+
 /* ─── classifyGemTiming ───────────────────────────────────────────── */
 
 test('classifyGemTiming — bucket boundaries match scoreGemCandidate semantics', () => {

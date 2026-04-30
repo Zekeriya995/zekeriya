@@ -1779,9 +1779,13 @@ function renderSmallCaps(res){
   if(!f.length){slEl.innerHTML='<div class="empty"><div class="empty-ic">💎</div><div class="empty-tx">'+esc(t('gem_no_results_short'))+'</div></div>';return}
   var h='';
   f.slice(0,GEM_CONFIG.RENDER_LIMIT).forEach(function(g){
-    /* Defense in depth — even though isValidGemSymbol gated entry,
-       escape g.s before it lands inside an inline JS string + HTML
-       attribute. */
+    /* Safety here is enforced by isValidGemSymbol's /^[A-Z0-9]{1,15}$/
+       gate — a quote or angle bracket can never reach this point. We
+       still pipe through esc() as a paranoid second layer for the HTML
+       interpolation `>💎 sSafe<`, but note that esc()'s &#39; output
+       is decoded by the browser BEFORE the JS in onclick="..." is
+       parsed, so esc alone would not protect the inline-handler path
+       if the regex were ever loosened — keep both guards in lockstep. */
     var sSafe=esc(g.s);
     /* Rug-risk pill: visible reassurance that we filtered, not just guessed. */
     var rugCol=g.rugRisk<30?'var(--up)':g.rugRisk<60?'var(--warn)':'var(--dn)';
@@ -4629,6 +4633,14 @@ function invalidateMarketCaches(){
   if(typeof ethCache==='object'&&ethCache){ethCache.h=null;ethCache.t=0;}
   if(typeof mktKlDailyCache==='object'&&mktKlDailyCache){mktKlDailyCache.BTC=null;mktKlDailyCache.ETH=null;}
   if(typeof mktKlDailyCacheTime==='object'&&mktKlDailyCacheTime){mktKlDailyCacheTime.BTC=0;mktKlDailyCacheTime.ETH=0;}
+  /* Gem Hunter caches: tBadge.l strings are resolved via t() at scoring
+     time and stored on the cached row, so a language toggle would re-
+     render gems with the previous language's labels until RES_TTL_MS
+     elapses. Drop both the per-symbol kline cache and the result cache
+     so the next loadSmallCapsUI() rebuilds the labels in the new lang. */
+  _gemResCache=null;
+  _gemResCacheAt=0;
+  _gemKlineCache={};
 }
 var RPT_COINS=[{s:'BTC',ic:'\u20bf',col:'#f7931a'},{s:'ETH',ic:'\u039e',col:'#627eea'},{s:'SOL',ic:'\u25ce',col:'#9945ff'},{s:'BNB',ic:'\u2b21',col:'#f0b90b'},{s:'XRP',ic:'\u2715',col:'#0085c0'}];
 var reportHistory=safeGetJSON('nxRptHist',[]);

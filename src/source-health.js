@@ -83,10 +83,14 @@ var NEXUS_SOURCES = [
     critical: false,
   },
   {
-    id: 'tokenomist',
-    name: 'Tokenomist',
+    id: 'llama-emissions',
+    name: 'DeFiLlama Emissions',
+    /* Replaced api.tokenomist.ai/v1/unlocks (deprecated, returned
+       HTTP 404 from production probes on 2026-04-30). DeFiLlama's
+       emissions endpoint serves the same upcoming-unlock catalogue
+       and our other DeFiLlama hosts respond in <50ms. */
     url: function () {
-      return 'https://api.tokenomist.ai/v1/unlocks/upcoming?limit=1';
+      return 'https://api.llama.fi/emissions';
     },
     critical: false,
   },

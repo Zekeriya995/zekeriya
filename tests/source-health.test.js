@@ -32,6 +32,16 @@ test('NEXUS_SOURCES — covers all 12 documented sources', () => {
   }
 });
 
+test('NEXUS_SOURCES — deprecated Tokenomist replaced by DeFiLlama Emissions', () => {
+  /* api.tokenomist.ai/v1/* returned HTTP 404 from production probes
+     on 2026-04-30. The catalogue must reflect the working alternative. */
+  const ids = NEXUS_SOURCES.map((s) => s.id);
+  assert.ok(!ids.includes('tokenomist'), 'deprecated tokenomist must be removed');
+  assert.ok(ids.includes('llama-emissions'), 'llama-emissions must replace it');
+  const emissions = NEXUS_SOURCES.find((s) => s.id === 'llama-emissions');
+  assert.match(emissions.url(), /api\.llama\.fi\/emissions/);
+});
+
 test('NEXUS_SOURCES — all entries have id, name, url(), critical', () => {
   for (const s of NEXUS_SOURCES) {
     assert.equal(typeof s.id, 'string');

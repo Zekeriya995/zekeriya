@@ -24,22 +24,27 @@ function reset() {
 
 /* ─── catalogue invariants ────────────────────────────────────────── */
 
-test('NEXUS_SOURCES — covers all 12 documented sources', () => {
-  assert.equal(NEXUS_SOURCES.length, 12, 'audit lists 10 + Coinbase + Telegram-via-proxy = 12');
+test('NEXUS_SOURCES — covers the 11 verified live sources', () => {
+  /* Expected size dropped from 12 → 11 after the unverified
+     llama-emissions entry was removed (its URL produced HTTP 503
+     from production probes; not part of DeFiLlama's published
+     free API). When a verified upstream is identified, this
+     count goes back up. */
+  assert.equal(NEXUS_SOURCES.length, 11);
   const ids = NEXUS_SOURCES.map((s) => s.id);
   for (const required of ['proxy', 'bn-spot', 'bn-fut', 'coingecko', 'mempool']) {
     assert.ok(ids.includes(required), 'missing source: ' + required);
   }
 });
 
-test('NEXUS_SOURCES — deprecated Tokenomist replaced by DeFiLlama Emissions', () => {
-  /* api.tokenomist.ai/v1/* returned HTTP 404 from production probes
-     on 2026-04-30. The catalogue must reflect the working alternative. */
+test('NEXUS_SOURCES — deprecated/unverified token-unlock upstreams not in catalogue', () => {
+  /* Both api.tokenomist.ai/v1/* (404) and api.llama.fi/emissions
+     (503) failed in production probes. The catalogue must not
+     surface them — falling silently to the relative-date fallback
+     in fetchTokenUnlocks is the correct degraded behaviour. */
   const ids = NEXUS_SOURCES.map((s) => s.id);
-  assert.ok(!ids.includes('tokenomist'), 'deprecated tokenomist must be removed');
-  assert.ok(ids.includes('llama-emissions'), 'llama-emissions must replace it');
-  const emissions = NEXUS_SOURCES.find((s) => s.id === 'llama-emissions');
-  assert.match(emissions.url(), /api\.llama\.fi\/emissions/);
+  assert.ok(!ids.includes('tokenomist'));
+  assert.ok(!ids.includes('llama-emissions'));
 });
 
 test('NEXUS_SOURCES — all entries have id, name, url(), critical', () => {
@@ -135,6 +140,79 @@ test('pingSource — success after failure clears lastError but keeps failCount'
   assert.equal(sourceHealth.test.successCount, 1);
   assert.equal(sourceHealth.test.failCount, 1, 'failCount is monotonic');
   assert.equal(sourceHealth.test.lastError, null, 'success clears lastError');
+});
+
+/* ─── pingSource retry-on-transient ───────────────────────────────── */
+
+/* Drive the back-off to 0 in tests so we don't sleep 400 ms each retry. */
+globalThis.window = globalThis.window || {};
+globalThis.window.NEXUS_PROBE_RETRY_MS = 0;
+
+test('pingSource — retries once on 503; counts only the final outcome', async () => {
+  reset();
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts++;
+    /* First attempt: 503. Retry: 200. */
+    return attempts === 1 ? { ok: false, status: 503 } : { ok: true, status: 200 };
+  };
+  const r = await pingSource({ id: 'test', name: 'Test', url: () => 'https://x.test/' });
+  assert.equal(attempts, 2, 'second attempt fired');
+  assert.equal(r.ok, true, 'final result reflects the retry success');
+  assert.equal(r.status, 200);
+  assert.equal(sourceHealth.test.successCount, 1);
+  assert.equal(sourceHealth.test.failCount, 0, 'transient failure not counted when retry succeeds');
+});
+
+test('pingSource — retries on 429 (rate-limit) too', async () => {
+  reset();
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts++;
+    return attempts === 1 ? { ok: false, status: 429 } : { ok: true, status: 200 };
+  };
+  await pingSource({ id: 'test', name: 'Test', url: () => 'https://x.test/' });
+  assert.equal(attempts, 2);
+});
+
+test('pingSource — retries on network error', async () => {
+  reset();
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts++;
+    if (attempts === 1) throw new Error('flaky');
+    return { ok: true, status: 200 };
+  };
+  const r = await pingSource({ id: 'test', name: 'Test', url: () => 'https://x.test/' });
+  assert.equal(attempts, 2);
+  assert.equal(r.ok, true);
+});
+
+test('pingSource — does NOT retry on 4xx (permanent error)', async () => {
+  reset();
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts++;
+    return { ok: false, status: 404 };
+  };
+  const r = await pingSource({ id: 'test', name: 'Test', url: () => 'https://x.test/' });
+  assert.equal(attempts, 1, '404 is permanent — no retry');
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 404);
+});
+
+test('pingSource — both attempts fail → final result reports the second outcome', async () => {
+  reset();
+  let attempts = 0;
+  globalThis.fetch = async () => {
+    attempts++;
+    return { ok: false, status: 503 };
+  };
+  const r = await pingSource({ id: 'test', name: 'Test', url: () => 'https://x.test/' });
+  assert.equal(attempts, 2);
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 503);
+  assert.equal(sourceHealth.test.failCount, 1, 'one persistent failure counted, not two');
 });
 
 /* ─── pingAllSources ──────────────────────────────────────────────── */

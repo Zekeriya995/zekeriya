@@ -452,10 +452,21 @@ test('getRugPullRisk — extreme price move adds 15', () => {
   assert.equal(getRugPullRisk(d, fr, book), 15);
 });
 
-test('getRugPullRisk — no futures market adds 10', () => {
+test('getRugPullRisk — explicit null fr (no futures market) adds 10', () => {
+  /* `null` means "we know this coin has no futures market". */
   const d = { v: 5000000, c: 2 };
   const book = { spread: 0.1, bidQty: 5000, askQty: 5000 };
   assert.equal(getRugPullRisk(d, null, book), 10);
+});
+
+test('getRugPullRisk — undefined fr (data not loaded) adds 0', () => {
+  /* Cold-start contract: callers pass undefined when the FR feed
+     hasn't hydrated yet — must not penalize the candidate. */
+  const d = { v: 5000000, c: 2 };
+  const book = { spread: 0.1, bidQty: 5000, askQty: 5000 };
+  assert.equal(getRugPullRisk(d, undefined, book), 0);
+  /* Implicit undefined (omitted argument) also resolves to 0. */
+  assert.equal(getRugPullRisk(d, /* fr omitted */ undefined, book), 0);
 });
 
 test('getRugPullRisk — multiple red flags stack and cap at 100', () => {
@@ -471,6 +482,190 @@ test('getRugPullRisk — missing book ticker contributes nothing (gap, not risk)
   const fr = { rate: 0.0001 };
   /* No book ticker passed — risk should be 0, not 50 */
   assert.equal(getRugPullRisk(d, fr, null), 0);
+});
+
+/* ─── scoreGemCandidate boundary tests (off-by-one mutation guards) ── */
+
+test('scoreGemCandidate — vx ladder boundaries fire at exact threshold', () => {
+  const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
+  /* Each rung's threshold is inclusive (>=). */
+  assert.equal(scoreGemCandidate(t, { vx: 4.0, timing: null }, null).score, 45);
+  assert.equal(scoreGemCandidate(t, { vx: 3.999, timing: null }, null).score, 40);
+  assert.equal(scoreGemCandidate(t, { vx: 3.0, timing: null }, null).score, 40);
+  assert.equal(scoreGemCandidate(t, { vx: 2.999, timing: null }, null).score, 30);
+  assert.equal(scoreGemCandidate(t, { vx: 2.0, timing: null }, null).score, 30);
+  assert.equal(scoreGemCandidate(t, { vx: 1.999, timing: null }, null).score, 15);
+  assert.equal(scoreGemCandidate(t, { vx: 1.5, timing: null }, null).score, 15);
+  assert.equal(scoreGemCandidate(t, { vx: 1.499, timing: null }, null).score, 0);
+});
+
+test('scoreGemCandidate — VPIN boundaries (>0.6 high, >0.4 moderate)', () => {
+  const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
+  assert.equal(scoreGemCandidate(t, null, { vpin: { vpin: 0.6 } }).score, 8);
+  assert.equal(scoreGemCandidate(t, null, { vpin: { vpin: 0.601 } }).score, 15);
+  assert.equal(scoreGemCandidate(t, null, { vpin: { vpin: 0.4 } }).score, 0);
+  assert.equal(scoreGemCandidate(t, null, { vpin: { vpin: 0.401 } }).score, 8);
+});
+
+test('scoreGemCandidate — c boundaries: 0 / 3 / 8 each fall in the right bucket', () => {
+  /* c > 0 && c < 3 -> +20. c >= 3 && c < 8 -> +10. c >= 8 -> 0. */
+  const at0 = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
+  const at3 = { p: 1, c: 3, v: 1e6, h: 1, l: 1 };
+  const at8 = { p: 1, c: 8, v: 1e6, h: 1, l: 1 };
+  const just_below_3 = { p: 1, c: 2.999, v: 1e6, h: 1, l: 1 };
+  const just_below_8 = { p: 1, c: 7.999, v: 1e6, h: 1, l: 1 };
+  assert.equal(scoreGemCandidate(at0, null, null).score, 0);
+  assert.equal(scoreGemCandidate(just_below_3, null, null).score, 20);
+  assert.equal(scoreGemCandidate(at3, null, null).score, 10);
+  assert.equal(scoreGemCandidate(just_below_8, null, null).score, 10);
+  assert.equal(scoreGemCandidate(at8, null, null).score, 0);
+});
+
+test('scoreGemCandidate — whalePnL > 1% threshold', () => {
+  const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };
+  assert.equal(scoreGemCandidate(t, null, { whalePnL: { pct: 1 } }).score, 0);
+  assert.equal(scoreGemCandidate(t, null, { whalePnL: { pct: 1.001 } }).score, 10);
+});
+
+test('scoreGemCandidate — bottom-of-range threshold at exactly 30%', () => {
+  /* posInRange < 0.3 — strict less-than. At 30% exactly, NO bonus. */
+  const at30 = { p: 103, c: 0, v: 1e6, h: 110, l: 100 }; /* (103-100)/(110-100) = 0.3 */
+  const just_below = { p: 102.999, c: 0, v: 1e6, h: 110, l: 100 };
+  assert.equal(scoreGemCandidate(at30, null, null).score, 0);
+  assert.equal(scoreGemCandidate(just_below, null, null).score, 10);
+});
+
+/* ─── walkbackSpikeStart ──────────────────────────────────────────── */
+
+test('walkbackSpikeStart — empty / null input returns 0', () => {
+  assert.equal(walkbackSpikeStart(null, 1), 0);
+  assert.equal(walkbackSpikeStart([], 1), 0);
+});
+
+test('walkbackSpikeStart — invalid avgV returns the most recent index', () => {
+  const v = [1, 1, 1, 1, 1];
+  assert.equal(walkbackSpikeStart(v, 0), 4);
+  assert.equal(walkbackSpikeStart(v, -5), 4);
+});
+
+test('walkbackSpikeStart — most recent candle calm: returns N-1 (no spike)', () => {
+  /* Spike was 4 bars ago, but the latest is calm — caller measures
+     gain from the latest close, which is the right behavior. */
+  const v = [1, 1, 5, 5, 1];
+  assert.equal(walkbackSpikeStart(v, 1), 4);
+});
+
+test('walkbackSpikeStart — trailing spike: returns earliest spike index', () => {
+  /* avg=1, threshold=1.5. Last 3 bars all spike. Earliest = idx 2. */
+  const v = [1, 1, 5, 5, 5];
+  assert.equal(walkbackSpikeStart(v, 1), 2);
+});
+
+test('walkbackSpikeStart — entire series is one continuous spike', () => {
+  const v = [10, 10, 10, 10, 10];
+  assert.equal(walkbackSpikeStart(v, 1), 0);
+});
+
+test('walkbackSpikeStart — single-bar spike: returns that bar only', () => {
+  /* Only the last bar is hot. */
+  const v = [1, 1, 1, 1, 5];
+  assert.equal(walkbackSpikeStart(v, 1), 4);
+});
+
+test('walkbackSpikeStart — alternating spike/calm/spike: stops at first calm walking back', () => {
+  /* Trailing spike at idx 4, calm at 3, spike at 1-2. The earlier
+     spike is NOT part of the trailing run — we want idx 4. */
+  const v = [5, 5, 1, 5];
+  assert.equal(walkbackSpikeStart(v, 1), 3);
+});
+
+test('walkbackSpikeStart — multiplier override changes threshold', () => {
+  /* avg=1, mult=4 -> threshold=4. Bars at 5 spike; bars at 3 do not. */
+  const v = [3, 3, 5];
+  assert.equal(walkbackSpikeStart(v, 1, 4), 2);
+  /* With default mult=1.5 -> threshold=1.5, all three bars spike. */
+  assert.equal(walkbackSpikeStart(v, 1), 0);
+});
+
+/* ─── classifyGemTiming ───────────────────────────────────────────── */
+
+test('classifyGemTiming — bucket boundaries match scoreGemCandidate semantics', () => {
+  /* < EARLY_MAX (3) = early; < STILL_MAX (8) = still; else late. */
+  assert.equal(classifyGemTiming(-1), 'early');
+  assert.equal(classifyGemTiming(0), 'early');
+  assert.equal(classifyGemTiming(2.999), 'early');
+  assert.equal(classifyGemTiming(3), 'still');
+  assert.equal(classifyGemTiming(5), 'still');
+  assert.equal(classifyGemTiming(7.999), 'still');
+  assert.equal(classifyGemTiming(8), 'late');
+  assert.equal(classifyGemTiming(50), 'late');
+});
+
+test('classifyGemTiming — non-finite input collapses to early (most permissive)', () => {
+  assert.equal(classifyGemTiming(NaN), 'early');
+  assert.equal(classifyGemTiming(undefined), 'early');
+  assert.equal(classifyGemTiming(null), 'early');
+  assert.equal(classifyGemTiming(Infinity), 'early');
+});
+
+/* ─── isValidGemSymbol ────────────────────────────────────────────── */
+
+test('isValidGemSymbol — accepts uppercase alphanumeric tickers', () => {
+  assert.equal(isValidGemSymbol('BTC'), true);
+  assert.equal(isValidGemSymbol('1INCH'), true);
+  assert.equal(isValidGemSymbol('PEPE2'), true);
+  assert.equal(isValidGemSymbol('A'), true);
+});
+
+test('isValidGemSymbol — rejects empty / non-string / oversize', () => {
+  assert.equal(isValidGemSymbol(''), false);
+  assert.equal(isValidGemSymbol(null), false);
+  assert.equal(isValidGemSymbol(undefined), false);
+  assert.equal(isValidGemSymbol(123), false);
+  assert.equal(isValidGemSymbol('A'.repeat(16)), false);
+});
+
+test('isValidGemSymbol — rejects punctuation / lowercase / injection vectors', () => {
+  /* These are the actual attack shapes that motivated the whitelist:
+     punctuation breaks out of the inline JS string + HTML attribute,
+     URL parameter splitting via & or ? ruins the Binance request. */
+  assert.equal(isValidGemSymbol('btc'), false);
+  assert.equal(isValidGemSymbol("X');alert(1);//"), false);
+  assert.equal(isValidGemSymbol('BTC&limit=1000'), false);
+  assert.equal(isValidGemSymbol('BTC USDT'), false);
+  assert.equal(isValidGemSymbol('BTC-USD'), false);
+  assert.equal(isValidGemSymbol('<script>'), false);
+});
+
+/* ─── GEM_CONFIG immutability ─────────────────────────────────────── */
+
+test('GEM_CONFIG — frozen so accidental mutation cannot drift the contract', () => {
+  /* Object.freeze: silently no-op in sloppy mode, TypeError in strict
+     mode. The runtime mode here is sloppy (no 'use strict' on the
+     vm.runInThisContext wrapper), so we verify the OUTCOME — that
+     the assignment did not take — rather than the error path. */
+  const original = GEM_CONFIG.SCORE_MIN;
+  try {
+    GEM_CONFIG.SCORE_MIN = 0;
+  } catch {
+    /* Strict-mode environments will throw; sloppy will silently no-op. */
+  }
+  assert.equal(GEM_CONFIG.SCORE_MIN, original);
+  assert.equal(Object.isFrozen(GEM_CONFIG), true);
+});
+
+test('GEM_CONFIG — score gate raised to 35 (timing-alone-passes guard)', () => {
+  /* The orchestrator gate at 35 is the contract that prevents
+     timing='early' alone (30 pts) from surfacing as a gem.
+     If this drops back to 25 a regression has been introduced. */
+  assert.equal(GEM_CONFIG.SCORE_MIN, 35);
+});
+
+test('GEM_CONFIG — stables list covers the major USD pegs', () => {
+  /* Defensive list — additions are fine; removals are the worry. */
+  ['USDT', 'USDC', 'DAI', 'FDUSD', 'USDE'].forEach(s => {
+    assert.ok(GEM_CONFIG.STABLES.indexOf(s) !== -1, s + ' missing from STABLES');
+  });
 });
 
 /* ─── evaluateSignalOutcome ───────────────────────────────────────── */

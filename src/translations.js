@@ -118,6 +118,32 @@ const TR = {
     ar: '💎 عملات صغيرة بحركة غير عادية — فرص أرباح كبيرة',
     en: '💎 Small caps with unusual moves — big profit potential',
   },
+  /* Gem Hunter — UI states */
+  gem_loading_title: { ar: 'جاري تحميل البيانات...', en: 'Loading data...' },
+  gem_loading_sub: {
+    ar: 'انتظر حتى يتم تحميل بيانات العملات',
+    en: 'Waiting for coin data to load',
+  },
+  gem_no_results_title: { ar: 'لا جواهر مكتشفة حالياً', en: 'No gems found right now' },
+  gem_no_results_sub: {
+    ar: 'السكانر يبحث عن عملات صغيرة بحركة غير عادية — حاول لاحقاً',
+    en: 'Scanner looking for small caps with unusual moves — try later',
+  },
+  gem_error_title: { ar: 'خطأ في التحليل', en: 'Analysis error' },
+  gem_no_results_short: { ar: 'لا جواهر حالياً', en: 'No gems now' },
+  gem_market_quiet: { ar: 'لا جواهر حالياً — السوق هادئ', en: 'No gems now — Market quiet' },
+  /* Gem Hunter — timing badges */
+  gem_early_label: { ar: 'مبكر — ادخل!', en: 'Early — Enter!' },
+  gem_still_label: { ar: 'فيه فرصة — حذر', en: 'Still time — Caution' },
+  gem_late_label: { ar: 'متأخر — راقب', en: 'Late — Watch' },
+  /* Gem Hunter — rug-risk pills */
+  gem_safe_pill: { ar: '🛡 آمن', en: '🛡 Safe' },
+  gem_medium_pill: { ar: '⚠ متوسط', en: '⚠ Medium' },
+  gem_risk_pill: { ar: '🚨 خطر', en: '🚨 Risk' },
+  /* Gem Hunter — card labels */
+  gem_mc_label: { ar: 'سوق:', en: 'MC:' },
+  gem_mc_unknown: { ar: 'MC ?', en: 'MC ?' },
+  gem_from_spike: { ar: 'من القفزة', en: 'from spike' },
   wl_desc: {
     ar: '👁 أضف عملات لمراقبتها 24/7',
     en: '👁 Add coins to watch 24/7',

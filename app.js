@@ -1580,37 +1580,87 @@ function updateScanSummary(sigCount,tkCount){
     else{srcEl.innerHTML='<span style="color:var(--warn)">⚡</span>';srcEl.title=lang==='ar'?'اتصال مباشر':'Direct API'}
   }
 }
-/* ═══ TAB 3: SMALL CAPS ═══ */
+/* ═══ TAB 3: GEM HUNTER (صيد الجواهر) ═══
+   Three runtime caches drive the contract:
+     _gemKlineCache  — per-symbol 1h klines, TTL via GEM_CONFIG.KLINE_TTL_MS
+     _gemResCache    — full scored result set, TTL via GEM_CONFIG.RES_TTL_MS
+     _gemLoadInflight — boolean guard against re-entrant loads
+   Rationale: filter-button clicks (all/early/still/late) used to fan out
+   ~25 fresh klines requests per click. With these caches the network
+   work happens once per RES_TTL_MS, and filter switching becomes a
+   pure client-side array filter on _gemResCache. */
+var _gemKlineCache = {};
+var _gemResCache = null;
+var _gemResCacheAt = 0;
+var _gemLoadInflight = false;
+
+function _gemBadge(timing){
+  if(timing==='early') return {ic:'🟢', l:t('gem_early_label'), col:'var(--up)'};
+  if(timing==='still') return {ic:'🟡', l:t('gem_still_label'), col:'var(--warn)'};
+  return {ic:'🔴', l:t('gem_late_label'), col:'var(--dn)'};
+}
+
+function _gemFetchKlines(s){
+  /* Per-symbol kline fetch with TTL cache. encodeURIComponent on `s`
+     even though isValidGemSymbol already passed — defense in depth
+     against URL splitting if the regex is ever loosened. */
+  var cached = _gemKlineCache[s];
+  if(cached && Date.now() - cached.t < GEM_CONFIG.KLINE_TTL_MS) return Promise.resolve(cached.kl);
+  return fj(BN+'/klines?symbol='+encodeURIComponent(s)+'USDT&interval=1h&limit=12').then(function(kl){
+    if(kl && kl.length) _gemKlineCache[s] = {t: Date.now(), kl: kl};
+    return kl;
+  });
+}
+
 async function loadSmallCapsUI(){
   var slEl=document.getElementById('smallList');
   if(!slEl)return;
+  /* Fresh cached results — re-render without re-fetching. */
+  if(_gemResCache && Date.now() - _gemResCacheAt < GEM_CONFIG.RES_TTL_MS){
+    if(_gemResCache.length) renderSmallCaps(_gemResCache);
+    else slEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">💎</div><div class="sc-empty-title">'+esc(t('gem_no_results_title'))+'</div><div class="sc-empty-sub">'+esc(t('gem_no_results_sub'))+'</div></div>';
+    return;
+  }
+  /* In-flight guard — prevents the rapid-click amplification storm. */
+  if(_gemLoadInflight) return;
+  _gemLoadInflight = true;
   slEl.innerHTML='<div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div>';
-  /* ═══ GEM HUNTER v2 — Enabled with direct Binance scan ═══ */
   if(Object.keys(T).length<10){
-    slEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">⚠️</div><div class="sc-empty-title">'+(lang==='ar'?'جاري تحميل البيانات...':'Loading data...')+'</div><div class="sc-empty-sub">'+(lang==='ar'?'انتظر حتى يتم تحميل بيانات العملات':'Waiting for coin data to load')+'</div></div>';
+    slEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">⚠️</div><div class="sc-empty-title">'+esc(t('gem_loading_title'))+'</div><div class="sc-empty-sub">'+esc(t('gem_loading_sub'))+'</div></div>';
+    _gemLoadInflight = false;
     return;
   }
   try{
     var res=await loadSmallCaps2();
-    if(res&&res.length){renderSmallCaps(res)}
-    else{slEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">💎</div><div class="sc-empty-title">'+(lang==='ar'?'لا جواهر مكتشفة حالياً':'No gems found right now')+'</div><div class="sc-empty-sub">'+(lang==='ar'?'السكانر يبحث عن عملات صغيرة بحركة غير عادية — حاول لاحقاً':'Scanner looking for small caps with unusual moves — try later')+'</div></div>';}
+    _gemResCache = res || [];
+    _gemResCacheAt = Date.now();
+    if(res && res.length) renderSmallCaps(res);
+    else slEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">💎</div><div class="sc-empty-title">'+esc(t('gem_no_results_title'))+'</div><div class="sc-empty-sub">'+esc(t('gem_no_results_sub'))+'</div></div>';
   }catch(e){
     console.error('[GemHunter] Error:',e);
-    slEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">❌</div><div class="sc-empty-title">'+(lang==='ar'?'خطأ في التحليل':'Analysis error')+'</div><div class="sc-empty-sub">'+esc(e&&e.message?e.message:'unknown')+'</div></div>';
+    slEl.innerHTML='<div class="sc-empty"><div class="sc-empty-ic">❌</div><div class="sc-empty-title">'+esc(t('gem_error_title'))+'</div><div class="sc-empty-sub">'+esc(e&&e.message?e.message:'unknown')+'</div></div>';
+  }finally{
+    _gemLoadInflight = false;
   }
 }
-/* ═══ Gem Hunter v2 — small-cap pre-pump scanner ═══
+
+/* ═══ Gem Hunter — small-cap pre-pump scanner ═══
    Two-stage filter, then V3-aware scoring on the survivors.
 
    Pre-filter (cheap, ticker only):
-     - Not a stablecoin, not a Top-100 watchlist member
-     - Price in (0, 20] and 24h volume > 100K
-     - Real CoinGecko market cap in [$1M, $50M] when known
+     - Symbol is whitelisted (^[A-Z0-9]{1,15}$ — see isValidGemSymbol)
+     - Not a stablecoin (GEM_CONFIG.STABLES — ~16 symbols)
+     - Not a Top-100 watchlist member (TIER1)
+     - Price in (0, GEM_CONFIG.PRICE_MAX] and 24h volume > VOL_MIN
+     - Real CoinGecko market cap in [MC_MIN, MC_MAX] when known
        (when MC is missing, we KEEP the candidate — better than
        blocking the whole feature on a cold start)
-     - Rugpull risk < 70 via getRugPullRisk(d, FR, bookTickers)
+     - Rugpull risk < RUG_MAX. Pre-filter passes `undefined` for fr
+       when FR feed isn't loaded yet (so the +10 "no futures" risk
+       doesn't fire globally during cold start) and `null` only
+       when FR is loaded but this coin has no entry.
 
-   Per-survivor scoring (kline + V3, top 25 only to bound API calls):
+   Per-survivor scoring (kline + V3, top SCORE_LIMIT only):
      vol-spike multiplier on 1h klines  +15..+45
      timing (early / still / late)      +30 / +15 / 0
      position-in-range (bottom 30%)     +10
@@ -1620,85 +1670,129 @@ async function loadSmallCapsUI(){
      V3 — CVD bullish divergence        +15
      24h change in (0, 3] / [3, 8)      +20 / +10
 
-   Results with score >= 25 are returned, sorted desc. The renderer
-   shows the top 20. */
+   Gate (orchestrator-side, NOT in scoreGemCandidate):
+     score >= GEM_CONFIG.SCORE_MIN AND (vx >= 1.5 OR timing in early/still)
+     The momentum guard prevents pure V3-stack signals (4 confirmations
+     = 60 points but no volume) from being surfaced as gems. */
 async function loadSmallCaps2(){
   if(!Object.keys(T).length)await loadTk();
-  var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USDP','PYUSD'];
+  var STABLES=GEM_CONFIG.STABLES;
+  /* FR readiness: when the feed has at least one entry it's hydrated;
+     before that, missing FR[s] means "data not loaded yet" — see
+     the null-vs-undefined contract on getRugPullRisk. */
+  var frReady=Object.keys(FR).length>0;
+  function frArgFor(s){
+    if(!frReady) return undefined;
+    return FR[s] || null;
+  }
   var cands=Object.entries(T).filter(function(e){
     var s=e[0],d=e[1];
+    if(!isValidGemSymbol(s))return false;
     if(STABLES.indexOf(s)!==-1)return false;
     if(TIER1.has(s))return false;
-    if(!d.p||d.p<=0||d.p>20)return false;
-    if(d.v<100000)return false;
-    /* Market-cap window — only enforce when the data is loaded. */
+    if(!d.p||d.p<=0||d.p>GEM_CONFIG.PRICE_MAX)return false;
+    if(d.v<GEM_CONFIG.VOL_MIN)return false;
     var mc=marketCapData[s];
-    if(mc!=null&&mc>0&&(mc<1000000||mc>50000000))return false;
-    /* Rugpull risk gate — pure helper from src/scanner-helpers.js. */
-    var rug=getRugPullRisk(d,FR[s],bookTickers[s]);
-    if(rug>=70)return false;
+    if(mc!=null&&mc>0&&(mc<GEM_CONFIG.MC_MIN||mc>GEM_CONFIG.MC_MAX))return false;
+    var rug=getRugPullRisk(d,frArgFor(s),bookTickers[s]);
+    if(rug>=GEM_CONFIG.RUG_MAX)return false;
     return true;
-  }).sort(function(a,b){return b[1].v-a[1].v}).slice(0,50);
+  }).sort(function(a,b){return b[1].v-a[1].v}).slice(0,GEM_CONFIG.PREFILTER_LIMIT);
   var res=[];
-  var proms=cands.slice(0,25).map(function(e){
+  var proms=cands.slice(0,GEM_CONFIG.SCORE_LIMIT).map(function(e){
     var s=e[0];
-    return fj(BN+'/klines?symbol='+s+'USDT&interval=1h&limit=12').then(function(kl){
+    return _gemFetchKlines(s).then(function(kl){
       if(!kl||kl.length<6)return;
-      var vols=kl.map(function(k){return+k[5]});
-      var cls=kl.map(function(k){return+k[4]});
-      var avgV=vols.slice(0,-2).reduce(function(a,b){return a+b},0)/Math.max(1,vols.length-2);
-      var recV=(vols[vols.length-1]+vols[vols.length-2])/2;
+      /* Use closed candles only: the most recent 1h candle is typically
+         partial during the hour, so its volume is not yet final.
+         Including it biases vx downward (especially early in the hour)
+         and can mask real spikes. Drop it for both vol stats and
+         price reads. */
+      var closed=kl.slice(0,-1);
+      if(closed.length<5)return;
+      var vols=closed.map(function(k){return+k[5]});
+      var cls=closed.map(function(k){return+k[4]});
+      var n=vols.length;
+      var avgV=vols.slice(0,-2).reduce(function(a,b){return a+b},0)/Math.max(1,n-2);
+      var recV=(vols[n-1]+vols[n-2])/2;
       var vx=avgV>0?recV/avgV:1;
-      /* Walk back to find where the volume spike began for "% from spike". */
-      var sI=vols.length-1;
-      for(var i=vols.length-1;i>=1;i--){if(vols[i]>avgV*1.5)sI=i;else break}
-      var pS=+kl[sI][1];
-      var pN=cls[cls.length-1];
+      /* Walk back to find where the active spike began. The pure helper
+         walkbackSpikeStart(vols, avgV, mult) returns the EARLIEST index
+         in the trailing run of spiking candles — fixes the original
+         walkback that happened to work by accident only in some cases. */
+      var sI=walkbackSpikeStart(vols,avgV,GEM_CONFIG.WALKBACK_VOL_MULT);
+      var pS=+closed[sI][1];
+      var pN=cls[n-1];
       var gain=pS>0?((pN-pS)/pS*100):0;
-      var timing,tBadge;
-      if(gain<3){timing='early';tBadge={ic:'🟢',l:lang==='ar'?'مبكر — ادخل!':'Early — Enter!',col:'var(--up)'}}
-      else if(gain<8){timing='still';tBadge={ic:'🟡',l:lang==='ar'?'فيه فرصة — حذر':'Still time — Caution',col:'var(--warn)'}}
-      else{timing='late';tBadge={ic:'🔴',l:lang==='ar'?'متأخر — راقب':'Late — Watch',col:'var(--dn)'}}
+      var timing=classifyGemTiming(gain);
+      var tBadge=_gemBadge(timing);
       var d=T[s];if(!d)return;
-      /* Look up V3 results — each call can throw on small caps with
-         sparse data, so wrap individually. */
+      /* V3 helper calls — each can throw on small caps with sparse
+         data, so wrap individually so one failure doesn't drop the
+         whole candidate. */
       var _ice=null,_vp=null,_wPnL=null,_cvd=null;
-      try{_ice=detectIceberg(s)}catch(e){}
-      try{_vp=calcVPIN(s)}catch(e){}
-      try{_wPnL=calcWhalePnL(s)}catch(e){}
-      try{_cvd=analyzeCVD(s)}catch(e){}
+      try{_ice=detectIceberg(s)}catch(_e){}
+      try{_vp=calcVPIN(s)}catch(_e){}
+      try{_wPnL=calcWhalePnL(s)}catch(_e){}
+      try{_cvd=analyzeCVD(s)}catch(_e){}
       var _scored=scoreGemCandidate(d,{vx:vx,timing:timing},{iceberg:_ice,vpin:_vp,whalePnL:_wPnL,cvd:_cvd});
       var sc=_scored.score;
       var tags=_scored.tags;
-      var target=timing!=='late'?pN*(timing==='early'?1.30:1.25):null;
-      var stop=timing!=='late'?pN*(timing==='early'?0.90:0.88):null;
-      var rugRisk=getRugPullRisk(d,FR[s],bookTickers[s]);
+      var target=timing!=='late'?pN*(timing==='early'?GEM_CONFIG.TARGET_EARLY:GEM_CONFIG.TARGET_STILL):null;
+      var stop=timing!=='late'?pN*(timing==='early'?GEM_CONFIG.STOP_EARLY:GEM_CONFIG.STOP_STILL):null;
+      /* Reuse the prefilter rug calc — getRugPullRisk is pure and FR
+         hasn't changed within this loop, so a second call would burn
+         cycles on the hot path. */
+      var rugRisk=getRugPullRisk(d,frArgFor(s),bookTickers[s]);
       var mc=marketCapData[s]||0;
-      if(sc>=25)res.push({s:s,p:d.p,c:d.c,v:d.v,mc:mc,rugRisk:rugRisk,vx:vx,gain:gain,timing:timing,tBadge:tBadge,sc:sc,tags:tags,target:target,stop:stop});
+      /* Gate: raised threshold + momentum requirement so V3-only
+         candidates without volume confirmation don't surface. */
+      var hasMomentum=vx>=1.5||timing==='early'||timing==='still';
+      if(sc>=GEM_CONFIG.SCORE_MIN&&hasMomentum){
+        res.push({s:s,p:d.p,c:d.c,v:d.v,mc:mc,rugRisk:rugRisk,vx:vx,gain:gain,timing:timing,tBadge:tBadge,sc:sc,tags:tags,target:target,stop:stop});
+      }
     }).catch(function(){});
   });
   await Promise.all(proms);
   res.sort(function(a,b){return b.sc-a.sc});
   return res;
 }
-function filterSmall(f,btn){curSmallFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadSmallCapsUI()}
+
+/* Filter switching is now pure client-side: re-render the cached
+   result set if it's fresh, fall back to a full reload only on cache
+   miss. Eliminates the ~25 kline calls per filter click. */
+function filterSmall(f,btn){
+  curSmallFilter=f;
+  btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});
+  btn.classList.add('act');
+  if(_gemResCache && Date.now() - _gemResCacheAt < GEM_CONFIG.RES_TTL_MS){
+    renderSmallCaps(_gemResCache);
+  }else{
+    loadSmallCapsUI();
+  }
+}
+
 function renderSmallCaps(res){
   var f=res;
   if(curSmallFilter!=='all')f=res.filter(function(x){return x.timing===curSmallFilter});
   var slEl=document.getElementById('smallList');if(!slEl)return;
-  if(!f.length){slEl.innerHTML='<div class="empty"><div class="empty-ic">💎</div><div class="empty-tx">'+(lang==='ar'?'لا جواهر حالياً':'No gems now')+'</div></div>';return}
+  if(!f.length){slEl.innerHTML='<div class="empty"><div class="empty-ic">💎</div><div class="empty-tx">'+esc(t('gem_no_results_short'))+'</div></div>';return}
   var h='';
-  f.slice(0,20).forEach(function(g){
+  f.slice(0,GEM_CONFIG.RENDER_LIMIT).forEach(function(g){
+    /* Defense in depth — even though isValidGemSymbol gated entry,
+       escape g.s before it lands inside an inline JS string + HTML
+       attribute. */
+    var sSafe=esc(g.s);
     /* Rug-risk pill: visible reassurance that we filtered, not just guessed. */
     var rugCol=g.rugRisk<30?'var(--up)':g.rugRisk<60?'var(--warn)':'var(--dn)';
-    var rugTxt=g.rugRisk<30?(lang==='ar'?'🛡 آمن':'🛡 Safe'):g.rugRisk<60?(lang==='ar'?'⚠ متوسط':'⚠ Medium'):(lang==='ar'?'🚨 خطر':'🚨 Risk');
-    var mcDisplay=g.mc>0?fmt(g.mc):(lang==='ar'?'MC ?':'MC ?');
-    h+='<div class="whale-card" style="border-left:3px solid '+g.tBadge.col+';margin-bottom:8px" onclick="openCoin(\''+g.s+'\')">'
+    var rugTxt=g.rugRisk<30?t('gem_safe_pill'):g.rugRisk<60?t('gem_medium_pill'):t('gem_risk_pill');
+    var mcDisplay=g.mc>0?fmt(g.mc):t('gem_mc_unknown');
+    h+='<div class="whale-card" style="border-left:3px solid '+g.tBadge.col+';margin-bottom:8px" onclick="openCoin(\''+sSafe+'\')">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
       +'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
-      +'<span style="font-weight:800;font-size:14px">💎 '+g.s+'</span>'
-      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+g.tBadge.col+';font-weight:700">'+g.tBadge.ic+' '+g.tBadge.l+'</span>'
-      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+rugCol+';font-weight:700">'+rugTxt+'</span>'
+      +'<span style="font-weight:800;font-size:14px">💎 '+sSafe+'</span>'
+      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+g.tBadge.col+';font-weight:700">'+esc(g.tBadge.ic)+' '+esc(g.tBadge.l)+'</span>'
+      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+rugCol+';font-weight:700">'+esc(rugTxt)+'</span>'
       +'</div>'
       +'<span style="font-family:var(--fm);font-size:12px;font-weight:800;color:var(--neon)">'+g.vx.toFixed(1)+'x vol</span>'
       +'</div>'
@@ -1706,14 +1800,14 @@ function renderSmallCaps(res){
       +'<span>'+fP(g.p)+'</span>'
       +'<span style="color:'+(g.c>=0?'var(--up)':'var(--dn)')+'">'+(g.c>=0?'+':'')+g.c.toFixed(1)+'%</span>'
       +'<span>Vol:'+fmt(g.v)+'</span>'
-      +'<span style="color:var(--t2)">'+(lang==='ar'?'سوق:':'MC:')+mcDisplay+'</span>'
-      +'<span style="color:var(--warn)">+'+g.gain.toFixed(1)+'% '+(lang==='ar'?'من القفزة':'from spike')+'</span>'
+      +'<span style="color:var(--t2)">'+esc(t('gem_mc_label'))+esc(mcDisplay)+'</span>'
+      +'<span style="color:var(--warn)">+'+g.gain.toFixed(1)+'% '+esc(t('gem_from_spike'))+'</span>'
       +'</div>';
     /* V3 confirmation chips — only when we have 1+ */
     if(g.tags&&g.tags.length){
       h+='<div style="display:flex;flex-wrap:wrap;gap:3px;margin-bottom:4px">';
-      g.tags.slice(0,6).forEach(function(t){
-        h+='<span style="font-size:8px;padding:2px 5px;border-radius:4px;background:var(--bg2);color:var(--t1);font-family:var(--fm)">'+t+'</span>';
+      g.tags.slice(0,6).forEach(function(tg){
+        h+='<span style="font-size:8px;padding:2px 5px;border-radius:4px;background:var(--bg2);color:var(--t1);font-family:var(--fm)">'+esc(tg)+'</span>';
       });
       h+='</div>';
     }
@@ -4502,67 +4596,7 @@ async function renderPerfStats(sym){var el=document.getElementById('perfStats');
 
 /* LIQUIDITY + ORDER BOOK */
 async function loadLiq(){if(!Object.keys(T).length)await loadTk();document.getElementById('liqL').innerHTML=Object.entries(T).sort(function(a,b){return b[1].v-a[1].v}).slice(0,12).map(function(e,i){return coinRow(e[0],e[1],i+1)}).join('');var h='';var syms=['BTC','ETH','SOL','BNB','XRP'];var proms=syms.map(function(s){return fj(BN+'/depth?symbol='+s+'USDT&limit=10')});var obs=await Promise.all(proms);syms.forEach(function(s,si){var ob=obs[si];if(!ob)return;var bids=ob.bids.map(function(b){return+b[0]*+b[1]}),asks=ob.asks.map(function(a){return+a[0]*+a[1]});var bT=bids.reduce(function(a,b){return a+b},0),aT=asks.reduce(function(a,b){return a+b},0);var r=aT>0?bT/aT:1;var mx=Math.max.apply(null,bids.concat(asks));h+='<div class="cd" style="padding:8px"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-weight:700;font-family:var(--fd)">'+s+'</span><span style="font-size:9px;font-family:var(--fm);color:var(--'+(r>1.3?'up':r<.7?'dn':'warn')+')">'+(r>1.3?'BUY':r<.7?'SELL':'NEUTRAL')+' '+r.toFixed(2)+'x</span></div><div class="ob-v">'+bids.reverse().map(function(v){return'<div class="ob-b bid" style="height:'+Math.max(3,v/mx*100)+'%"></div>'}).join('')+'<div style="width:1px;background:var(--t3);height:100%"></div>'+asks.map(function(v){return'<div class="ob-b ask" style="height:'+Math.max(3,v/mx*100)+'%"></div>'}).join('')+'</div></div>'});document.getElementById('obS').innerHTML=h}
-/* GEM FINDER — small caps with unusual activity */
-async function loadGems(){
-  if(!Object.keys(T).length)await loadTk();
-  var gemLEl=document.getElementById('gemL');if(!gemLEl)return;
-  gemLEl.innerHTML='<div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div>';
-  /* Step 1: Filter small-cap coins (price < $1, volume $500K-$50M) */
-  var candidates=Object.entries(T).filter(function(e){var d=e[1];return d.p>0&&d.p<1&&d.v>500000&&d.v<5e7}).sort(function(a,b){return b[1].v-a[1].v}).slice(0,40);
-  /* Step 2: Fetch klines for top candidates to analyze volume spike */
-  var gemResults=[];
-  var proms=candidates.slice(0,20).map(function(e){var s=e[0];
-    return fj(BN+'/klines?symbol='+s+'USDT&interval=1h&limit=12').then(function(kl){
-      if(!kl||kl.length<6)return;
-      var vols=kl.map(function(k){return+k[5]});
-      var closes=kl.map(function(k){return+k[4]});
-      /* Average volume of older candles (exclude last 2) */
-      var oldVols=vols.slice(0,-2);
-      var avgVol=oldVols.reduce(function(a,b){return a+b},0)/Math.max(1,oldVols.length);
-      /* Recent volume (last 2 candles) */
-      var recentVol=(vols[vols.length-1]+vols[vols.length-2])/2;
-      var volMultiple=avgVol>0?recentVol/avgVol:1;
-      /* Find when volume spike started */
-      var spikeStartIdx=vols.length-1;
-      for(var i=vols.length-1;i>=1;i--){if(vols[i]>avgVol*1.5)spikeStartIdx=i;else break}
-      var spikeStartTime=+kl[spikeStartIdx][0];
-      /* Price at spike start vs now */
-      var priceAtSpike=+kl[spikeStartIdx][1];
-      var priceNow=closes[closes.length-1];
-      var gainSinceSpike=priceAtSpike>0?((priceNow-priceAtSpike)/priceAtSpike)*100:0;
-      /* Classify timing */
-      var timing,timingCls,timingLabel;
-      if(gainSinceSpike<3){timing='early';timingCls='str-strong';timingLabel=lang==='ar'?'🟢 صيد مبكر — ادخل!':'🟢 Early — Enter now!'}
-      else if(gainSinceSpike<8){timing='still';timingCls='str-normal';timingLabel=lang==='ar'?'🟡 لسا فيه فرصة — حذر':'🟡 Still time — Caution'}
-      else{timing='late';timingCls='str-weak';timingLabel=lang==='ar'?'🔴 متأخر — راقب فقط':'🔴 Late — Watch only'}
-      /* Score: high volume spike + early = best */
-      var gemScore=0;
-      if(volMultiple>=3)gemScore+=40;else if(volMultiple>=2)gemScore+=30;else if(volMultiple>=1.5)gemScore+=15;
-      if(timing==='early')gemScore+=30;else if(timing==='still')gemScore+=15;
-      var _gd=T[s];if(!_gd)return;
-      if(_gd.c>0&&_gd.c<3)gemScore+=20; /* small positive = accumulating */
-      else if(_gd.c>=3&&_gd.c<8)gemScore+=10;
-      if(gemScore>=25)gemResults.push({s:s,p:_gd.p,c:_gd.c,v:_gd.v,volX:volMultiple,gainSinceSpike:gainSinceSpike,spikeTime:spikeStartTime,timing:timing,timingCls:timingCls,timingLabel:timingLabel,score:gemScore,priceAtSpike:priceAtSpike})
-    }).catch(function(){})});
-  await Promise.all(proms);
-  /* Sort: early + high volume first */
-  gemResults.sort(function(a,b){return b.score-a.score});
-  /* Render */
-  gemLEl.innerHTML=gemResults.length?gemResults.map(function(g){
-    /* Notify only for EARLY gems with high volume */
-    if(g.timing==='early'&&g.volX>=2)notify(g.s,'gem',g.score);
-    var src=[];if(T[g.s])src.push('Binance');if(T[g.s]&&T[g.s].by)src.push('Bybit');if(CBP[g.s])src.push('Coinbase');
-    return'<div class="whale-card" onclick="openCoin(\''+g.s+'\')">'
-    +'<div class="whale-head"><div class="whale-sym">💎 '+g.s+'/USDT <span class="str-badge '+g.timingCls+'">'+g.timingLabel+'</span></div>'+timeBadge(g.spikeTime)+'</div>'
-    +'<div class="whale-grid">'
-    +'<div class="whale-item"><div class="whale-item-v" style="color:var(--up)">'+fP(g.p)+'</div><div class="whale-item-l">'+(lang==='ar'?'السعر الحالي':'Current Price')+'</div></div>'
-    +'<div class="whale-item"><div class="whale-item-v" style="color:var(--neon)">'+g.volX.toFixed(1)+'x</div><div class="whale-item-l">'+(lang==='ar'?'ضغط الحجم':'Vol Spike')+'</div></div>'
-    +'<div class="whale-item"><div class="whale-item-v" style="color:'+(g.gainSinceSpike<3?'var(--up)':g.gainSinceSpike<8?'var(--warn)':'var(--dn)')+'">+'+(g.gainSinceSpike).toFixed(1)+'%</div><div class="whale-item-l">'+(lang==='ar'?'منذ بداية الحركة':'Since spike')+'</div></div>'
-    +'<div class="whale-item"><div class="whale-item-v">'+fP(g.priceAtSpike)+'</div><div class="whale-item-l">'+(lang==='ar'?'سعر البداية':'Spike Price')+'</div></div>'
-    +'</div>'
-    +'<div style="margin-top:4px"><div class="prw"><div class="prb" style="width:'+Math.min(100,g.score)+'%;background:'+(g.timing==='early'?'var(--up)':g.timing==='still'?'var(--warn)':'var(--dn)')+'"></div></div></div>'
-    +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px"><div class="src-row">'+src.map(function(s){return'<span class="src-badge">'+s+'</span>'}).join('')+'</div><span style="font-family:var(--fm);font-size:9px;color:var(--t2)">Vol:'+fmt(g.v)+'</span></div>'
-    +'</div>'}).join(''):'<div class="empty"><div class="empty-ic">💎</div><div class="empty-tx">'+(lang==='ar'?'لا جواهر حالياً — السوق هادئ':'No gems now — Market quiet')+'</div></div>'}/* WATCHLIST */
+/* WATCHLIST */
 var watchlist=safeGetJSON('nxwl10',[]);
 /* 📊 MARKET DIRECTION REPORT — Parallel + Error-Safe */
 /* ═══ MARKET REPORT v2.0 ═══ */

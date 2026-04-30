@@ -346,6 +346,135 @@ function pickCardVisualTier(signal) {
   };
 }
 
+/* ─── Gem Hunter — central tuning knobs ────────────────────────────
+   All tunable thresholds for the Gem Hunter live here so the live
+   scanner, the unit tests, and any future tuning UI read from one
+   place. Changing a number here changes the behavior everywhere.
+
+   Frozen so accidental mutation surfaces as a TypeError at the
+   call site instead of silently drifting the scoring contract. */
+const GEM_CONFIG = Object.freeze({
+  /* Pre-filter (cheap, ticker-only) */
+  STABLES: ['USDT', 'USDC', 'TUSD', 'DAI', 'BUSD', 'FDUSD', 'USDP', 'PYUSD',
+            'USDE', 'USDD', 'GUSD', 'USTC', 'USDS', 'CRVUSD', 'LUSD', 'FRAX'],
+  PRICE_MAX: 20,            /* USDT — upper bound for "small cap" candidate */
+  VOL_MIN: 100000,          /* 24h quote-volume floor (Binance USD) */
+  MC_MIN: 1000000,          /* CoinGecko MC floor when MC is known */
+  MC_MAX: 50000000,         /* CoinGecko MC ceiling when MC is known */
+
+  /* Risk / scoring gates */
+  RUG_MAX: 70,              /* getRugPullRisk gate — reject above this */
+  SCORE_MIN: 35,            /* loadSmallCaps2 gate — raised from 25 to
+                               require timing+vol or score-stack, not
+                               timing alone */
+
+  /* Spike walkback */
+  WALKBACK_VOL_MULT: 1.5,   /* a candle's vol > avgV*1.5 counts as part
+                               of the active spike */
+
+  /* Timing thresholds (gain% from spike start) */
+  EARLY_MAX: 3,             /* gain < 3% = early */
+  STILL_MAX: 8,             /* gain < 8% = still time */
+                            /* gain >= 8% = late */
+
+  /* Slice caps */
+  PREFILTER_LIMIT: 50,      /* survivors of pre-filter sorted by 24h vol */
+  SCORE_LIMIT: 25,          /* of those, top N actually fetched + scored */
+  RENDER_LIMIT: 20,         /* top N rendered as cards */
+
+  /* Caching (orchestrator side) */
+  KLINE_TTL_MS: 90000,      /* per-symbol 1h klines TTL */
+  RES_TTL_MS: 90000,        /* full result set TTL — drives filter switching */
+
+  /* Target/stop hints (display only — not used in scoring) */
+  TARGET_EARLY: 1.30,
+  TARGET_STILL: 1.25,
+  STOP_EARLY: 0.90,
+  STOP_STILL: 0.88,
+});
+
+/* Validate a ticker symbol before it enters URL builders or
+   string-concatenated onclick handlers. Defense-in-depth: even though
+   T's keys come from a trusted proxy, a hostile or buggy upstream
+   feed could push a key like `X');alert(1);//` and we'd happily
+   string-concat it into both the Binance URL and inline JS. The
+   regex caps it at uppercase alphanumerics, 1-15 chars — wider than
+   any real ticker but tight enough to be unforgeable.
+
+   Returns true for safe symbols, false for anything else (including
+   non-string, empty, lowercase, or symbols containing punctuation). */
+function isValidGemSymbol(s) {
+  if (typeof s !== 'string') return false;
+  return /^[A-Z0-9]{1,15}$/.test(s);
+}
+
+/* Find the index in `vols` where the active volume spike *began*.
+   Walks back from the most recent candle while each prior candle
+   was also "spiking" (vol > avgV * multiplier). Returns the index
+   of the *earliest* such candle in the trailing run.
+
+   The previous in-line implementation in app.js wrote
+     `for (i = N-1; i >= 1; i--) { if (vols[i] > T) sI = i; else break }`
+   which only ever assigned `sI` for candles inside the trailing
+   spike, but EVERY iteration overwrote sI — so the value left in
+   sI when the loop hit a calm bar was the last spike index visited,
+   i.e. the EARLIEST spike of the trailing run. That accidental
+   correctness DEPENDED on the loop terminating at the first calm
+   bar. If the input had alternating spike / calm / spike candles,
+   the loop would break at the first calm (correct), but if the
+   most recent candle was calm and the prior spike was further back,
+   the loop would break before finding any spike and sI would stay
+   at N-1 (the most recent calm candle) — masking the spike entirely.
+
+   This pure version makes the contract explicit:
+     - Start at the most recent candle.
+     - If it's NOT spiking, the spike is over (or never started) —
+       return N-1 so callers measure gain from the most recent close.
+     - Otherwise, walk back one candle at a time until either we hit
+       a non-spiking bar (return the spike's first index) or run out
+       of candles (return 0).
+
+   Returns an integer index in [0, vols.length-1]. Always defined as
+   long as vols has at least one entry. */
+function walkbackSpikeStart(vols, avgV, multiplier) {
+  if (!vols || vols.length === 0) return 0;
+  multiplier = multiplier == null ? 1.5 : multiplier;
+  if (!(avgV > 0)) return vols.length - 1;
+  var threshold = avgV * multiplier;
+  var n = vols.length;
+  /* If the most recent candle isn't part of a spike, return it. */
+  if (!(vols[n - 1] > threshold)) return n - 1;
+  /* Walk back through the contiguous trailing spike. */
+  var sI = n - 1;
+  for (var i = n - 2; i >= 0; i--) {
+    if (vols[i] > threshold) sI = i;
+    else break;
+  }
+  return sI;
+}
+
+/* Classify a gem candidate's "timing" — how early in the move are we?
+   Pure: numeric input, string output. Bucketing is intentional so
+   the orchestrator can tag each result and the renderer can pick a
+   color. Cutoffs read from GEM_CONFIG so tuning happens in one place.
+
+   Returns one of:
+     'early' — gain < EARLY_MAX (default 3%)   — best entry window
+     'still' — gain < STILL_MAX (default 8%)   — caution
+     'late'  — gain >= STILL_MAX               — watch only
+
+   NaN / non-numeric input collapses to 'early' (the most permissive
+   bucket) so a missing-data candidate still gets considered rather
+   than silently dropped. The score gate downstream still requires
+   real momentum signals, so 'early' alone won't surface noise. */
+function classifyGemTiming(gainPct) {
+  var g = +gainPct;
+  if (!isFinite(g)) return 'early';
+  if (g < GEM_CONFIG.EARLY_MAX) return 'early';
+  if (g < GEM_CONFIG.STILL_MAX) return 'still';
+  return 'late';
+}
+
 /* Score a Gem-Hunter candidate from already-computed inputs.
    Pure: takes the ticker snapshot, kline-derived stats, and V3
    technique results — no globals, no fetches, deterministic.
@@ -437,7 +566,7 @@ function scoreGemCandidate(ticker, klineStats, v3) {
    risk are filtered out before the user ever sees them. Pure: takes
    a ticker snapshot, optional funding-rate object, optional book
    ticker (best bid/ask + qty + spread). Returns a number; the
-   Gem Hunter rejects anything above 70.
+   Gem Hunter rejects anything above GEM_CONFIG.RUG_MAX.
 
    Risk factors (additive, capped at 100):
      +30  bid/ask spread > 1%        (illiquid market)
@@ -449,7 +578,19 @@ function scoreGemCandidate(ticker, klineStats, v3) {
    Missing inputs are treated as "data unavailable" and contribute 0
    to risk — we don't penalize a coin for our own data gaps. The
    exception is `d` itself: if no ticker snapshot, return 100 (max
-   risk) because we can't make any safety claim. */
+   risk) because we can't make any safety claim.
+
+   `fr` semantics — explicit-null vs undefined:
+     - `null`       → caller asserts: this coin has NO futures market.
+                      Adds +10 (the documented "no futures" risk).
+     - `undefined`  → caller signals: futures data not loaded yet.
+                      Adds 0. This prevents a global cold-start
+                      penalty where every gem candidate inherits +10
+                      while the FR feed is still hydrating.
+     - any object   → futures exist. Adds 0.
+   The previous `!fr` test conflated null and undefined, which made
+   the cold-start window rejecting otherwise-valid gems for ~minutes
+   on every page load. */
 function getRugPullRisk(d, fr, bookTicker) {
   if (!d) return 100;
   var risk = 0;
@@ -460,7 +601,7 @@ function getRugPullRisk(d, fr, bookTicker) {
   }
   if (d.v != null && d.v < 500000) risk += 25;
   if (d.c != null && Math.abs(d.c) > 30) risk += 15;
-  if (!fr) risk += 10;
+  if (fr === null) risk += 10;
   if (risk > 100) risk = 100;
   return risk;
 }

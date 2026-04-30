@@ -691,6 +691,93 @@ test('GEM_CONFIG — stables list covers the major USD pegs', () => {
   });
 });
 
+test('GEM_CONFIG — stables list catches the production slip-throughs (USD1, RLUSD)', () => {
+  /* These two showed up as "gems" in production because they are recent
+     stablecoins not in the original list. Pin them so a future cleanup
+     of STABLES cannot reintroduce the regression. */
+  assert.ok(GEM_CONFIG.STABLES.indexOf('USD1') !== -1, 'USD1 must be in STABLES');
+  assert.ok(GEM_CONFIG.STABLES.indexOf('RLUSD') !== -1, 'RLUSD must be in STABLES');
+});
+
+/* ─── gemTrackFirstSeen ───────────────────────────────────────────── */
+
+test('gemTrackFirstSeen — fresh symbol gets firstSeen = lastSeen = now', () => {
+  const state = {};
+  const now = 1_700_000_000_000;
+  gemTrackFirstSeen(state, ['BTC', 'ETH'], now);
+  assert.deepEqual(state.BTC, { firstSeen: now, lastSeen: now });
+  assert.deepEqual(state.ETH, { firstSeen: now, lastSeen: now });
+});
+
+test('gemTrackFirstSeen — recently-seen symbol preserves firstSeen', () => {
+  const t0 = 1_700_000_000_000;
+  const t1 = t0 + 5 * 60 * 1000; /* 5 min later — well within 30min default */
+  const state = { BTC: { firstSeen: t0, lastSeen: t0 } };
+  gemTrackFirstSeen(state, ['BTC'], t1);
+  assert.equal(state.BTC.firstSeen, t0, 'firstSeen must be preserved');
+  assert.equal(state.BTC.lastSeen, t1, 'lastSeen must refresh to current call');
+});
+
+test('gemTrackFirstSeen — long-absent symbol resets firstSeen', () => {
+  /* Default missTimeoutMs is 30 min. A symbol unseen for 1h is treated
+     as a re-appearance — firstSeen resets so the user does not see a
+     stale "8 hours ago" age on what is effectively a fresh detection. */
+  const t0 = 1_700_000_000_000;
+  const t1 = t0 + 60 * 60 * 1000; /* 1h gap */
+  const state = { BTC: { firstSeen: t0, lastSeen: t0 } };
+  gemTrackFirstSeen(state, ['BTC'], t1);
+  assert.equal(state.BTC.firstSeen, t1, 'firstSeen must reset after long absence');
+  assert.equal(state.BTC.lastSeen, t1);
+});
+
+test('gemTrackFirstSeen — boundary: exactly missTimeoutMs preserves firstSeen', () => {
+  /* The contract uses `<=` for "still on radar" — equality is in. */
+  const t0 = 1_700_000_000_000;
+  const miss = 30 * 60 * 1000;
+  const state = { BTC: { firstSeen: t0, lastSeen: t0 } };
+  gemTrackFirstSeen(state, ['BTC'], t0 + miss, miss);
+  assert.equal(state.BTC.firstSeen, t0);
+  /* Just past the boundary — resets. */
+  const state2 = { BTC: { firstSeen: t0, lastSeen: t0 } };
+  gemTrackFirstSeen(state2, ['BTC'], t0 + miss + 1, miss);
+  assert.equal(state2.BTC.firstSeen, t0 + miss + 1);
+});
+
+test('gemTrackFirstSeen — symbols not in the current list are pruned only when stale', () => {
+  /* A symbol seen earlier but not in the current syms list should
+     remain (lastSeen unchanged) until staleMs elapses, then be pruned. */
+  const t0 = 1_700_000_000_000;
+  const stale = 24 * 60 * 60 * 1000;
+  const state = {
+    BTC: { firstSeen: t0, lastSeen: t0 + 60_000 } /* fresh — keep */,
+    ETH: { firstSeen: t0, lastSeen: t0 } /* will be > stale away */,
+  };
+  /* Run with the current scan having no symbols, at a time just past
+     stale relative to ETH but not BTC. */
+  gemTrackFirstSeen(state, [], t0 + stale + 5_000);
+  assert.ok(state.BTC, 'BTC should survive — not yet stale');
+  assert.equal(state.ETH, undefined, 'ETH should be pruned');
+});
+
+test('gemTrackFirstSeen — handles null / missing inputs without throwing', () => {
+  /* Defensive: localStorage might return null on first visit. */
+  const out = gemTrackFirstSeen(null, ['BTC'], 1_700_000_000_000);
+  assert.equal(typeof out, 'object');
+  assert.ok(out.BTC);
+  /* Missing syms array — no throw, stale entries pruned. */
+  const state = { BTC: { firstSeen: 1, lastSeen: 1 } };
+  gemTrackFirstSeen(state, null, 1_700_000_000_000);
+  assert.equal(state.BTC, undefined);
+});
+
+test('gemTrackFirstSeen — empty / falsy symbols skipped, valid ones still tracked', () => {
+  const state = {};
+  gemTrackFirstSeen(state, ['BTC', '', null, undefined, 'ETH'], 1_700_000_000_000);
+  assert.ok(state.BTC);
+  assert.ok(state.ETH);
+  assert.equal(state[''], undefined);
+});
+
 /* ─── evaluateSignalOutcome ───────────────────────────────────────── */
 
 test('evaluateSignalOutcome — missing or zero entry returns neutral', () => {

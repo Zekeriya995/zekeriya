@@ -354,7 +354,16 @@ function pickCardVisualTier(signal) {
    Frozen so accidental mutation surfaces as a TypeError at the
    call site instead of silently drifting the scoring contract. */
 const GEM_CONFIG = Object.freeze({
-  /* Pre-filter (cheap, ticker-only) */
+  /* Pre-filter (cheap, ticker-only).
+     Two families:
+       USD pegs   — USDT, USDC, TUSD, DAI, BUSD, FDUSD, USDP, PYUSD,
+                    USDE, USDD, GUSD, USTC, USDS, CRVUSD, LUSD, FRAX,
+                    USD1 (Trump's USD1), RLUSD (Ripple's), AUSD,
+                    DOLA, SUSD
+       EUR pegs   — AEUR, EURT, EURS, EURC
+     Adding to this list is cheap; missing entries surface as
+     stablecoins masquerading as gems (which is exactly what got
+     caught in production for USD1 and RLUSD). */
   STABLES: [
     'USDT',
     'USDC',
@@ -372,6 +381,15 @@ const GEM_CONFIG = Object.freeze({
     'CRVUSD',
     'LUSD',
     'FRAX',
+    'USD1',
+    'RLUSD',
+    'AUSD',
+    'DOLA',
+    'SUSD',
+    'AEUR',
+    'EURT',
+    'EURS',
+    'EURC',
   ],
   PRICE_MAX: 20 /* USDT — upper bound for "small cap" candidate */,
   VOL_MIN: 100000 /* 24h quote-volume floor (Binance USD) */,
@@ -467,6 +485,55 @@ function walkbackSpikeStart(vols, avgV, multiplier) {
     else break;
   }
   return sI;
+}
+
+/* Track when each gem symbol was first detected and update its
+   "still being seen" timestamp. Pure: takes a state object, the list
+   of currently-detected symbols, and the current epoch ms; returns
+   the same state mutated in-place AND returns it for convenience.
+
+   Contract:
+     - Symbols seen for the first time get { firstSeen: now, lastSeen: now }.
+     - Symbols seen recently (lastSeen within `missTimeoutMs`) keep
+       their firstSeen and refresh lastSeen — the user sees a stable
+       "appeared X minutes ago" reading.
+     - Symbols whose lastSeen is older than `missTimeoutMs` are
+       treated as a fresh re-appearance — firstSeen resets to now.
+       Without this, a coin that disappears for hours and pops back
+       would mislead the user with a stale "8h ago" age.
+     - Entries whose lastSeen is older than `staleMs` are pruned
+       from state to bound localStorage growth.
+
+   Defaults: missTimeoutMs = 30 min, staleMs = 24 h. */
+function gemTrackFirstSeen(state, syms, now, missTimeoutMs, staleMs) {
+  if (!state || typeof state !== 'object') state = {};
+  if (!syms) syms = [];
+  if (!(now > 0)) now = Date.now();
+  if (!(missTimeoutMs > 0)) missTimeoutMs = 30 * 60 * 1000;
+  if (!(staleMs > 0)) staleMs = 24 * 60 * 60 * 1000;
+  /* Update / insert entries for the symbols we just saw. */
+  for (var i = 0; i < syms.length; i++) {
+    var s = syms[i];
+    if (!s) continue;
+    var prev = state[s];
+    if (!prev || !(now - prev.lastSeen <= missTimeoutMs)) {
+      /* New, or absent for too long — reset firstSeen. */
+      state[s] = { firstSeen: now, lastSeen: now };
+    } else {
+      /* Still on the radar — keep firstSeen, refresh lastSeen. */
+      state[s] = { firstSeen: prev.firstSeen, lastSeen: now };
+    }
+  }
+  /* Prune stale entries (not seen recently enough to be relevant). */
+  var keys = Object.keys(state);
+  for (var k = 0; k < keys.length; k++) {
+    var key = keys[k];
+    var entry = state[key];
+    if (!entry || !(now - entry.lastSeen <= staleMs)) {
+      delete state[key];
+    }
+  }
+  return state;
 }
 
 /* Classify a gem candidate's "timing" — how early in the move are we?

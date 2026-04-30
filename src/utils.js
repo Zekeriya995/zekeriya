@@ -1,6 +1,27 @@
 /* NEXUS PRO — pure helper functions.
    Nothing here depends on any app-level global: safe to load early. */
 
+/* Debug-gated console.log. Production builds default to silent so
+   internal state (whale activity, top-100 churn, fallback paths)
+   doesn't leak via the JS console. Users / devs flip the gate by
+   setting localStorage.nxDebug = '1' or window.NEXUS_DEBUG = true.
+   console.error / console.warn stay unconditional — those are real
+   problems we always want surfaced. */
+var NEXUS_DEBUG_ENABLED = (function () {
+  try {
+    if (typeof window !== 'undefined' && window.NEXUS_DEBUG === true) return true;
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('nxDebug') === '1') return true;
+  } catch (e) {
+    /* localStorage may throw in private browsing — silently fall through. */
+  }
+  return false;
+})();
+function dbg() {
+  if (NEXUS_DEBUG_ENABLED && typeof console !== 'undefined' && console.log) {
+    console.log.apply(console, arguments);
+  }
+}
+
 /* Compact money format: $1.2B / $34.5M / $678.0K / $123 */
 function fmt(n) {
   if (n >= 1e9) return '$' + (n / 1e9).toFixed(1) + 'B';

@@ -54,6 +54,8 @@ export default [
         calcEMA: 'readonly',
         calcATR: 'readonly',
         calcPearson: 'readonly',
+        dbg: 'readonly',
+        NEXUS_DEBUG_ENABLED: 'readonly',
         /* Declared in src/scanner-helpers.js */
         isConfirmedBreakout: 'readonly',
         tfAlignment: 'readonly',
@@ -243,6 +245,8 @@ export default [
         calcEMA: 'readonly',
         calcATR: 'readonly',
         calcPearson: 'readonly',
+        dbg: 'readonly',
+        NEXUS_DEBUG_ENABLED: 'readonly',
         /* From src/scanner-helpers.js */
         isConfirmedBreakout: 'readonly',
         tfAlignment: 'readonly',

@@ -670,7 +670,7 @@ canvas{width:100%!important;border-radius:4px}
 <div class="hdr-r"><div class="hdr-live">LIVE <div id="validatorDot" style="width:6px;height:6px;border-radius:50%;background:var(--up);box-shadow:0 0 6px var(--up)"></div> <span id="connStatus" style="font-size:7px;font-family:var(--fm);font-weight:700;color:var(--up)">...</span></div><div class="ic-b notif" data-c="0" id="notifB" onclick="sp('me');setTimeout(function(){pTab(3,document.querySelector('#pg-me .big-tab:last-child'))},100)">🔔</div><div class="ic-b" id="menuBtn" onclick="toggleMenu()">☰</div></div>
 </div></header>
 
-<div class="srch" style="position:relative"><div class="srch-b"><span style="color:var(--t3)">🔍</span><input id="sInp" oninput="onSrch(this.value)"></div><div class="srch-r" id="sRes"></div></div>
+<div class="srch" style="position:relative"><div class="srch-b"><span style="color:var(--t3)" aria-hidden="true">🔍</span><input id="sInp" oninput="onSrch(this.value)" aria-label="بحث عن عملة" type="search" autocomplete="off"></div><div class="srch-r" id="sRes" role="listbox"></div></div>
 <div class="welcome-bar"><div class="welcome-txt" id="welcomeTxt">🚀 أهلاً وسهلاً في عالم الكريبتو مع زيكو — Welcome to the world of crypto with Ziko 🚀</div></div>
 
 <!-- 🆕 Quick Access Cards — fixed at top -->
@@ -857,7 +857,7 @@ canvas{width:100%!important;border-radius:4px}
 </div>
 
 <!-- MODALS -->
-<div class="mo" id="addMo"><div class="mo-c"><div class="mo-bar"></div><h3>➕ <span data-t="add_coin">إضافة عملة</span></h3><input class="mo-inp" id="aSym" placeholder="BTC"><input class="mo-inp" id="aAmt" type="number"><input class="mo-inp" id="aPr" type="number"><button class="mo-btn" onclick="addPort()">✅ <span data-t="add">إضافة</span></button><button class="rfr" onclick="closeMo('addMo')" style="margin-top:4px" data-t="cancel">إلغاء</button></div></div>
+<div class="mo" id="addMo" role="dialog" aria-modal="true" aria-labelledby="addMoTitle"><div class="mo-c"><div class="mo-bar"></div><h3 id="addMoTitle">➕ <span data-t="add_coin">إضافة عملة</span></h3><input class="mo-inp" id="aSym" placeholder="BTC" aria-label="رمز العملة"><input class="mo-inp" id="aAmt" type="number" placeholder="الكمية" aria-label="الكمية"><input class="mo-inp" id="aPr" type="number" placeholder="سعر الشراء" aria-label="سعر الشراء"><button class="mo-btn" onclick="addPort()">✅ <span data-t="add">إضافة</span></button><button class="rfr" onclick="closeMo('addMo')" style="margin-top:4px" data-t="cancel">إلغاء</button></div></div>
 <div class="mo" id="coinMo"><div class="mo-c"><div class="mo-bar"></div><div class="sticky-back"><div class="back-btn" onclick="closeMo('coinMo')">← <span data-t="back">رجوع</span></div><div style="text-align:right"><h3 id="cmT" style="margin:0;font-size:16px">BTC</h3><div style="display:flex;align-items:center;gap:8px;justify-content:flex-end"><span class="cm-price" id="cmP" style="font-size:14px">$0</span><span class="cm-ch" id="cmC" style="font-size:12px">0%</span></div></div></div><div class="chart-w"><div class="chart-ctl"><button class="chart-ind act" data-i="vol" onclick="tgI('vol',this)">VOL</button><button class="chart-ind" data-i="sma" onclick="tgI('sma',this)">EMA</button><button class="chart-ind" data-i="bb" onclick="tgI('bb',this)">BB</button><button class="chart-ind" data-i="rsi" onclick="tgI('rsi',this)">RSI</button><button class="chart-ind" data-i="macd" onclick="tgI('macd',this)">MACD</button><button class="chart-ind" data-i="sr" onclick="tgI('sr',this)">S/R</button><button class="chart-ind" data-i="ema" onclick="tgI('ema',this)">EMA50</button><button class="chart-ind" data-i="pat" onclick="tgI('pat',this)">🔍</button><div style="flex:1"></div><button class="chart-tf" data-t2="5m" onclick="cTF('5m',this)">5M</button><button class="chart-tf" data-t2="15m" onclick="cTF('15m',this)">15M</button><button class="chart-tf act" data-t2="1h" onclick="cTF('1h',this)">1H</button><button class="chart-tf" data-t2="4h" onclick="cTF('4h',this)">4H</button><button class="chart-tf" data-t2="1d" onclick="cTF('1d',this)">1D</button><button class="chart-tf" data-t2="1w" onclick="cTF('1w',this)">1W</button></div><canvas id="chCv" height="280" style="touch-action:none"></canvas><div id="perfStats"></div></div><div class="sts" id="cmSts"></div><div id="cmExtra"></div><button class="rfr" onclick="closeMo('coinMo')">🔙 <span data-t="back">رجوع</span></button></div></div>
 
 <!-- NOTIFICATION SOUND (louder) -->
@@ -889,8 +889,8 @@ canvas{width:100%!important;border-radius:4px}
 <div class="side-profile">
 <div class="side-avatar" id="sideAvatar">👤</div>
 <div style="flex:1">
-<input class="side-inp" id="userName" placeholder="الاسم" oninput="saveProfile()">
-<input class="side-inp" id="userNick" placeholder="@الكنية" oninput="saveProfile()" style="font-size:10px;color:var(--neon)">
+<input class="side-inp" id="userName" placeholder="الاسم" oninput="saveProfile()" aria-label="الاسم">
+<input class="side-inp" id="userNick" placeholder="@الكنية" oninput="saveProfile()" style="font-size:10px;color:var(--neon)" aria-label="الكنية">
 </div>
 </div>
 </div>

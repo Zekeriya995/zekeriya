@@ -24,5 +24,21 @@
   ],
   "categories": ["finance", "business"],
   "lang": "ar",
-  "dir": "rtl"
+  "dir": "rtl",
+  "screenshots": [
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1080 1920'%3E%3Crect width='1080' height='1920' fill='%23020408'/%3E%3Ctext x='540' y='960' font-size='120' text-anchor='middle' fill='%2300ff88' font-family='Arial,sans-serif' font-weight='bold'%3ENEXUS PRO%3C/text%3E%3Ctext x='540' y='1100' font-size='48' text-anchor='middle' fill='%2300ff8888' font-family='Arial,sans-serif'%3ECrypto Trading Dashboard%3C/text%3E%3C/svg%3E",
+      "sizes": "1080x1920",
+      "type": "image/svg+xml",
+      "form_factor": "narrow",
+      "label": "Dashboard"
+    },
+    {
+      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1280 800'%3E%3Crect width='1280' height='800' fill='%23020408'/%3E%3Ctext x='640' y='400' font-size='100' text-anchor='middle' fill='%2300ff88' font-family='Arial,sans-serif' font-weight='bold'%3ENEXUS PRO%3C/text%3E%3Ctext x='640' y='500' font-size='40' text-anchor='middle' fill='%2300ff8888' font-family='Arial,sans-serif'%3EScanner %2B Indicators %2B Whale Intelligence%3C/text%3E%3C/svg%3E",
+      "sizes": "1280x800",
+      "type": "image/svg+xml",
+      "form_factor": "wide",
+      "label": "Scanner + indicators"
+    }
+  ]
 }

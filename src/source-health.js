@@ -82,18 +82,14 @@ var NEXUS_SOURCES = [
     },
     critical: false,
   },
-  {
-    id: 'llama-emissions',
-    name: 'DeFiLlama Emissions',
-    /* Replaced api.tokenomist.ai/v1/unlocks (deprecated, returned
-       HTTP 404 from production probes on 2026-04-30). DeFiLlama's
-       emissions endpoint serves the same upcoming-unlock catalogue
-       and our other DeFiLlama hosts respond in <50ms. */
-    url: function () {
-      return 'https://api.llama.fi/emissions';
-    },
-    critical: false,
-  },
+  /* Token-unlocks upstream removed from the live catalogue. The
+     Tokenomist v1 endpoint deprecated to 404 and the speculative
+     DeFiLlama /emissions URL we tried in PR #42 returned 503 from
+     production probes on 2026-04-30 — neither path is verified.
+     The unlocks feature in app.js falls back to a relative-date
+     synthesised list (today + N days), which the panel does not
+     need to surface as a "source". When a verified upstream is
+     identified we re-add the entry here. */
   {
     id: 'coingecko',
     name: 'CoinGecko',
@@ -168,11 +164,15 @@ function _now() {
   return Date.now();
 }
 
-/* Probe one source. Always resolves — never throws — so callers can
-   `Promise.all([...].map(pingSource))` without a wrapping try. */
-async function pingSource(spec) {
-  var url = typeof spec.url === 'function' ? spec.url() : String(spec.url || '');
-  var stat = _stat(spec.id);
+/* Status codes worth a single retry. 5xx and 429 are by definition
+   transient ("try again"); 408 is server-side timeout. Anything else
+   (4xx auth/path errors) is a permanent miss for this probe. */
+var _RETRYABLE_STATUS = { 429: 1, 408: 1, 500: 1, 502: 1, 503: 1, 504: 1 };
+
+/* Single fetch attempt — returns a uniform `{ ok, status, ms, errorMsg }`
+   shape so the public pingSource() can decide whether to retry without
+   duplicating the try/catch + AbortController plumbing. */
+async function _probeOnce(url) {
   var t0 = _now();
   var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
   var timeoutId = null;
@@ -188,30 +188,62 @@ async function pingSource(spec) {
   try {
     var r = await fetch(url, ctrl ? { signal: ctrl.signal } : {});
     if (timeoutId !== null) clearTimeout(timeoutId);
-    var ms = Math.round(_now() - t0);
-    stat.lastLatencyMs = ms;
-    stat.lastStatus = r.status;
-    if (r.ok) {
-      stat.successCount++;
-      stat.lastSuccessAt = Date.now();
-      stat.lastError = null;
-      return { id: spec.id, name: spec.name, ok: true, status: r.status, ms: ms };
-    }
-    stat.failCount++;
-    stat.lastFailAt = Date.now();
-    stat.lastError = 'HTTP ' + r.status;
-    return { id: spec.id, name: spec.name, ok: false, status: r.status, ms: ms };
+    return { ok: r.ok, status: r.status, ms: Math.round(_now() - t0), errorMsg: null };
   } catch (e) {
     if (timeoutId !== null) clearTimeout(timeoutId);
-    var failMs = Math.round(_now() - t0);
-    stat.lastLatencyMs = failMs;
-    stat.lastStatus = 0;
-    stat.failCount++;
-    stat.lastFailAt = Date.now();
     var msg = e && e.name === 'AbortError' ? 'TIMEOUT' : (e && e.message) || 'NETWORK_ERROR';
-    stat.lastError = msg;
-    return { id: spec.id, name: spec.name, ok: false, status: 0, ms: failMs, error: msg };
+    return { ok: false, status: 0, ms: Math.round(_now() - t0), errorMsg: msg };
   }
+}
+
+/* Probe one source. Always resolves — never throws — so callers can
+   `Promise.all([...].map(pingSource))` without a wrapping try.
+
+   Retry policy: a single retry with a 400 ms back-off when the first
+   attempt returns a transient status (429 / 408 / 5xx) or fails as a
+   network error. Free-tier APIs (CoinGecko in particular) intermittently
+   return 503 under burst load; one retry resolves most of those without
+   over-stressing the upstream. The total wall-clock cost is bounded:
+   8 s timeout × 2 attempts + 0.4 s back-off. */
+async function pingSource(spec) {
+  var url = typeof spec.url === 'function' ? spec.url() : String(spec.url || '');
+  var stat = _stat(spec.id);
+
+  var first = await _probeOnce(url);
+  var final = first;
+
+  if (!first.ok && (first.status === 0 || _RETRYABLE_STATUS[first.status])) {
+    /* Brief back-off before the retry. Settable via window.NEXUS_PROBE_RETRY_MS
+       so test code can drive it to 0 without sleeping. */
+    var delayMs =
+      typeof window !== 'undefined' && Number.isFinite(window.NEXUS_PROBE_RETRY_MS)
+        ? window.NEXUS_PROBE_RETRY_MS
+        : 400;
+    if (delayMs > 0)
+      await new Promise(function (r) {
+        setTimeout(r, delayMs);
+      });
+    var second = await _probeOnce(url);
+    /* Only adopt the retry if it's strictly better. */
+    if (second.ok || (second.status > 0 && first.status === 0)) {
+      final = second;
+    }
+  }
+
+  stat.lastLatencyMs = final.ms;
+  stat.lastStatus = final.status;
+  if (final.ok) {
+    stat.successCount++;
+    stat.lastSuccessAt = Date.now();
+    stat.lastError = null;
+    return { id: spec.id, name: spec.name, ok: true, status: final.status, ms: final.ms };
+  }
+  stat.failCount++;
+  stat.lastFailAt = Date.now();
+  stat.lastError = final.errorMsg || 'HTTP ' + final.status;
+  var ret = { id: spec.id, name: spec.name, ok: false, status: final.status, ms: final.ms };
+  if (final.errorMsg) ret.error = final.errorMsg;
+  return ret;
 }
 
 async function pingAllSources() {

@@ -1974,64 +1974,21 @@ async function fetchCoinbasePrices(){
 
 /* ═══ Token Unlocks ═══
 
-   AUDIT-Tokenomist: api.tokenomist.ai/v1/* deprecated and returns
-   404 in production. The previous code already had a static
-   fallback, but its dates were hard-coded to April 2026 — they
-   silently expire. The fix:
-     1. Try DeFiLlama Emissions first (api.llama.fi/emissions) —
-        same data, free, and our other DeFiLlama endpoints already
-        respond in <50ms in this app's source-health probes.
-     2. Tokenomist is kept as a SECONDARY fallback in case the
-        host comes back online; if it ever does, the data merges
-        seamlessly because of the relaxed field-name shape below.
-     3. Static fallback dates are now relative to today (today + N
-        days), so even with both upstreams down, the user sees
-        plausible upcoming-unlock entries instead of expired ones. */
+   Both upstreams we tried for upcoming-unlock data have failed in
+   production probes:
+     - api.tokenomist.ai/v1/unlocks/upcoming  → HTTP 404 (deprecated)
+     - api.llama.fi/emissions                  → HTTP 503 (the path was
+       speculative; not part of DeFiLlama's published free API)
+
+   Until a verified free upstream is identified we keep the legacy
+   Tokenomist try (so a future revival auto-recovers) and otherwise
+   fall through to a synthesised relative-date list. The list uses
+   today + N days, so the panel never shows expired examples. */
 async function fetchTokenUnlocks(){
   if(Date.now()-unlockCache.t<3600000&&tokenUnlocks.length>0)return;
 
-  /* 1. Primary: DeFiLlama Emissions. */
-  try{
-    var ll=await fj('https://api.llama.fi/emissions');
-    if(ll&&ll.length){
-      var nowMs=Date.now();
-      var horizon=nowMs+90*86400000; /* next 90 days */
-      var picks=ll
-        .map(function(p){
-          /* DeFiLlama shape: { token, name, nextEvent: { timestamp, noOfTokens, ... }, gecko_id, mcap, ... } */
-          var ev=p.nextEvent||{};
-          var ts=+(ev.timestamp||0)*1000; /* sec → ms */
-          if(!ts||ts<nowMs||ts>horizon)return null;
-          var sym=(p.token||p.gecko_id||'').toUpperCase();
-          if(!sym)return null;
-          var tokens=+ev.noOfTokens||0;
-          /* Best-effort USD value: tokens × current mcap-per-token estimate. */
-          var px=+p.tokenPrice||0;
-          var amount=tokens*px;
-          return{
-            sym:sym,
-            date:new Date(ts).toISOString().slice(0,10),
-            amount:amount,
-            tokens:tokens,
-            pct:+ev.pct||0,
-            type:ev.category||'unlock',
-            name:p.name||sym
-          };
-        })
-        .filter(function(u){return u&&u.sym&&u.amount>100000})
-        .sort(function(a,b){return a.date.localeCompare(b.date)})
-        .slice(0,15);
-      if(picks.length){
-        tokenUnlocks=picks;
-        TOKEN_UNLOCKS=tokenUnlocks.map(function(u){return{sym:u.sym,date:u.date,amount:u.amount}});
-        unlockCache.t=Date.now();
-        return;
-      }
-    }
-  }catch(e){}
-
-  /* 2. Secondary: legacy Tokenomist. Returns 404 today; kept so a
-        future revival is automatic. */
+  /* 1. Legacy Tokenomist — returns 404 today; harmless try, lets us
+        auto-recover the day the host comes back. */
   try{
     var data=await fj('https://api.tokenomist.ai/v1/unlocks/upcoming?limit=15');
     if(data&&data.length){
@@ -2052,9 +2009,7 @@ async function fetchTokenUnlocks(){
     }
   }catch(e){}
 
-  /* 3. Both upstreams down — synthesise plausible upcoming entries
-        with dates relative to today, so the panel doesn't display
-        expired April-2026 examples. */
+  /* 2. Synthesise from today + N days so dates never expire. */
   if(!tokenUnlocks.length){
     var today=new Date();
     function inDays(n){

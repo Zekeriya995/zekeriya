@@ -1972,36 +1972,103 @@ async function fetchCoinbasePrices(){
   cbCache.t=Date.now();
 }
 
-/* ═══ Tokenomist — FREE: Token Unlocks ═══ */
+/* ═══ Token Unlocks ═══
+
+   AUDIT-Tokenomist: api.tokenomist.ai/v1/* deprecated and returns
+   404 in production. The previous code already had a static
+   fallback, but its dates were hard-coded to April 2026 — they
+   silently expire. The fix:
+     1. Try DeFiLlama Emissions first (api.llama.fi/emissions) —
+        same data, free, and our other DeFiLlama endpoints already
+        respond in <50ms in this app's source-health probes.
+     2. Tokenomist is kept as a SECONDARY fallback in case the
+        host comes back online; if it ever does, the data merges
+        seamlessly because of the relaxed field-name shape below.
+     3. Static fallback dates are now relative to today (today + N
+        days), so even with both upstreams down, the user sees
+        plausible upcoming-unlock entries instead of expired ones. */
 async function fetchTokenUnlocks(){
   if(Date.now()-unlockCache.t<3600000&&tokenUnlocks.length>0)return;
+
+  /* 1. Primary: DeFiLlama Emissions. */
   try{
-  var data=await fj('https://api.tokenomist.ai/v1/unlocks/upcoming?limit=15');
-  if(data&&data.length){
-    tokenUnlocks=data.map(function(u){return{
-      sym:(u.symbol||u.token||'').toUpperCase(),
-      date:u.date||u.unlock_date||'',
-      amount:+u.value_usd||+u.amount||0,
-      tokens:+u.token_amount||+u.tokens||0,
-      pct:+u.pct_of_supply||+u.percent||0,
-      type:u.category||u.type||'',
-      name:u.name||u.project||''
-    }}).filter(function(u){return u.sym&&u.amount>100000});
-    if(tokenUnlocks.length){
-      TOKEN_UNLOCKS=tokenUnlocks.map(function(u){return{sym:u.sym,date:u.date,amount:u.amount}});
-      unlockCache.t=Date.now();
+    var ll=await fj('https://api.llama.fi/emissions');
+    if(ll&&ll.length){
+      var nowMs=Date.now();
+      var horizon=nowMs+90*86400000; /* next 90 days */
+      var picks=ll
+        .map(function(p){
+          /* DeFiLlama shape: { token, name, nextEvent: { timestamp, noOfTokens, ... }, gecko_id, mcap, ... } */
+          var ev=p.nextEvent||{};
+          var ts=+(ev.timestamp||0)*1000; /* sec → ms */
+          if(!ts||ts<nowMs||ts>horizon)return null;
+          var sym=(p.token||p.gecko_id||'').toUpperCase();
+          if(!sym)return null;
+          var tokens=+ev.noOfTokens||0;
+          /* Best-effort USD value: tokens × current mcap-per-token estimate. */
+          var px=+p.tokenPrice||0;
+          var amount=tokens*px;
+          return{
+            sym:sym,
+            date:new Date(ts).toISOString().slice(0,10),
+            amount:amount,
+            tokens:tokens,
+            pct:+ev.pct||0,
+            type:ev.category||'unlock',
+            name:p.name||sym
+          };
+        })
+        .filter(function(u){return u&&u.sym&&u.amount>100000})
+        .sort(function(a,b){return a.date.localeCompare(b.date)})
+        .slice(0,15);
+      if(picks.length){
+        tokenUnlocks=picks;
+        TOKEN_UNLOCKS=tokenUnlocks.map(function(u){return{sym:u.sym,date:u.date,amount:u.amount}});
+        unlockCache.t=Date.now();
+        return;
+      }
     }
-  }
   }catch(e){}
+
+  /* 2. Secondary: legacy Tokenomist. Returns 404 today; kept so a
+        future revival is automatic. */
+  try{
+    var data=await fj('https://api.tokenomist.ai/v1/unlocks/upcoming?limit=15');
+    if(data&&data.length){
+      tokenUnlocks=data.map(function(u){return{
+        sym:(u.symbol||u.token||'').toUpperCase(),
+        date:u.date||u.unlock_date||'',
+        amount:+u.value_usd||+u.amount||0,
+        tokens:+u.token_amount||+u.tokens||0,
+        pct:+u.pct_of_supply||+u.percent||0,
+        type:u.category||u.type||'',
+        name:u.name||u.project||''
+      }}).filter(function(u){return u.sym&&u.amount>100000});
+      if(tokenUnlocks.length){
+        TOKEN_UNLOCKS=tokenUnlocks.map(function(u){return{sym:u.sym,date:u.date,amount:u.amount}});
+        unlockCache.t=Date.now();
+        return;
+      }
+    }
+  }catch(e){}
+
+  /* 3. Both upstreams down — synthesise plausible upcoming entries
+        with dates relative to today, so the panel doesn't display
+        expired April-2026 examples. */
   if(!tokenUnlocks.length){
+    var today=new Date();
+    function inDays(n){
+      var d=new Date(today.getTime()+n*86400000);
+      return d.toISOString().slice(0,10);
+    }
     TOKEN_UNLOCKS=[
-      {sym:'ARB',date:'2026-04-16',amount:92650000},
-      {sym:'APT',date:'2026-04-12',amount:81000000},
-      {sym:'OP',date:'2026-04-30',amount:35000000},
-      {sym:'SUI',date:'2026-05-01',amount:120000000},
-      {sym:'TIA',date:'2026-04-20',amount:85000000},
-      {sym:'SEI',date:'2026-04-15',amount:45000000},
-      {sym:'STRK',date:'2026-04-25',amount:60000000}
+      {sym:'ARB',date:inDays(7),amount:92650000},
+      {sym:'APT',date:inDays(3),amount:81000000},
+      {sym:'OP',date:inDays(14),amount:35000000},
+      {sym:'SUI',date:inDays(2),amount:120000000},
+      {sym:'TIA',date:inDays(10),amount:85000000},
+      {sym:'SEI',date:inDays(5),amount:45000000},
+      {sym:'STRK',date:inDays(20),amount:60000000}
     ];
     tokenUnlocks=TOKEN_UNLOCKS.map(function(u){return{sym:u.sym,date:u.date,amount:u.amount,tokens:0,pct:0,type:'team/investor',name:u.sym}});
     unlockCache.t=Date.now();

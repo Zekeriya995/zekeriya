@@ -1581,10 +1581,14 @@ function updateScanSummary(sigCount,tkCount){
   }
 }
 /* ═══ TAB 3: GEM HUNTER (صيد الجواهر) ═══
-   Three runtime caches drive the contract:
+   Four pieces of runtime state drive the contract:
      _gemKlineCache  — per-symbol 1h klines, TTL via GEM_CONFIG.KLINE_TTL_MS
      _gemResCache    — full scored result set, TTL via GEM_CONFIG.RES_TTL_MS
      _gemLoadInflight — boolean guard against re-entrant loads
+     _gemSeenState   — { [sym]: {firstSeen, lastSeen} } persisted to
+                       localStorage so the "appeared X minutes ago"
+                       badge survives page reloads. Mutated by the
+                       pure helper gemTrackFirstSeen.
    Rationale: filter-button clicks (all/early/still/late) used to fan out
    ~25 fresh klines requests per click. With these caches the network
    work happens once per RES_TTL_MS, and filter switching becomes a
@@ -1593,6 +1597,7 @@ var _gemKlineCache = {};
 var _gemResCache = null;
 var _gemResCacheAt = 0;
 var _gemLoadInflight = false;
+var _gemSeenState = safeGetJSON('nxgemSeen', {}) || {};
 
 function _gemBadge(timing){
   if(timing==='early') return {ic:'🟢', l:t('gem_early_label'), col:'var(--up)'};
@@ -1755,6 +1760,17 @@ async function loadSmallCaps2(){
   });
   await Promise.all(proms);
   res.sort(function(a,b){return b.sc-a.sc});
+  /* Stamp each row with its firstSeen so the renderer can show
+     "منذ Xم/س". The pure helper preserves firstSeen across cycles
+     while the coin keeps reappearing, and resets it after a long
+     absence — see gemTrackFirstSeen contract. */
+  var _gNow=Date.now();
+  gemTrackFirstSeen(_gemSeenState,res.map(function(r){return r.s}),_gNow);
+  for(var _i=0;_i<res.length;_i++){
+    var _entry=_gemSeenState[res[_i].s];
+    res[_i].firstSeen=_entry?_entry.firstSeen:_gNow;
+  }
+  safeSetJSON('nxgemSeen',_gemSeenState);
   return res;
 }
 
@@ -1791,12 +1807,19 @@ function renderSmallCaps(res){
     var rugCol=g.rugRisk<30?'var(--up)':g.rugRisk<60?'var(--warn)':'var(--dn)';
     var rugTxt=g.rugRisk<30?t('gem_safe_pill'):g.rugRisk<60?t('gem_medium_pill'):t('gem_risk_pill');
     var mcDisplay=g.mc>0?fmt(g.mc):t('gem_mc_unknown');
+    /* "Appeared X minutes ago" badge — uses the existing timeBadge() /
+       timeAgo() helpers so the format matches the rest of the app
+       (الآن / منذ Xم / منذ Xس). g.firstSeen is stamped by
+       loadSmallCaps2 from _gemSeenState, which persists across reloads
+       so the age is honest after a refresh. */
+    var ageBadge=g.firstSeen?timeBadge(g.firstSeen):'';
     h+='<div class="whale-card" style="border-left:3px solid '+g.tBadge.col+';margin-bottom:8px" onclick="openCoin(\''+sSafe+'\')">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
       +'<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'
       +'<span style="font-weight:800;font-size:14px">💎 '+sSafe+'</span>'
       +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+g.tBadge.col+';font-weight:700">'+esc(g.tBadge.ic)+' '+esc(g.tBadge.l)+'</span>'
       +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+rugCol+';font-weight:700">'+esc(rugTxt)+'</span>'
+      +ageBadge
       +'</div>'
       +'<span style="font-family:var(--fm);font-size:12px;font-weight:800;color:var(--neon)">'+g.vx.toFixed(1)+'x vol</span>'
       +'</div>'

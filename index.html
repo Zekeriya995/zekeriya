@@ -215,8 +215,12 @@
 <!-- NOTIFICATION SOUND (louder) -->
 <audio id="sndAlert" preload="auto"><source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVYGAACBAIA/f4CAgIB/f39/gICAgH9/f4CAgIB/f4CAgIB/f3+AgICBgH5+f4GBgYB+fn+BgYGAfn5/gYGBgH19foKCgoF8fH6CgoKBfHx+goODgnx7foODg4J7e36EhISCenp/hISEg3p5f4WFhIN5eYCFhYWDeHiAhoaGhHd3gIeHh4R2doCHh4iEdXWBiIiIhHR0gYmJiYRzc4GJiomFcnKCioqKhXFxgouLi4VwcIKLjIyGb2+CjIyMhm5ugoyNjYZtbYONjY2HbGyDjo6Oh2trg4+Pj4dqaoOPj5CHaWmEkJCQiGhoAA==" type="audio/wav"></audio>
 
-<!-- ON-SCREEN NOTIFICATION POPUP -->
-<div id="notifPopup" style="position:fixed;top:-80px;left:50%;transform:translateX(-50%);z-index:500;width:92%;max-width:400px;transition:top .4s cubic-bezier(.175,.885,.32,1.275)">
+<!-- ON-SCREEN NOTIFICATION POPUP — role + aria-live so screen readers
+     announce each new title/body when textContent updates. polite (not
+     assertive) because trade signals are informational, not emergencies;
+     announcing them mid-speech would be jarring. aria-atomic re-reads
+     the whole region so partial updates don't leak through. -->
+<div id="notifPopup" role="status" aria-live="polite" aria-atomic="true" style="position:fixed;top:-80px;left:50%;transform:translateX(-50%);z-index:500;width:92%;max-width:400px;transition:top .4s cubic-bezier(.175,.885,.32,1.275)">
 <div style="background:linear-gradient(135deg,rgba(16,24,42,.95),rgba(10,16,28,.98));border:1px solid rgba(0,255,136,.2);border-radius:14px;padding:12px 14px;backdrop-filter:blur(20px);box-shadow:0 10px 40px rgba(0,0,0,.5),0 0 20px rgba(0,255,136,.1)">
 <div style="display:flex;align-items:center;gap:10px">
 <div id="npIcon" style="font-size:24px;flex-shrink:0">⭐</div>

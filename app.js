@@ -6505,7 +6505,10 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   },60000);
   bgInterval(monitorTrades,10000);
   bgInterval(function(){try{renderTop3()}catch(e){}},60000); /* Auto-update VIP trades every minute */
-  bgInterval(function(){notifiedSet={};safeSet('nxnot10','{}');tgSent={}},3600000);
+  /* Hourly reset of both dedupe sets. tgSent is now persisted (key
+     nxtgs10), so the wipe must clear both localStorage entries to
+     avoid a stale tgSent surviving past a notifiedSet reset. */
+  bgInterval(function(){notifiedSet={};safeSet('nxnot10','{}');tgSent={};safeSet('nxtgs10','{}')},3600000);
   setTimeout(function(){runValidator()},10000);
   bgInterval(function(){runValidator()},90000);
   /* Open the Binance public ticker WebSocket. Once connected, price

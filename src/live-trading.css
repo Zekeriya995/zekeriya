@@ -1,0 +1,492 @@
+/* NEXUS PRO — Live Trading view styles
+ * Visual companion to src/live-trading.js. Everything is namespaced
+ * under .lv- so it can't collide with the existing platform CSS. */
+
+#pg-live {
+  padding-bottom: 24px;
+}
+
+.lv-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ---------- top header / live status ---------- */
+.lv-head {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
+  align-items: center;
+  background: var(--glass);
+  backdrop-filter: var(--gb);
+  border: 1px solid var(--bdr);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+.lv-head-l {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.lv-head-r {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.lv-sym-select {
+  background: var(--bg2);
+  border: 1px solid var(--bdr-a);
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: var(--t0);
+  font-family: var(--fd);
+  font-weight: 700;
+  font-size: 12px;
+  min-width: 120px;
+  cursor: pointer;
+}
+
+.lv-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  background: var(--ud);
+  border: 1px solid rgba(0, 255, 136, 0.18);
+  border-radius: 18px;
+  font-size: 9px;
+  font-family: var(--fm);
+  font-weight: 700;
+  color: var(--up);
+  letter-spacing: 1.2px;
+}
+.lv-pill::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--up);
+  box-shadow: 0 0 10px var(--up);
+  animation: lv-pulse 1.4s infinite;
+}
+@keyframes lv-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.7);
+  }
+}
+
+.lv-fps {
+  font-family: var(--fm);
+  font-size: 9px;
+  color: var(--t3);
+  padding: 3px 8px;
+  background: var(--bg2);
+  border-radius: 6px;
+}
+
+/* ---------- price headline ---------- */
+.lv-price-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.lv-price {
+  font-family: var(--fm);
+  font-weight: 800;
+  font-size: 30px;
+  color: var(--up);
+  direction: ltr;
+  letter-spacing: -0.5px;
+  transition:
+    color 0.2s ease,
+    text-shadow 0.2s ease;
+  text-shadow: 0 0 18px transparent;
+}
+.lv-price.lv-flick-up {
+  color: #00ff88 !important;
+  text-shadow: 0 0 22px rgba(0, 255, 136, 0.7);
+  animation: lv-flick-up 0.38s ease-out;
+}
+.lv-price.lv-flick-dn {
+  color: #ff3860 !important;
+  text-shadow: 0 0 22px rgba(255, 56, 96, 0.7);
+  animation: lv-flick-dn 0.38s ease-out;
+}
+@keyframes lv-flick-up {
+  0% {
+    background: rgba(0, 255, 136, 0.22);
+  }
+  100% {
+    background: transparent;
+  }
+}
+@keyframes lv-flick-dn {
+  0% {
+    background: rgba(255, 56, 96, 0.22);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.lv-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+.lv-stat {
+  background: var(--bg2);
+  border: 1px solid var(--bdr);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.lv-stat-l {
+  font-size: 8px;
+  color: var(--t3);
+  font-family: var(--fm);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.lv-stat-v {
+  font-family: var(--fm);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--t0);
+  margin-top: 3px;
+  direction: ltr;
+}
+.lv-stat-v.lv-up {
+  color: var(--up);
+}
+.lv-stat-v.lv-dn {
+  color: var(--dn);
+}
+
+/* ---------- scrolling tape ---------- */
+.lv-tt {
+  overflow: hidden;
+  background: rgba(6, 11, 20, 0.5);
+  border: 1px solid var(--bdr);
+  border-radius: 10px;
+  padding: 8px 0;
+}
+.lv-tt-track {
+  display: flex;
+  gap: 28px;
+  white-space: nowrap;
+  animation: lv-scroll 32s linear infinite;
+  width: max-content;
+}
+.lv-tt-i {
+  font-size: 11px;
+  font-family: var(--fm);
+  color: var(--t1);
+  flex-shrink: 0;
+}
+.lv-tt-i b {
+  font-family: var(--fd);
+  color: var(--t0);
+  margin-right: 6px;
+}
+.lv-tt-c {
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-right: 4px;
+}
+.lv-tt-c.up {
+  color: var(--up);
+  background: var(--ud);
+}
+.lv-tt-c.dn {
+  color: var(--dn);
+  background: var(--dd);
+}
+@keyframes lv-scroll {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* ---------- mini ticker grid ---------- */
+.lv-mini-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 6px;
+}
+.lv-mini-card {
+  background: var(--bg2);
+  border: 1px solid var(--bdr);
+  border-radius: 10px;
+  padding: 8px 10px;
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+  transition:
+    border-color 0.15s ease,
+    transform 0.12s ease;
+  color: var(--t0);
+}
+.lv-mini-card:active {
+  transform: scale(0.97);
+}
+.lv-mini-card.lv-mini-active {
+  border-color: var(--neon);
+  box-shadow: 0 0 0 2px rgba(0, 255, 136, 0.18);
+}
+.lv-mini-card.up::after,
+.lv-mini-card.dn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  animation: lv-flash 0.4s ease-out;
+}
+.lv-mini-card.up::after {
+  background: rgba(0, 255, 136, 0.14);
+}
+.lv-mini-card.dn::after {
+  background: rgba(255, 56, 96, 0.14);
+}
+@keyframes lv-flash {
+  0% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.lv-mini-sym {
+  font-family: var(--fd);
+  font-weight: 800;
+  font-size: 11px;
+  color: var(--t0);
+  letter-spacing: 0.5px;
+}
+.lv-mini-price {
+  font-family: var(--fm);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--t1);
+  margin-top: 2px;
+  direction: ltr;
+}
+.lv-mini-ch {
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  margin-top: 2px;
+}
+.lv-mini-ch.up {
+  color: var(--up);
+}
+.lv-mini-ch.dn {
+  color: var(--dn);
+}
+
+/* ---------- main grid: chart + sidebar ---------- */
+.lv-main {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+@media (min-width: 900px) {
+  .lv-main {
+    grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
+  }
+}
+
+.lv-card {
+  background: var(--glass);
+  backdrop-filter: var(--gb);
+  border: 1px solid var(--bdr);
+  border-radius: 14px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.lv-card-h {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--bdr);
+  font-family: var(--fd);
+  font-weight: 700;
+  font-size: 11px;
+  color: var(--t1);
+  letter-spacing: 0.8px;
+}
+.lv-card-h .lv-tag {
+  font-family: var(--fm);
+  font-size: 9px;
+  color: var(--t3);
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+/* ---------- timeframe pills ---------- */
+.lv-tfs {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.lv-tf {
+  background: var(--bg2);
+  border: 1px solid var(--bdr);
+  color: var(--t2);
+  font-family: var(--fm);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 5px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.lv-tf.act {
+  background: var(--ud);
+  border-color: rgba(0, 255, 136, 0.4);
+  color: var(--up);
+}
+
+/* ---------- chart ---------- */
+.lv-chart-wrap {
+  position: relative;
+  height: 380px;
+}
+#lvChartCv {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background:
+    radial-gradient(ellipse at 70% 0%, rgba(0, 255, 136, 0.04), transparent 55%),
+    radial-gradient(ellipse at 30% 100%, rgba(176, 124, 255, 0.04), transparent 55%), var(--bg);
+}
+
+/* ---------- order book ---------- */
+.lv-book-wrap {
+  position: relative;
+  height: 380px;
+}
+#lvBookCv {
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 56, 96, 0.02),
+    transparent 50%,
+    rgba(0, 255, 136, 0.02)
+  );
+}
+
+/* ---------- trade tape ---------- */
+.lv-tape {
+  max-height: 260px;
+  overflow-y: auto;
+  padding: 4px 8px;
+  scrollbar-width: thin;
+}
+.lv-tape::-webkit-scrollbar {
+  width: 3px;
+}
+.lv-tape::-webkit-scrollbar-thumb {
+  background: var(--t3);
+  border-radius: 3px;
+}
+.lv-trade-row {
+  display: grid;
+  grid-template-columns: 14px 1fr 1fr 60px;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--fm);
+  font-size: 10px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  direction: ltr;
+  animation: lv-trade-in 0.25s ease-out;
+}
+@keyframes lv-trade-in {
+  from {
+    transform: translateY(-6px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.lv-trade-row.lv-trade-buy {
+  background: rgba(0, 255, 136, 0.04);
+}
+.lv-trade-row.lv-trade-sell {
+  background: rgba(255, 56, 96, 0.04);
+}
+.lv-trade-row.lv-trade-buy .lv-trade-side,
+.lv-trade-row.lv-trade-buy .lv-trade-price {
+  color: var(--up);
+}
+.lv-trade-row.lv-trade-sell .lv-trade-side,
+.lv-trade-row.lv-trade-sell .lv-trade-price {
+  color: var(--dn);
+}
+.lv-trade-side {
+  font-size: 9px;
+}
+.lv-trade-price {
+  font-weight: 700;
+}
+.lv-trade-qty {
+  color: var(--t1);
+}
+.lv-trade-time {
+  color: var(--t3);
+  font-size: 9px;
+  text-align: right;
+}
+
+/* ---------- depth bars under chart (tiny status row) ---------- */
+.lv-depth-bar {
+  display: flex;
+  height: 4px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 6px 12px 10px;
+  background: var(--bg2);
+}
+.lv-depth-bar > div {
+  transition: width 0.4s ease;
+}
+.lv-depth-bar .lv-bid {
+  background: linear-gradient(90deg, transparent, var(--up));
+}
+.lv-depth-bar .lv-ask {
+  background: linear-gradient(90deg, var(--dn), transparent);
+}
+
+/* ---------- responsive tweaks ---------- */
+@media (max-width: 600px) {
+  .lv-stat-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .lv-price {
+    font-size: 24px;
+  }
+  .lv-chart-wrap {
+    height: 300px;
+  }
+  .lv-book-wrap {
+    height: 320px;
+  }
+}

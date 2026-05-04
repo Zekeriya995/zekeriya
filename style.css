@@ -650,3 +650,17 @@ canvas{width:100%!important;border-radius:4px}
 .src-health-row{transition:background .15s}
 .src-health-row:hover{background:var(--bdr)}
 .src-health-row:last-child{border-bottom:none}
+
+/* Live ticker — flicker animation applied by src/live-ticker.js when a
+   cached price moves between ticks. Strips off after ~420ms so the
+   next change replays the keyframes. */
+.lt-flick-up{animation:lt-flick-up .42s ease-out;color:var(--up)!important}
+.lt-flick-dn{animation:lt-flick-dn .42s ease-out;color:var(--dn)!important}
+@keyframes lt-flick-up{
+  0%{background:rgba(0,255,136,.28);text-shadow:0 0 14px rgba(0,255,136,.6)}
+  100%{background:transparent;text-shadow:0 0 0 transparent}
+}
+@keyframes lt-flick-dn{
+  0%{background:rgba(255,56,96,.28);text-shadow:0 0 14px rgba(255,56,96,.6)}
+  100%{background:transparent;text-shadow:0 0 0 transparent}
+}

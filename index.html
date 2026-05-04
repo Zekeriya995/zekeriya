@@ -14,6 +14,7 @@
 <script defer src="https://telegram.org/js/telegram-web-app.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="src/live-trading.css">
 </head>
 <body data-theme="dark" data-lang="ar">
 
@@ -168,6 +169,84 @@
 <div id="mktETH" style="display:none"></div>
 </div>
 
+<!-- ⚡ LIVE TRADING VIEW — real-time WebSocket-driven exchange-style page -->
+<div class="pg" id="pg-live">
+<div class="lv-shell">
+
+<div class="lv-head">
+<div class="lv-head-l">
+<select class="lv-sym-select" id="lvSymSelect" aria-label="رمز العملة"></select>
+<span class="lv-pill" id="lvLivePill">LIVE STREAM</span>
+<span class="lv-fps" id="lvFps">60 fps</span>
+</div>
+<div class="lv-head-r">
+<div class="lv-tfs" role="group" aria-label="الإطار الزمني">
+<button class="lv-tf" data-tf="1m">1m</button>
+<button class="lv-tf act" data-tf="5m">5m</button>
+<button class="lv-tf" data-tf="15m">15m</button>
+<button class="lv-tf" data-tf="1h">1h</button>
+<button class="lv-tf" data-tf="4h">4h</button>
+</div>
+</div>
+</div>
+
+<div class="lv-card">
+<div style="padding:14px 16px">
+<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">
+<span id="lvSymName" style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0);letter-spacing:1px">BTC/USDT</span>
+<span class="lv-price" id="lvPrice" style="direction:ltr">--</span>
+<span class="lv-stat-v lv-up" id="lvChange" style="font-size:14px">--</span>
+</div>
+<div class="lv-stat-grid">
+<div class="lv-stat"><div class="lv-stat-l">24h HIGH</div><div class="lv-stat-v" id="lvHigh">--</div></div>
+<div class="lv-stat"><div class="lv-stat-l">24h LOW</div><div class="lv-stat-v" id="lvLow">--</div></div>
+<div class="lv-stat"><div class="lv-stat-l">24h VOL</div><div class="lv-stat-v" id="lvVol">--</div></div>
+<div class="lv-stat"><div class="lv-stat-l">TRADES</div><div class="lv-stat-v" id="lvTrades">--</div></div>
+</div>
+</div>
+</div>
+
+<div class="lv-tt"><div class="lv-tt-track" id="lvTickerTape"><span class="lv-tt-i muted">streaming…</span></div></div>
+
+<div class="lv-card">
+<div class="lv-card-h">
+<span>📈 السوق المباشر</span>
+<span class="lv-tag" data-t="live_market">multi-symbol pulse</span>
+</div>
+<div style="padding:8px">
+<div class="lv-mini-grid" id="lvMiniGrid"></div>
+</div>
+</div>
+
+<div class="lv-main">
+<div class="lv-card">
+<div class="lv-card-h">
+<span>🕯️ الشموع المباشرة</span>
+<span class="lv-tag">canvas · 60fps</span>
+</div>
+<div class="lv-chart-wrap"><canvas id="lvChartCv"></canvas></div>
+</div>
+
+<div class="lv-card">
+<div class="lv-card-h">
+<span>📗 دفتر الأوامر</span>
+<span class="lv-tag">depth · 100ms</span>
+</div>
+<div class="lv-book-wrap"><canvas id="lvBookCv"></canvas></div>
+</div>
+</div>
+
+<div class="lv-card">
+<div class="lv-card-h">
+<span>⚡ تدفق الصفقات</span>
+<span class="lv-tag">aggTrade stream</span>
+</div>
+<div class="lv-tape" id="lvTapeList"></div>
+</div>
+
+</div>
+</div>
+
 <!-- 📊 INDICATORS — 7 Pro Cards -->
 <div class="pg" id="pg-ind">
 <div id="indCards"><div style="text-align:center;padding:30px"><div class="ldr"><div class="ldr-d"></div><div class="ldr-d"></div><div class="ldr-d"></div></div></div></div>
@@ -204,6 +283,7 @@
 <button class="bb" data-p="scan"><span class="bi">📡</span><span data-t="nav_scan">السكانر</span></button>
 <button class="bb" data-p="whale"><span class="bi">🐋</span><span data-t="nav_whale">حيتان</span></button>
 <button class="bb" data-p="market"><span class="bi">📈</span><span data-t="nav_market">حركة السوق</span></button>
+<button class="bb" data-p="live"><span class="bi">⚡</span><span data-t="nav_live">مباشر</span></button>
 <button class="bb" data-p="ind"><span class="bi">📊</span><span data-t="nav_ind">مؤشرات</span></button>
 <button class="bb" data-p="me"><span class="bi">👤</span><span data-t="nav_me">حسابي</span></button>
 </div>
@@ -333,6 +413,9 @@
 </div>
 </div>
 <script defer src="src/price-stream.js"></script>
+<script defer src="src/kline-stream.js"></script>
+<script defer src="src/live-trading.js"></script>
+<script defer src="src/live-ticker.js"></script>
 <script defer src="app.js"></script>
 </body>
 </html>

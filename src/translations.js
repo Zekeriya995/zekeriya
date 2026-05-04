@@ -13,6 +13,8 @@ const TR = {
   nav_ind: { ar: 'مؤشرات', en: 'Indicators' },
   nav_me: { ar: 'حسابي', en: 'Profile' },
   nav_market: { ar: 'حركة السوق', en: 'Market' },
+  nav_live: { ar: 'مباشر', en: 'Live' },
+  live_market: { ar: 'نبض الأسواق', en: 'Multi-symbol pulse' },
 
   /* Signals & categories */
   breakout: { ar: 'بداية صعود', en: 'Rising' },

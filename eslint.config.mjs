@@ -117,6 +117,20 @@ export default [
         chartData: 'writable',
         drawChartFrame: 'readonly',
         sparkHist: 'writable',
+        /* Render helpers re-used by src/live-ticker.js to power the
+           1-second pulse on every page. Pure DOM rebuilders that read
+           from already-cached state — no network. */
+        calcHealth: 'readonly',
+        getWarnings: 'readonly',
+        renderDashLS: 'readonly',
+        renderAcc: 'readonly',
+        renderTop3: 'readonly',
+        updateQACards: 'readonly',
+        renderHeatmap: 'readonly',
+        renderAlerts: 'readonly',
+        renderMonPanel: 'readonly',
+        renderWhaleResults: 'readonly',
+        cache: 'writable',
         /* Declared in src/storage.js */
         safeGetJSON: 'readonly',
         safeGet: 'readonly',

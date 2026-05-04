@@ -78,6 +78,7 @@ grep '\[V2-DRY\] PASS' /tmp/v2_dry.log | sed 's/.*tier=//; s/ .*//' | sort | uni
 ```
 
 **Healthy targets:**
+
 - 10–20 PASS over 30 min (≈ 20–40/day, before quiet-hours suppression)
 - Most PASS are Silver, a few Gold, rare Diamond
 - Top drop reasons: `tier_bronze`, `hard_vol_low`, `rate_limited`

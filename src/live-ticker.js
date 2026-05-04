@@ -648,6 +648,143 @@
     if (html && el.innerHTML.length !== html.length) el.innerHTML = html;
   }
 
+  /* ------------- order book on whale page (depth WebSocket) -------------
+     The legacy loadLiq() built #obS from a one-shot REST /depth call
+     for five symbols; nothing kept it fresh after the user opened the
+     page. We now subscribe to <sym>@depth20@100ms for each of those
+     symbols whenever the whale page is active and the liquidity tab
+     is open, then redraw the bid/ask bars in place every ~100ms. */
+  var OB_SYMBOLS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP'];
+  var obSubs = {};
+  var obBooks = {};
+  var obLastRender = 0;
+
+  function _obRender() {
+    var el = document.getElementById('obS');
+    if (!el) return;
+    var now = Date.now();
+    /* Cap the DOM refresh to ~10fps even though the WS pushes every
+       100ms — it means at most one render per push and avoids
+       redundant work when multiple subs fire in the same tick. */
+    if (now - obLastRender < 90) return;
+    obLastRender = now;
+    var html = '';
+    for (var i = 0; i < OB_SYMBOLS.length; i++) {
+      var s = OB_SYMBOLS[i];
+      var book = obBooks[s];
+      if (!book || !book.bids.length || !book.asks.length) continue;
+      var bidsVal = book.bids.map(function (b) {
+        return b.p * b.q;
+      });
+      var asksVal = book.asks.map(function (a) {
+        return a.p * a.q;
+      });
+      var bT = bidsVal.reduce(function (acc, v) {
+        return acc + v;
+      }, 0);
+      var aT = asksVal.reduce(function (acc, v) {
+        return acc + v;
+      }, 0);
+      var r = aT > 0 ? bT / aT : 1;
+      var mx = Math.max.apply(null, bidsVal.concat(asksVal));
+      var lbl = r > 1.3 ? 'BUY' : r < 0.7 ? 'SELL' : 'NEUTRAL';
+      var col = r > 1.3 ? 'up' : r < 0.7 ? 'dn' : 'warn';
+      var bidsHtml = bidsVal
+        .slice()
+        .reverse()
+        .map(function (v) {
+          return '<div class="ob-b bid" style="height:' + Math.max(3, (v / mx) * 100) + '%"></div>';
+        })
+        .join('');
+      var asksHtml = asksVal
+        .map(function (v) {
+          return '<div class="ob-b ask" style="height:' + Math.max(3, (v / mx) * 100) + '%"></div>';
+        })
+        .join('');
+      html +=
+        '<div class="cd" style="padding:8px"><div style="display:flex;justify-content:space-between;margin-bottom:4px"><span style="font-weight:700;font-family:var(--fd)">' +
+        s +
+        '</span><span style="font-size:9px;font-family:var(--fm);color:var(--' +
+        col +
+        ')">' +
+        lbl +
+        ' ' +
+        r.toFixed(2) +
+        'x</span></div><div class="ob-v">' +
+        bidsHtml +
+        '<div style="width:1px;background:var(--t3);height:100%"></div>' +
+        asksHtml +
+        '</div></div>';
+    }
+    if (html && el.innerHTML.length !== html.length) el.innerHTML = html;
+  }
+
+  function syncOrderBookSubs() {
+    /* Order book lives on the whale page under the liquidity tab
+       (#wh1 must be the visible tab body). When it isn't visible
+       there's no DOM to update, so unsubscribe to free the sockets. */
+    var page = activePageId();
+    var liqVisible =
+      page === 'whale' &&
+      (function () {
+        var tab = document.getElementById('wh1');
+        return !!(tab && tab.style.display !== 'none');
+      })();
+    var want = liqVisible;
+    var have = !!Object.keys(obSubs).length;
+    if (want && !have && typeof DepthStream !== 'undefined' && DepthStream.subscribe) {
+      OB_SYMBOLS.forEach(function (s) {
+        obSubs[s] = DepthStream.subscribe(s + 'USDT', function (book) {
+          obBooks[s] = book;
+          _obRender();
+        });
+      });
+    } else if (!want && have) {
+      Object.keys(obSubs).forEach(function (k) {
+        try {
+          obSubs[k].close();
+        } catch (e) {
+          /* ignore */
+        }
+      });
+      obSubs = {};
+    }
+  }
+
+  /* ------------- BTC/ETH market analysis page price ticker -------------
+     The market analysis report is heavy and stays cached for 30 min,
+     but the headline price + 24h change at the top should track
+     real-time. We tag those elements with data-live-mkt during render
+     and update only their text from T[sym] on each tick. */
+  function pulseMarket() {
+    if (typeof T === 'undefined' || !T) return;
+    var nodes = document.querySelectorAll('[data-live-mkt]');
+    for (var i = 0; i < nodes.length; i++) {
+      var n = nodes[i];
+      var sym = n.getAttribute('data-live-mkt-sym');
+      var kind = n.getAttribute('data-live-mkt');
+      if (!sym) continue;
+      var d = T[sym];
+      if (!d || !(d.p > 0)) continue;
+      if (kind === 'price') {
+        var newTxt = typeof rP === 'function' ? rP(d.p) : d.p.toFixed(2);
+        if (n.textContent !== newTxt) {
+          var prev = prevPrice['mkt:' + sym];
+          n.textContent = newTxt;
+          if (prev != null && prev !== d.p) flick(n, d.p > prev ? 1 : -1);
+          prevPrice['mkt:' + sym] = d.p;
+        }
+      } else if (kind === 'change') {
+        var ch = typeof d.c === 'number' ? d.c : 0;
+        var ctx = (ch >= 0 ? '+' : '') + ch.toFixed(1) + '% (24h)';
+        if (n.textContent !== ctx) {
+          n.textContent = ctx;
+          n.style.color = ch >= 0 ? 'var(--up)' : 'var(--dn)';
+        }
+      }
+    }
+  }
+
   /* ---------- master tick ---------- */
   function tick() {
     /* The dedicated /pg-live page runs its own RAF render loop in
@@ -665,7 +802,14 @@
     }
     if (page === 'favs') pulseFavourites();
     if (page === 'scan') pulseScanner();
-    if (page === 'whale') pulseWhale();
+    if (page === 'whale') {
+      pulseWhale();
+      syncOrderBookSubs();
+    } else {
+      /* Tear down depth subs if we're no longer on the whale page. */
+      syncOrderBookSubs();
+    }
+    if (page === 'market') pulseMarket();
     if (page === 'heatmap') pulseHeatmap();
     if (page === 'alerts') pulseAlerts();
     if (page === 'monitor') pulseMonitor();

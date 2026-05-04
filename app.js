@@ -5063,8 +5063,8 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<div class="mkt-hero" style="background:'+heroBg+';border:1px solid '+heroBdr+'">';
   h+='<div style="font-size:32px;color:'+coinColor+'">'+coinIcon+'</div>';
   h+='<h2 class="mkt-hero-title" style="font-size:14px;font-weight:800;color:var(--t0);margin:4px 0">'+cn+' <span style="color:var(--t2);font-size:12px">'+sym+'/USDT</span></h2>';
-  h+='<div class="mkt-hero-price" dir="ltr">'+rP(data.price)+'</div>';
-  h+='<div class="mkt-hero-ch" style="color:'+(data.ch.h24>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.ch.h24>=0?'+':'')+data.ch.h24.toFixed(1)+'% (24h)</div>';
+  h+='<div class="mkt-hero-price" data-live-mkt="price" data-live-mkt-sym="'+sym+'" dir="ltr">'+rP(data.price)+'</div>';
+  h+='<div class="mkt-hero-ch" data-live-mkt="change" data-live-mkt-sym="'+sym+'" style="color:'+(data.ch.h24>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.ch.h24>=0?'+':'')+data.ch.h24.toFixed(1)+'% (24h)</div>';
   h+='<div class="mkt-hero-meta">'+(isAr?'الاتجاه: ':'Direction: ')+data.dIc+' '+data.dir+' · '+(isAr?'التقييم: ':'Score: ')+data.sc+'/10</div>';
   /* Baked-in "Updated: HH:MM" was removed — the freshness badge
      rendered by renderMktFresh() above the hero already shows the

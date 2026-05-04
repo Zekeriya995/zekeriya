@@ -105,6 +105,10 @@ export default [
         LiveTicker: 'readonly',
         /* Declared in src/kline-stream.js */
         KlineStream: 'readonly',
+        /* Declared in src/depth-stream.js */
+        DepthStream: 'readonly',
+        /* Declared in app.js — used by src/live-ticker.js pulseMarket */
+        rP: 'readonly',
         /* Declared in app.js — read by src/live-ticker.js to drive
            the per-second repaint of dashboard / favourites / modal. */
         TOP4: 'readonly',

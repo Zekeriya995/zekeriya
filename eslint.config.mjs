@@ -99,6 +99,8 @@ export default [
         /* Declared in src/source-health-ui.js */
         renderSourceHealth: 'readonly',
         runSourceHealthCheck: 'readonly',
+        /* Declared in src/live-trading.js */
+        LiveTrading: 'readonly',
         /* Declared in src/storage.js */
         safeGetJSON: 'readonly',
         safeGet: 'readonly',

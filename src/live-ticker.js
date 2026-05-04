@@ -202,6 +202,22 @@
     } else {
       return;
     }
+    /* Mirror the candle's close into the modal header so the price
+       above the chart matches the price label drawn next to the live
+       candle. T[sym].p comes from the !ticker@arr aggregate stream
+       which lags the per-symbol kline stream by a tick or two —
+       that mismatch was visible to users as e.g. $80,418 in the
+       header vs $80,414 on the candle. */
+    var pEl = document.getElementById('cmP');
+    if (pEl && typeof fP === 'function') {
+      var prev = prevPrice['mod-kline:' + (typeof curCoin !== 'undefined' ? curCoin : '')];
+      var newTxt = fP(candle.c);
+      if (pEl.textContent !== newTxt) {
+        pEl.textContent = newTxt;
+        if (prev != null && prev !== candle.c) flick(pEl, candle.c > prev ? 1 : -1);
+      }
+      prevPrice['mod-kline:' + (typeof curCoin !== 'undefined' ? curCoin : '')] = candle.c;
+    }
     if (typeof drawChartFrame === 'function') {
       try {
         drawChartFrame();
@@ -239,11 +255,18 @@
     var d = T[curCoin];
     if (!d || !(d.p > 0)) return;
 
-    /* Header: price + 24h percentage. The chart itself is driven by
-       the kline subscription, so we only touch DOM strings here. */
+    /* Header price: only paint from T[sym].p as a cold-start fallback.
+       Once the kline subscription is pushing, _modalKlineHandler owns
+       the cmP element so the header value matches the candle exactly. */
+    var klineDriving = !!(
+      modalSub &&
+      typeof KlineStream !== 'undefined' &&
+      KlineStream.metrics &&
+      KlineStream.metrics.latencyMs != null
+    );
     var pEl = document.getElementById('cmP');
     var cEl = document.getElementById('cmC');
-    if (pEl && typeof fP === 'function') {
+    if (!klineDriving && pEl && typeof fP === 'function') {
       var prev = prevPrice['mod:' + curCoin];
       pEl.textContent = fP(d.p);
       if (prev != null && prev !== d.p) flick(pEl, d.p > prev ? 1 : -1);

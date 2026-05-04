@@ -172,19 +172,75 @@
     }
   }
 
-  /* Update the open coin modal: header price + percentage, and the
-     last candle on the chart. We don't re-fetch /klines — instead we
-     overwrite the trailing bar's close with T[sym].p and stretch its
-     high/low if needed. The user sees the current bar inhale and
-     exhale in real time, exactly like the live bar on Binance. */
+  /* ------------- modal coin chart (kline-stream backed) -------------
+     The modal originally fetches /klines once via REST. Without a live
+     stream the trailing bar would freeze and new bars would never
+     appear. Here we subscribe to the appropriate Binance kline_<tf>
+     WebSocket whenever the modal is open and (curCoin, curTF) is
+     stable, then fan-out each frame into chartData and ask
+     drawChartFrame() to repaint. When the modal closes (or the user
+     switches symbol/timeframe) we tear the subscription down so we
+     never leak sockets. */
+  var modalSub = null;
+  var modalSubKey = '';
+
+  function _modalKlineHandler(candle) {
+    if (typeof chartData === 'undefined' || !chartData || !chartData.length) return;
+    var n = chartData.length;
+    var last = chartData[n - 1];
+    if (last.t === candle.t) {
+      /* Update in place — Binance pushes the in-progress candle
+         many times per second and only sets `x:true` on close. */
+      last.o = candle.o;
+      last.h = candle.h;
+      last.l = candle.l;
+      last.c = candle.c;
+      last.v = candle.v;
+    } else if (candle.t > last.t) {
+      chartData.push(candle);
+      if (chartData.length > 500) chartData.shift();
+    } else {
+      return;
+    }
+    if (typeof drawChartFrame === 'function') {
+      try {
+        drawChartFrame();
+      } catch (e) {
+        /* ignore — drawChartFrame guards itself but we don't trust it */
+      }
+    }
+  }
+
+  function syncModalKlineSub() {
+    var open = isModalOpen('coinMo');
+    var sym = typeof curCoin !== 'undefined' ? curCoin : '';
+    var tf = typeof curTF !== 'undefined' ? curTF : '';
+    var want = open && sym && tf ? sym + 'USDT|' + tf : '';
+    if (want === modalSubKey) return;
+    if (modalSub) {
+      try {
+        modalSub.close();
+      } catch (e) {
+        /* ignore */
+      }
+      modalSub = null;
+    }
+    modalSubKey = want;
+    if (want && typeof KlineStream !== 'undefined' && KlineStream.subscribe) {
+      modalSub = KlineStream.subscribe(sym + 'USDT', tf, _modalKlineHandler);
+    }
+  }
+
   function pulseModalChart() {
+    syncModalKlineSub();
     if (!isModalOpen('coinMo')) return;
     if (typeof curCoin === 'undefined' || !curCoin) return;
     if (typeof T === 'undefined' || !T) return;
     var d = T[curCoin];
     if (!d || !(d.p > 0)) return;
 
-    /* Header: price + 24h percentage */
+    /* Header: price + 24h percentage. The chart itself is driven by
+       the kline subscription, so we only touch DOM strings here. */
     var pEl = document.getElementById('cmP');
     var cEl = document.getElementById('cmC');
     if (pEl && typeof fP === 'function') {
@@ -199,21 +255,84 @@
       cEl.style.color = ch >= 0 ? 'var(--up)' : 'var(--dn)';
     }
 
-    /* Chart: stretch the trailing bar to track the live price */
-    var cd = typeof chartData !== 'undefined' ? chartData : null;
-    if (cd && cd.length) {
-      var last = cd[cd.length - 1];
-      var moved = last.c !== d.p;
-      last.c = d.p;
-      if (d.p > last.h) last.h = d.p;
-      if (d.p < last.l) last.l = d.p;
-      if (moved && typeof drawChartFrame === 'function') {
-        try {
-          drawChartFrame();
-        } catch (e) {
-          /* ignore */
+    /* If the kline socket hasn't pushed yet (cold start, or 1d/1w bars
+       that update infrequently), keep the legacy "stretch the trailing
+       bar" fallback so the chart still feels alive immediately. */
+    if (!modalSub || !KlineStream.metrics || !KlineStream.metrics.latencyMs) {
+      var cd = typeof chartData !== 'undefined' ? chartData : null;
+      if (cd && cd.length) {
+        var last = cd[cd.length - 1];
+        var moved = last.c !== d.p;
+        last.c = d.p;
+        if (d.p > last.h) last.h = d.p;
+        if (d.p < last.l) last.l = d.p;
+        if (moved && typeof drawChartFrame === 'function') {
+          try {
+            drawChartFrame();
+          } catch (e) {
+            /* ignore */
+          }
         }
       }
+    }
+  }
+
+  /* ------------- live sparkline accumulator -------------
+     The dashboard sparklines read from sparkHist[s], which is appended
+     in loadTk() — and that runs every two minutes. So sparklines
+     barely move. Here we sample T[s].p once a tick and keep the last
+     ~24 readings; combined with renderTopCoins() running on the same
+     tick the trailing edge of every sparkline now actually breathes. */
+  var lastSparkSample = 0;
+  function pulseSparkAccumulator() {
+    if (typeof T === 'undefined' || !T) return;
+    if (typeof sparkHist === 'undefined') return;
+    var now = Date.now();
+    if (now - lastSparkSample < 5000) return; /* one fresh point every 5s */
+    lastSparkSample = now;
+    Object.keys(T).forEach(function (s) {
+      var d = T[s];
+      if (!d || !(d.p > 0)) return;
+      if (!sparkHist[s]) sparkHist[s] = [];
+      sparkHist[s].push(d.p);
+      /* Keep the buffer bounded so a long-lived tab doesn't grow it
+         indefinitely. 36 samples × 5s ≈ 3 minutes of trailing data. */
+      if (sparkHist[s].length > 36) sparkHist[s] = sparkHist[s].slice(-36);
+    });
+  }
+
+  /* ------------- live connection status -------------
+     We piggy-back on the existing #connStatus / #validatorDot pair in
+     the header. Healthy means the kline stream pushed within the last
+     ~6s; stale means we haven't seen a frame for 10s+; offline means
+     we have no socket open at all. */
+  function pulseConnectionStatus() {
+    var dot = document.getElementById('validatorDot');
+    var label = document.getElementById('connStatus');
+    if (!dot && !label) return;
+    var lat =
+      typeof KlineStream !== 'undefined' && KlineStream.metrics
+        ? KlineStream.metrics.latencyMs
+        : null;
+    var streamsCount =
+      typeof KlineStream !== 'undefined' && KlineStream.snapshot
+        ? KlineStream.snapshot().streams
+        : 0;
+    var wsTickerUp = typeof connMetrics !== 'undefined' && connMetrics ? !!connMetrics.wsUp : false;
+    var healthy = wsTickerUp || streamsCount > 0;
+    var color = healthy ? 'var(--up)' : 'var(--warn)';
+    if (dot) {
+      dot.style.background = color;
+      dot.style.boxShadow = '0 0 6px ' + color;
+    }
+    if (label) {
+      var text = healthy
+        ? lat != null && lat >= 0 && lat < 5000
+          ? 'LIVE ' + lat + 'ms'
+          : 'LIVE'
+        : 'OFFLINE';
+      if (label.textContent !== text) label.textContent = text;
+      label.style.color = color;
     }
   }
 
@@ -248,10 +367,14 @@
   /* ---------- master tick ---------- */
   function tick() {
     /* The dedicated /pg-live page runs its own RAF render loop in
-       src/live-trading.js — leave it alone to avoid duplicate work. */
+       src/live-trading.js — leave it alone for the page-specific
+       pulses but still keep the sparkline accumulator and connection
+       indicator running across the whole app. */
+    reapPendingFlickers();
+    pulseSparkAccumulator();
+    pulseConnectionStatus();
     var page = activePageId();
     if (page === 'live') return;
-    reapPendingFlickers();
     if (page === 'dash') pulseDashboard();
     if (page === 'favs') pulseFavourites();
     if (page === 'scan') pulseScanner();

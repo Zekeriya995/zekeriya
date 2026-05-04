@@ -103,6 +103,8 @@ export default [
         LiveTrading: 'readonly',
         /* Declared in src/live-ticker.js */
         LiveTicker: 'readonly',
+        /* Declared in src/kline-stream.js */
+        KlineStream: 'readonly',
         /* Declared in app.js — read by src/live-ticker.js to drive
            the per-second repaint of dashboard / favourites / modal. */
         TOP4: 'readonly',
@@ -111,8 +113,10 @@ export default [
         favorites: 'readonly',
         mkSpark: 'readonly',
         curCoin: 'writable',
+        curTF: 'writable',
         chartData: 'writable',
         drawChartFrame: 'readonly',
+        sparkHist: 'writable',
         /* Declared in src/storage.js */
         safeGetJSON: 'readonly',
         safeGet: 'readonly',

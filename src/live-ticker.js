@@ -387,6 +387,267 @@
     }
   }
 
+  /* ------------- dashboard secondary cards (1s) -------------
+     The cards below the TOP-coin row (market health, L/S ratio,
+     accuracy, stable-flow, warnings, breakout/ULTRA counts) used to
+     repaint only every two minutes when loadDash() ran. They all read
+     from already-cached state (T, FR, LS, fgValue, btcDom, etc.) and
+     their renderers are network-free, so we can call them on every
+     tick at zero cost beyond the DOM diffs they perform internally. */
+  function pulseDashSecondary() {
+    if (typeof T === 'undefined' || !T) return;
+
+    /* Market health — recompute and paint score, label, dot, factors. */
+    if (typeof calcHealth === 'function') {
+      try {
+        var h = calcHealth();
+        var hc = h.score >= 70 ? 'up' : h.score >= 45 ? 'warn' : 'dn';
+        var mhSE = document.getElementById('mhScore');
+        if (mhSE) {
+          if (mhSE.textContent !== String(h.score)) {
+            mhSE.textContent = h.score;
+            flick(mhSE, h.score >= 50 ? 1 : -1);
+          }
+          mhSE.style.color = 'var(--' + hc + ')';
+        }
+        var mhLE = document.getElementById('mhLabel');
+        if (mhLE) {
+          var ar = typeof lang !== 'undefined' && lang === 'ar';
+          mhLE.textContent =
+            h.score >= 70
+              ? ar
+                ? 'سوق صحي'
+                : 'Healthy'
+              : h.score >= 45
+                ? ar
+                  ? 'محايد — حذر'
+                  : 'Neutral'
+                : ar
+                  ? 'ضعيف'
+                  : 'Weak';
+        }
+        var mhPE = document.getElementById('mhPt');
+        if (mhPE) mhPE.style.left = h.score + '%';
+        var pMHE = document.getElementById('pMH');
+        if (pMHE) pMHE.textContent = h.score;
+        var mhFE = document.getElementById('mhFactors');
+        if (mhFE && h.factors && h.factors.map) {
+          mhFE.innerHTML = h.factors
+            .map(function (f) {
+              return (
+                '<div class="mh-f"><div class="mh-f-v" style="color:var(--' +
+                f.c +
+                ')">' +
+                f.v +
+                '</div><div class="mh-f-l">' +
+                f.l +
+                '</div></div>'
+              );
+            })
+            .join('');
+        }
+      } catch (e) {
+        /* swallow */
+      }
+    }
+
+    /* Long/Short ratio panel + Accuracy panel + Top-3 panel. */
+    if (typeof renderDashLS === 'function') {
+      try {
+        renderDashLS();
+      } catch (e) {
+        /* swallow */
+      }
+    }
+    if (typeof renderAcc === 'function') {
+      try {
+        renderAcc('accCard');
+      } catch (e) {
+        /* swallow */
+      }
+    }
+    if (typeof renderTop3 === 'function') {
+      try {
+        renderTop3();
+      } catch (e) {
+        /* swallow */
+      }
+    }
+
+    /* Stablecoin flow — recompute breakout count + ULTRA count. */
+    var bk = 0;
+    var keys = Object.keys(T);
+    for (var i = 0; i < keys.length; i++) {
+      if (T[keys[i]] && T[keys[i]].c >= 8) bk++;
+    }
+    var bkE = document.getElementById('brkC');
+    if (bkE && bkE.textContent !== String(bk)) {
+      bkE.textContent = bk;
+      flick(bkE, 1);
+    }
+    var pBE = document.getElementById('pBrk');
+    if (pBE) pBE.textContent = bk;
+
+    /* Warnings list — pure recompute from FR + LS caches. */
+    if (typeof getWarnings === 'function') {
+      try {
+        var ws = getWarnings();
+        var wbE = document.getElementById('warnBox');
+        if (wbE) {
+          var html = ws
+            .map(function (w) {
+              return (
+                '<div class="warn-box"><div class="w-ic">' +
+                w.ic +
+                '</div><div class="w-txt">' +
+                w.txt +
+                '</div></div>'
+              );
+            })
+            .join('');
+          if (wbE.innerHTML !== html) wbE.innerHTML = html;
+        }
+      } catch (e) {
+        /* swallow */
+      }
+    }
+
+    /* QA cards strip + sparkHist refresh handled elsewhere. */
+    if (typeof updateQACards === 'function') {
+      try {
+        updateQACards();
+      } catch (e) {
+        /* swallow */
+      }
+    }
+  }
+
+  /* ------------- portfolio P&L (1s) -------------
+     renderPort() reads each holding's amount × current T[sym].p, so a
+     re-render on each tick gives the user a live unrealised-P&L
+     ticker. The function is also defensive against missing T entries. */
+  function pulsePortfolio() {
+    if (typeof renderPort !== 'function') return;
+    if (typeof portfolio === 'undefined' || !portfolio || !portfolio.length) return;
+    /* Only repaint if any tracked symbol's price actually moved. */
+    var changed = false;
+    for (var i = 0; i < portfolio.length; i++) {
+      var s = portfolio[i] && portfolio[i].sym;
+      var d = s && typeof T !== 'undefined' ? T[s] : null;
+      if (!d || !(d.p > 0)) continue;
+      if (prevPrice['port:' + s] !== d.p) changed = true;
+      prevPrice['port:' + s] = d.p;
+    }
+    if (!changed) return;
+    var pVal = document.getElementById('pVal');
+    var pCh = document.getElementById('pCh');
+    var prevPVal = pVal ? pVal.textContent : '';
+    try {
+      renderPort();
+    } catch (e) {
+      /* swallow */
+    }
+    if (pVal && pVal.textContent !== prevPVal) flick(pVal, 1);
+    if (pCh) flick(pCh, 1);
+  }
+
+  /* ------------- whale page (1s) -------------
+     Whale rows show price + 24h change + rolling buy/sell totals; all
+     derive from T[sym] + cached scan results. Rebuild only when the
+     scan cache exists (otherwise the page is showing the loader). */
+  function pulseWhale() {
+    if (typeof renderWhaleResults !== 'function') return;
+    if (typeof cache === 'undefined' || !cache || !cache.scan) return;
+    try {
+      renderWhaleResults(cache.scan);
+    } catch (e) {
+      /* swallow */
+    }
+  }
+
+  /* ------------- heatmap / alerts / monitor (1s) -------------
+     These pages read pure-JS state (T, alertsList, monitorState) and
+     their render functions are inexpensive. */
+  function pulseHeatmap() {
+    if (typeof renderHeatmap === 'function') {
+      try {
+        renderHeatmap();
+      } catch (e) {
+        /* swallow */
+      }
+    }
+  }
+  function pulseAlerts() {
+    if (typeof renderAlerts === 'function') {
+      try {
+        renderAlerts();
+      } catch (e) {
+        /* swallow */
+      }
+    }
+  }
+  function pulseMonitor() {
+    /* Monitor page does heavier work (rendering tabs and data
+       breakdowns), so we throttle it to once every 3 ticks. */
+    if (!pulseMonitor._n) pulseMonitor._n = 0;
+    pulseMonitor._n++;
+    if (pulseMonitor._n % 3 !== 0) return;
+    if (typeof renderMonPanel === 'function') {
+      try {
+        renderMonPanel();
+      } catch (e) {
+        /* swallow */
+      }
+    }
+  }
+
+  /* ------------- indicators page (every 2s) -------------
+     The 20+ indicator cards rebuild from cached extras (FR, OI, LS,
+     CVD, …). Re-fetching the network would hammer the proxy, so we
+     re-run only the local builders. The full indicator HTML rebuild
+     is a few-millisecond DOM update on every other tick. */
+  function pulseIndicators() {
+    if (!pulseIndicators._n) pulseIndicators._n = 0;
+    pulseIndicators._n++;
+    if (pulseIndicators._n % 2 !== 0) return;
+    var el = document.getElementById('indCards');
+    if (!el || !el.children || !el.children.length) return; /* never rebuilt yet */
+    var builders = [
+      'buildStablecoinCard',
+      'buildTVLCard',
+      'buildUnlocksCard',
+      'buildFRCard',
+      'buildFRHistCard',
+      'buildOICard',
+      'buildOIHistCard',
+      'buildTopTradersCard',
+      'buildLiqCard',
+      'buildWhaleCard',
+      'buildRealCVDCard',
+      'buildCVDCard',
+      'buildOBCard',
+      'buildTakerCard',
+      'buildSpreadCard',
+      'buildMultiOICard',
+      'buildMultiFRCard',
+      'buildAggLiqCard',
+      'buildDEXCard',
+      'buildCBPremiumCard',
+      'buildOnChainCard',
+      'buildBitfinexCard',
+    ];
+    var html = '';
+    for (var i = 0; i < builders.length; i++) {
+      try {
+        var fn = window[builders[i]];
+        if (typeof fn === 'function') html += fn();
+      } catch (e) {
+        /* skip a single broken builder */
+      }
+    }
+    if (html && el.innerHTML.length !== html.length) el.innerHTML = html;
+  }
+
   /* ---------- master tick ---------- */
   function tick() {
     /* The dedicated /pg-live page runs its own RAF render loop in
@@ -398,9 +659,18 @@
     pulseConnectionStatus();
     var page = activePageId();
     if (page === 'live') return;
-    if (page === 'dash') pulseDashboard();
+    if (page === 'dash') {
+      pulseDashboard();
+      pulseDashSecondary();
+    }
     if (page === 'favs') pulseFavourites();
     if (page === 'scan') pulseScanner();
+    if (page === 'whale') pulseWhale();
+    if (page === 'heatmap') pulseHeatmap();
+    if (page === 'alerts') pulseAlerts();
+    if (page === 'monitor') pulseMonitor();
+    if (page === 'ind') pulseIndicators();
+    if (page === 'me') pulsePortfolio();
     /* The coin modal can be opened from any page, so check it
        independently of activePageId(). */
     pulseModalChart();

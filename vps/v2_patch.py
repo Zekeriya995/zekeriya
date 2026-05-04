@@ -2,17 +2,17 @@
 NEXUS PRO v2 Quality Engine - Layers 1-5
 Drop-in module: place at /root/v2_patch.py and import from nexus_notifier.py.
 
-Integration in nexus_notifier.py (3 lines per check function):
-    from v2_patch import v2_pipeline, v2_log
+Two integration modes:
 
-    # Inside _check_ultra(self, symbol, metrics):
-    ok, reason, tier, score, bd = v2_pipeline(symbol, metrics)
-    v2_log(symbol, "ULTRA", ok, reason, tier, score, bd)
+(A) Layered onto v1 (recommended) — use v2_gate() with v1's existing score:
+    from v2_patch import v2_gate, v2_log
+    # After v1's "if score < ULTRA_MIN_SCORE: return":
+    ok, tier, reason = v2_gate(sym, "ULTRA", score, vol_usd, change_pct)
+    v2_log(sym, "ULTRA", ok, reason, tier, score, {})
     if not ok:
-        return None
-    # ... existing message-building code, but use `tier` and `score` from above ...
+        return
 
-    # Same pattern inside _check_gem(...).
+(B) Standalone — use v2_pipeline() with a pre-built metrics dict.
 """
 import os
 import time
@@ -144,6 +144,25 @@ def v2_pipeline(symbol, metrics):
     return True, "pass", tier, score, bd
 
 
+def v2_gate(symbol, kind, score, vol_24h_usd, change_24h, btc_change_1h=0.0):
+    """
+    Layered gate using v1's existing score (0-100).
+    Skips Layer 2 (score breakdown); applies Layers 1, 3, 4, 5.
+    Returns (passed, tier, reason).
+    """
+    ok, reason = hard_filters(vol_24h_usd, change_24h, btc_change_1h)
+    if not ok:
+        return False, None, f"hard_{reason}"
+    tier = get_tier(score)
+    if tier == "Bronze":
+        return False, tier, "tier_bronze"
+    if not quiet_ok(tier):
+        return False, tier, "quiet_hours"
+    if not rate_limit_ok(tier):
+        return False, tier, "rate_limited"
+    return True, tier, "pass"
+
+
 def v2_log(symbol, kind, passed, reason, tier, score, bd):
     dry = os.getenv("NEXUS_DRY_RUN", "0") == "1"
     tag = "[V2-DRY]" if dry else "[V2]"
@@ -188,4 +207,16 @@ if __name__ == "__main__":
         ok, reason, tier, score, bd = v2_pipeline(name, m)
         v2_log(name, "TEST", ok, reason, tier, score, bd)
     print(f"[V2] quiet_hours_now={in_quiet_hours()}", flush=True)
+
+    # v2_gate self-test (v1-layered mode)
+    print("[V2] gate-mode self-test:", flush=True)
+    for label, score, vol, chg in [
+        ("v1_silver_pass", 75, 50_000_000, 5.0),
+        ("v1_gold_pass",   85, 80_000_000, 8.0),
+        ("v1_score_low",   60, 50_000_000, 5.0),
+        ("v1_vol_low",     85,  5_000_000, 5.0),
+        ("v1_pumped",      85, 50_000_000, 35.0),
+    ]:
+        gok, gtier, greason = v2_gate(label, "GATE", score, vol, chg)
+        v2_log(label, "GATE", gok, greason, gtier, score, {})
     print("[V2] self-test done", flush=True)

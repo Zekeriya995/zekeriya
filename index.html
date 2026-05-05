@@ -363,6 +363,19 @@
 <div id="srcHealthSummary" style="font-size:10px;color:var(--t3);margin-top:6px;text-align:center"></div>
 </div>
 
+<!-- LIVE SYSTEM STATUS — populated by src/live-ticker.js while the sidebar is open -->
+<div class="side-section">
+<div class="side-label">⚡ <span data-t="live_system">النظام اللحظي</span></div>
+<div class="lss-grid" id="lssGrid">
+<div class="lss-row"><span class="lss-l">📡 Ticker WS</span><span class="lss-v" id="lssTicker">--</span></div>
+<div class="lss-row"><span class="lss-l">🕯️ Kline streams</span><span class="lss-v" id="lssKline">--</span></div>
+<div class="lss-row"><span class="lss-l">📗 Depth streams</span><span class="lss-v" id="lssDepth">--</span></div>
+<div class="lss-row"><span class="lss-l">⏱️ Latency</span><span class="lss-v" id="lssLat">--</span></div>
+<div class="lss-row"><span class="lss-l">🤖 24/7 VPS</span><span class="lss-v" id="lssVps">--</span></div>
+<div class="lss-row"><span class="lss-l">📨 Sent / Dropped</span><span class="lss-v" id="lssCnt">--</span></div>
+</div>
+</div>
+
 <!-- ABOUT -->
 
 <div class="side-section">

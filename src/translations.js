@@ -15,6 +15,7 @@ const TR = {
   nav_market: { ar: 'حركة السوق', en: 'Market' },
   nav_live: { ar: 'مباشر', en: 'Live' },
   live_market: { ar: 'نبض الأسواق', en: 'Multi-symbol pulse' },
+  live_system: { ar: 'النظام اللحظي', en: 'Live System' },
 
   /* Signals & categories */
   breakout: { ar: 'بداية صعود', en: 'Rising' },

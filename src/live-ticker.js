@@ -785,6 +785,63 @@
     }
   }
 
+  /* ------------- VPS notifier 24/7 status pill -------------
+     The Contabo VPS posts a heartbeat to /api/vps-heartbeat every
+     60s; we poll /api/vps-status every 15s and reflect the result on
+     the #vpsPill in the header. Keeps users honest about whether
+     their always-on Telegram path is actually running, separately
+     from the in-browser WebSocket health. */
+  var lastVpsCheck = 0;
+  function pulseVpsStatus() {
+    var pill = document.getElementById('vpsPill');
+    if (!pill) return;
+    var now = Date.now();
+    if (now - lastVpsCheck < 15000) return;
+    lastVpsCheck = now;
+    var proxy = typeof PROXY !== 'undefined' && PROXY ? PROXY : '';
+    if (!proxy) return;
+    fetch(proxy + '/api/vps-status', { method: 'GET', cache: 'no-store' })
+      .then(function (r) {
+        return r.ok ? r.json() : null;
+      })
+      .then(function (j) {
+        if (!j) {
+          pill.setAttribute('data-state', 'offline');
+          var s1 = document.getElementById('vpsPillState');
+          if (s1) s1.textContent = 'OFFLINE';
+          return;
+        }
+        var stateEl = document.getElementById('vpsPillState');
+        if (j.alive) {
+          pill.setAttribute('data-state', 'online');
+          if (stateEl) stateEl.textContent = 'ONLINE';
+          if (j.last && (j.last.sent != null || j.last.dropped != null)) {
+            pill.title =
+              '24/7 VPS notifier — sent ' +
+              (j.last.sent || 0) +
+              ' · dropped ' +
+              (j.last.dropped || 0) +
+              ' · last ' +
+              Math.round(j.ageMs / 1000) +
+              's ago';
+          }
+        } else if (j.stale) {
+          pill.setAttribute('data-state', 'stale');
+          if (stateEl) stateEl.textContent = 'STALE';
+          pill.title = '24/7 VPS notifier — last heartbeat ' + Math.round(j.ageMs / 1000) + 's ago';
+        } else {
+          pill.setAttribute('data-state', 'offline');
+          if (stateEl) stateEl.textContent = 'OFFLINE';
+          pill.title = '24/7 VPS notifier — no heartbeat received';
+        }
+      })
+      .catch(function () {
+        pill.setAttribute('data-state', 'offline');
+        var s2 = document.getElementById('vpsPillState');
+        if (s2) s2.textContent = 'OFFLINE';
+      });
+  }
+
   /* ---------- master tick ---------- */
   function tick() {
     /* The dedicated /pg-live page runs its own RAF render loop in
@@ -794,6 +851,7 @@
     reapPendingFlickers();
     pulseSparkAccumulator();
     pulseConnectionStatus();
+    pulseVpsStatus();
     var page = activePageId();
     if (page === 'live') return;
     if (page === 'dash') {

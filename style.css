@@ -654,21 +654,6 @@ canvas{width:100%!important;border-radius:4px}
 /* Live ticker — flicker animation applied by src/live-ticker.js when a
    cached price moves between ticks. Strips off after ~420ms so the
    next change replays the keyframes. */
-.hdr-247{display:flex;align-items:center;gap:5px;padding:4px 8px;border-radius:18px;font-size:8px;font-family:var(--fm);font-weight:700;letter-spacing:1px;border:1px solid var(--bdr);background:var(--bg2);color:var(--t3)}
-.hdr-247[data-state="online"]{color:var(--up);background:var(--ud);border-color:rgba(0,255,136,.18)}
-.hdr-247[data-state="online"]::before{content:'';width:5px;height:5px;border-radius:50%;background:var(--up);box-shadow:0 0 8px var(--up);animation:pls 2s infinite}
-.hdr-247[data-state="stale"]{color:var(--warn);background:var(--wd);border-color:rgba(255,184,0,.18)}
-.hdr-247[data-state="offline"]{color:var(--dn);background:var(--dd);border-color:rgba(255,56,96,.18)}
-/* Live System Status panel — diagnostic readout in the sidebar fed by
-   pulseLiveSystem() once a second while the menu is open. */
-.lss-grid{display:flex;flex-direction:column;gap:4px;margin-top:6px}
-.lss-row{display:flex;align-items:center;justify-content:space-between;padding:5px 8px;background:var(--bg2);border:1px solid var(--bdr);border-radius:8px}
-.lss-l{font-size:9px;font-family:var(--fm);color:var(--t2);font-weight:600;letter-spacing:.5px}
-.lss-v{font-size:10px;font-family:var(--fm);color:var(--t0);font-weight:700;direction:ltr}
-.lss-v.ok{color:var(--up)}
-.lss-v.warn{color:var(--warn)}
-.lss-v.bad{color:var(--dn)}
-
 .lt-flick-up{animation:lt-flick-up .42s ease-out;color:var(--up)!important}
 .lt-flick-dn{animation:lt-flick-dn .42s ease-out;color:var(--dn)!important}
 @keyframes lt-flick-up{

@@ -95,51 +95,6 @@ journalctl -u nexus-notifier -f | grep '\[V2\]'
 
 Confirm one real Telegram notification arrives within an hour, then leave it running.
 
-## Step 5 — Wire the 24/7 heartbeat
-
-`heartbeat.py` posts a 1-line JSON ping to the proxy every 60 seconds
-so the PWA's header pill (`24/7 ONLINE / STALE / OFFLINE`) can confirm
-the notifier is actually running without the user having to SSH in.
-
-**A.** Drop the file on the VPS:
-
-```bash
-nano /root/heartbeat.py
-```
-
-Paste the **entire contents** of `vps/heartbeat.py` from this repo,
-save with `Ctrl+O`, `Enter`, `Ctrl+X`.
-
-**B.** Add the import + start call near the top of `nexus_notifier.py`:
-
-```python
-from heartbeat import start_heartbeat, bump_sent, bump_dropped
-start_heartbeat()
-```
-
-**C.** (Optional but recommended) bump the running counters from
-inside the `v2_pipeline` / Telegram-send paths so the dashboard
-tooltip can show `sent / dropped today`:
-
-- Right after a real Telegram POST succeeds: `bump_sent()`.
-- Inside `v2_should_send` when it returns `False`: `bump_dropped()`.
-
-**D.** Restart and verify:
-
-```bash
-sudo systemctl restart nexus-notifier
-journalctl -u nexus-notifier -f --since "1 min ago"
-```
-
-Open the PWA — within a minute the **24/7 ONLINE** pill in the header
-should turn green. If it stays grey/red, run a one-shot test:
-
-```bash
-NEXUS_NOTIFY_SECRET="$NEXUS_NOTIFY_SECRET" python3 /root/heartbeat.py
-```
-
-The pill flips to ONLINE within ~15s on the next platform poll.
-
 ## Rollback
 
 If anything breaks, revert the 3-line additions in `_check_ultra` / `_check_gem`, remove the `from v2_patch import ...` line, and restart:

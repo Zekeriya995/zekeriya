@@ -15,10 +15,6 @@ const TR = {
   nav_market: { ar: 'حركة السوق', en: 'Market' },
   nav_live: { ar: 'مباشر', en: 'Live' },
   live_market: { ar: 'نبض الأسواق', en: 'Multi-symbol pulse' },
-  live_system: { ar: 'النظام اللحظي', en: 'Live System' },
-  vps_sync: { ar: 'مزامنة VPS', en: 'VPS Sync' },
-  vps_sync_done: { ar: 'مزامنة VPS', en: 'VPS sync' },
-  save: { ar: 'حفظ ومزامنة الآن', en: 'Save & sync now' },
 
   /* Signals & categories */
   breakout: { ar: 'بداية صعود', en: 'Rising' },

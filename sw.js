@@ -2,7 +2,7 @@
    the previous generation atomically. The old string ('nexus-v10-v14-modules')
    was static, which meant a hot-fix to app.js was never fetched from the
    network until users hard-refreshed. */
-var CACHE_VERSION = 'v10.4.1-vps-defensive-2026-05-05';
+var CACHE_VERSION = 'v10.5.0-rollback-stable-2026-05-05';
 var CACHE_NAME = 'nexus-' + CACHE_VERSION;
 /* Critical assets — install fails if any fail */
 var CRITICAL_ASSETS = [
@@ -25,20 +25,10 @@ var CRITICAL_ASSETS = [
   './src/visibility-pause.js',
   './src/source-health.js',
   './src/source-health-ui.js',
-  /* V10.3 live-update modules */
-  './src/price-stream.js',
-  './src/kline-stream.js',
-  './src/depth-stream.js',
-  './src/live-trading.js',
-  './src/live-trading.css',
-  './src/live-ticker.js',
 ];
-/* Optional assets — best-effort cache, failure does not block install.
-   signal-sync.js sits here (not in CRITICAL_ASSETS) so a 404 from a
-   stale CDN path can't poison the entire install via cache.addAll. */
+/* Optional assets — best-effort cache, failure does not block install */
 var OPTIONAL_ASSETS = [
   'https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@400;500;600;700;800&display=swap',
-  './src/signal-sync.js',
 ];
 
 /* Install — cache critical first, then optional with failure tolerance */

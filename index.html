@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="NEXUS PRO">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://telegram.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; media-src 'self' data:; connect-src 'self' https://jolly-bush-9254.nexus-proxy.workers.dev https://api.binance.com https://fapi.binance.com wss://stream.binance.com:9443 https://api.bybit.com https://api.coingecko.com https://api.coinbase.com https://api.alternative.me https://api.llama.fi https://stablecoins.llama.fi https://api.tokenomist.ai https://mempool.space https://api.etherscan.io https://*.trycloudflare.com https://*.cfargotunnel.com; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://telegram.org; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https:; media-src 'self' data:; connect-src 'self' https://jolly-bush-9254.nexus-proxy.workers.dev https://api.binance.com https://fapi.binance.com wss://stream.binance.com:9443 https://api.bybit.com https://api.coingecko.com https://api.coinbase.com https://api.alternative.me https://api.llama.fi https://stablecoins.llama.fi https://api.tokenomist.ai https://mempool.space https://api.etherscan.io; manifest-src 'self'; worker-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'">
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%23060b14'/%3E%3Ctext x='96' y='125' font-size='110' text-anchor='middle' fill='%2300ff88' font-family='Arial,sans-serif' font-weight='bold'%3EN%3C/text%3E%3C/svg%3E">
 <script defer src="https://telegram.org/js/telegram-web-app.js"></script>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;500;600;700;800&family=Geist+Mono:wght@400;500;600;700&family=Noto+Kufi+Arabic:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -20,7 +20,7 @@
 
 <header class="hdr"><div class="hdr-in">
 <div class="logo" onclick="openAdminPanel()"><div class="logo-g"><div class="logo-g-i"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" fill="url(#lg)" stroke="rgba(255,255,255,.3)" stroke-width=".5"/><defs><linearGradient id="lg" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#00ff88"/><stop offset="100%" stop-color="#b07cff"/></linearGradient></defs></svg></div></div><div><div class="logo-t">NEXUS <span style="color:var(--neon)">PRO</span></div></div></div>
-<div class="hdr-r"><div class="hdr-live">LIVE <div id="validatorDot" style="width:6px;height:6px;border-radius:50%;background:var(--up);box-shadow:0 0 6px var(--up)"></div> <span id="connStatus" style="font-size:7px;font-family:var(--fm);font-weight:700;color:var(--up)">...</span></div><div id="vpsPill" class="hdr-247" title="VPS notifier (24/7)" data-state="unknown">24/7 <span id="vpsPillState">...</span></div><div class="ic-b notif" data-c="0" id="notifB" onclick="sp('me');setTimeout(function(){pTab(3,document.querySelector('#pg-me .big-tab:last-child'))},100)">🔔</div><div class="ic-b" id="menuBtn" onclick="toggleMenu()">☰</div></div>
+<div class="hdr-r"><div class="hdr-live">LIVE <div id="validatorDot" style="width:6px;height:6px;border-radius:50%;background:var(--up);box-shadow:0 0 6px var(--up)"></div> <span id="connStatus" style="font-size:7px;font-family:var(--fm);font-weight:700;color:var(--up)">...</span></div><div class="ic-b notif" data-c="0" id="notifB" onclick="sp('me');setTimeout(function(){pTab(3,document.querySelector('#pg-me .big-tab:last-child'))},100)">🔔</div><div class="ic-b" id="menuBtn" onclick="toggleMenu()">☰</div></div>
 </div></header>
 
 <div class="srch" style="position:relative"><div class="srch-b"><span style="color:var(--t3)" aria-hidden="true">🔍</span><input id="sInp" oninput="onSrch(this.value)" aria-label="بحث عن عملة" type="search" autocomplete="off"></div><div class="srch-r" id="sRes" role="listbox"></div></div>
@@ -363,28 +363,6 @@
 <div id="srcHealthSummary" style="font-size:10px;color:var(--t3);margin-top:6px;text-align:center"></div>
 </div>
 
-<!-- VPS SIGNAL SYNC — paste the tunnel URL once and forget it. Pulls signal backlog with REAL timestamps. -->
-<div class="side-section">
-<div class="side-label">🔗 <span data-t="vps_sync">مزامنة VPS</span></div>
-<input class="side-inp" id="vpsSyncUrl" placeholder="https://xxx.trycloudflare.com" style="font-family:var(--fm);font-size:10px;direction:ltr">
-<input class="side-inp" id="vpsSyncSecret" placeholder="X-Signal-Secret (optional)" style="font-family:var(--fm);font-size:10px;direction:ltr">
-<button class="rfr" id="vpsSyncSave" type="button" style="margin-top:6px"><span data-t="save">حفظ ومزامنة الآن</span></button>
-<div id="vpsSyncStatus" style="font-size:9px;color:var(--t3);margin-top:4px;text-align:center;font-family:var(--fm)"></div>
-</div>
-
-<!-- LIVE SYSTEM STATUS — populated by src/live-ticker.js while the sidebar is open -->
-<div class="side-section">
-<div class="side-label">⚡ <span data-t="live_system">النظام اللحظي</span></div>
-<div class="lss-grid" id="lssGrid">
-<div class="lss-row"><span class="lss-l">📡 Ticker WS</span><span class="lss-v" id="lssTicker">--</span></div>
-<div class="lss-row"><span class="lss-l">🕯️ Kline streams</span><span class="lss-v" id="lssKline">--</span></div>
-<div class="lss-row"><span class="lss-l">📗 Depth streams</span><span class="lss-v" id="lssDepth">--</span></div>
-<div class="lss-row"><span class="lss-l">⏱️ Latency</span><span class="lss-v" id="lssLat">--</span></div>
-<div class="lss-row"><span class="lss-l">🤖 24/7 VPS</span><span class="lss-v" id="lssVps">--</span></div>
-<div class="lss-row"><span class="lss-l">📨 Sent / Dropped</span><span class="lss-v" id="lssCnt">--</span></div>
-</div>
-</div>
-
 <!-- ABOUT -->
 
 <div class="side-section">
@@ -438,7 +416,6 @@
 <script defer src="src/depth-stream.js"></script>
 <script defer src="src/live-trading.js"></script>
 <script defer src="src/live-ticker.js"></script>
-<script defer src="src/signal-sync.js"></script>
 <script defer src="app.js"></script>
 </body>
 </html>

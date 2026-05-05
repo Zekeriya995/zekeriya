@@ -542,49 +542,6 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-/* ─── VPS notifier heartbeat ─────────────────────────────────────────
-   The 24/7 nexus_notifier.py service on the Contabo VPS posts a tiny
-   heartbeat here every 60s so the PWA can show a live "24/7" pill.
-   Any client can GET /api/vps-status to read the latest heartbeat;
-   only callers with the NEXUS_NOTIFY_SECRET (when configured) may
-   POST. We keep this in-memory only — losing it on a deploy is fine,
-   the next heartbeat (within a minute) repopulates it. */
-let lastVpsHeartbeat = null;
-
-app.post('/api/vps-heartbeat', (req, res) => {
-  if (CONFIG.NOTIFY_SECRET) {
-    const provided = req.get('X-Notify-Secret') || '';
-    if (provided !== CONFIG.NOTIFY_SECRET) {
-      return res.status(401).json({ ok: false, error: 'unauthorized' });
-    }
-  }
-  const body = req.body || {};
-  lastVpsHeartbeat = {
-    receivedAt: Date.now(),
-    version: typeof body.version === 'string' ? body.version.slice(0, 32) : null,
-    uptime: typeof body.uptime === 'number' ? body.uptime : null,
-    notifierAlive: body.notifierAlive !== false,
-    /* Optional counters from v2_patch — total signals processed,
-       sent, dropped — useful for the dashboard pill tooltip. */
-    sent: typeof body.sent === 'number' ? body.sent : null,
-    dropped: typeof body.dropped === 'number' ? body.dropped : null,
-  };
-  res.json({ ok: true });
-});
-
-app.get('/api/vps-status', (req, res) => {
-  if (!lastVpsHeartbeat) {
-    return res.json({ alive: false, ageMs: null, last: null });
-  }
-  const age = Date.now() - lastVpsHeartbeat.receivedAt;
-  res.json({
-    alive: age < 120000 /* fresh if heartbeat within the last 2 min */,
-    stale: age >= 120000 && age < 600000,
-    ageMs: age,
-    last: lastVpsHeartbeat,
-  });
-});
-
 /* sanitizeTelegramHtml + safeEqual now live in src/server-helpers.js so
    they can be unit-tested without booting Express. */
 

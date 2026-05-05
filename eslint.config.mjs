@@ -107,8 +107,6 @@ export default [
         KlineStream: 'readonly',
         /* Declared in src/depth-stream.js */
         DepthStream: 'readonly',
-        /* Declared in src/signal-sync.js */
-        SignalSync: 'readonly',
         /* Declared in app.js — used by src/live-ticker.js pulseMarket */
         rP: 'readonly',
         /* Declared in app.js — read by src/live-ticker.js to drive

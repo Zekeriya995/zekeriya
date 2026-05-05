@@ -26,7 +26,7 @@ const PROXY = (function () {
       return String(window.NEXUS_PROXY).replace(/\/+$/, '');
     }
   } catch (e) {}
-  return 'https://jolly-bush-9254.nexus-proxy.workers.dev';
+  return 'https://attorneys-lock-breed-warrant.trycloudflare.com';
 })();
 
 /* Watchlist — seeded with the top 100 by market cap; updateTop100() replaces

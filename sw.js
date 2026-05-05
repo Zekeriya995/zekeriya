@@ -2,7 +2,7 @@
    the previous generation atomically. The old string ('nexus-v10-v14-modules')
    was static, which meant a hot-fix to app.js was never fetched from the
    network until users hard-refreshed. */
-var CACHE_VERSION = 'v10.2.9-503-resilience-2026-04-30';
+var CACHE_VERSION = 'v10.3.0-live-update-2026-05-05';
 var CACHE_NAME = 'nexus-' + CACHE_VERSION;
 /* Critical assets — install fails if any fail */
 var CRITICAL_ASSETS = [
@@ -25,6 +25,13 @@ var CRITICAL_ASSETS = [
   './src/visibility-pause.js',
   './src/source-health.js',
   './src/source-health-ui.js',
+  /* V10.3 live-update modules */
+  './src/price-stream.js',
+  './src/kline-stream.js',
+  './src/depth-stream.js',
+  './src/live-trading.js',
+  './src/live-trading.css',
+  './src/live-ticker.js',
 ];
 /* Optional assets — best-effort cache, failure does not block install */
 var OPTIONAL_ASSETS = [

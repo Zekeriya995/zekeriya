@@ -299,20 +299,69 @@
   }
 
   /* Auto-bootstrap once the rest of the app has finished init. We
-     wait two seconds so notifHist + bgInterval are ready in scope. */
+     wait two seconds so notifHist + bgInterval are ready in scope.
+     Every step has its own try/catch — a single throw in this file
+     must NEVER block the rest of app.js from rendering data. */
   function _autoBoot() {
-    _wireSidebar();
-    syncOnce({ toast: true });
-    startPolling();
+    try {
+      _wireSidebar();
+    } catch (e) {
+      /* swallow */
+    }
+    try {
+      var p = syncOnce({ toast: true });
+      if (p && typeof p.catch === 'function') p.catch(function () {});
+    } catch (e) {
+      /* swallow */
+    }
+    try {
+      startPolling();
+    } catch (e) {
+      /* swallow */
+    }
   }
 
   if (typeof window !== 'undefined') {
+    /* Public API — every entry point is wrapped so a caller bug stays
+       a caller bug; nothing leaks back into app.js. */
     window.SignalSync = {
-      configure: configure,
-      syncOnce: syncOnce,
-      startPolling: startPolling,
-      stopPolling: stopPolling,
-      getConfig: _getCfg,
+      configure: function () {
+        try {
+          return configure.apply(null, arguments);
+        } catch (e) {
+          return null;
+        }
+      },
+      syncOnce: function () {
+        try {
+          var p = syncOnce.apply(null, arguments);
+          if (p && typeof p.catch === 'function') p.catch(function () {});
+          return p;
+        } catch (e) {
+          return Promise.resolve({ added: 0, error: 'crash' });
+        }
+      },
+      startPolling: function () {
+        try {
+          startPolling();
+        } catch (e) {
+          /* swallow */
+        }
+      },
+      stopPolling: function () {
+        try {
+          stopPolling();
+        } catch (e) {
+          /* swallow */
+        }
+      },
+      getConfig: function () {
+        try {
+          return _getCfg();
+        } catch (e) {
+          return { url: '', secret: '' };
+        }
+      },
     };
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', function () {

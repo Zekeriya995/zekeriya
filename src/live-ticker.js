@@ -805,6 +805,7 @@
         return r.ok ? r.json() : null;
       })
       .then(function (j) {
+        setVpsCache(j);
         if (!j) {
           pill.setAttribute('data-state', 'offline');
           var s1 = document.getElementById('vpsPillState');
@@ -842,6 +843,99 @@
       });
   }
 
+  /* ------------- Live System Status panel (sidebar) -------------
+     Reads the snapshot APIs from KlineStream / DepthStream + the
+     existing connMetrics + the cached vps-status so the user has a
+     single diagnostic surface for the whole real-time stack.
+     Repaints only while the side menu is visible — guarded by the
+     `.show` class on #sideMenu — to avoid useless DOM churn. */
+  var lastVpsStatus = null;
+  function setVpsCache(j) {
+    lastVpsStatus = j;
+  }
+  /* Reuse the response we already fetch in pulseVpsStatus by hooking
+     into the same /api/vps-status poller — patch it once below. */
+
+  function pulseLiveSystem() {
+    var menu = document.getElementById('sideMenu');
+    if (!menu || !menu.classList.contains('show')) return;
+    var grid = document.getElementById('lssGrid');
+    if (!grid) return;
+
+    /* Ticker WS — driven by src/price-stream.js. */
+    var tEl = document.getElementById('lssTicker');
+    if (tEl) {
+      var up = typeof connMetrics !== 'undefined' && connMetrics && connMetrics.wsUp;
+      tEl.textContent = up ? 'CONNECTED' : 'DOWN';
+      tEl.className = 'lss-v ' + (up ? 'ok' : 'bad');
+    }
+
+    /* Kline streams. */
+    var kEl = document.getElementById('lssKline');
+    if (kEl && typeof KlineStream !== 'undefined' && KlineStream.snapshot) {
+      var ks = KlineStream.snapshot();
+      kEl.textContent = ks.streams + ' streams · ' + ks.subs + ' subs';
+      kEl.className = 'lss-v ' + (ks.streams ? 'ok' : '');
+    }
+
+    /* Depth streams. */
+    var dEl = document.getElementById('lssDepth');
+    if (dEl && typeof DepthStream !== 'undefined' && DepthStream.snapshot) {
+      var ds = DepthStream.snapshot();
+      dEl.textContent = ds.streams + ' streams · ' + ds.subs + ' subs';
+      dEl.className = 'lss-v ' + (ds.streams ? 'ok' : '');
+    }
+
+    /* Latency — kline if available, else depth. */
+    var lEl = document.getElementById('lssLat');
+    if (lEl) {
+      var lat = null;
+      if (typeof KlineStream !== 'undefined' && KlineStream.metrics)
+        lat = KlineStream.metrics.latencyMs;
+      if (lat == null && typeof DepthStream !== 'undefined' && DepthStream.metrics)
+        lat = DepthStream.metrics.latencyMs;
+      if (lat == null || lat < 0) {
+        lEl.textContent = '--';
+        lEl.className = 'lss-v';
+      } else {
+        lEl.textContent = lat + ' ms';
+        lEl.className = 'lss-v ' + (lat < 500 ? 'ok' : lat < 2000 ? 'warn' : 'bad');
+      }
+    }
+
+    /* VPS notifier — uses the cached /api/vps-status response. */
+    var vEl = document.getElementById('lssVps');
+    if (vEl) {
+      var v = lastVpsStatus;
+      if (!v) {
+        vEl.textContent = '...';
+        vEl.className = 'lss-v';
+      } else if (v.alive) {
+        vEl.textContent = 'ONLINE · ' + Math.round(v.ageMs / 1000) + 's ago';
+        vEl.className = 'lss-v ok';
+      } else if (v.stale) {
+        vEl.textContent = 'STALE · ' + Math.round(v.ageMs / 1000) + 's ago';
+        vEl.className = 'lss-v warn';
+      } else {
+        vEl.textContent = 'OFFLINE';
+        vEl.className = 'lss-v bad';
+      }
+    }
+
+    /* Sent / Dropped counters from the heartbeat tooltip. */
+    var cEl = document.getElementById('lssCnt');
+    if (cEl) {
+      var lv = lastVpsStatus && lastVpsStatus.last;
+      if (lv && (lv.sent != null || lv.dropped != null)) {
+        cEl.textContent = (lv.sent || 0) + ' / ' + (lv.dropped || 0);
+        cEl.className = 'lss-v ok';
+      } else {
+        cEl.textContent = '--';
+        cEl.className = 'lss-v';
+      }
+    }
+  }
+
   /* ---------- master tick ---------- */
   function tick() {
     /* The dedicated /pg-live page runs its own RAF render loop in
@@ -852,6 +946,7 @@
     pulseSparkAccumulator();
     pulseConnectionStatus();
     pulseVpsStatus();
+    pulseLiveSystem();
     var page = activePageId();
     if (page === 'live') return;
     if (page === 'dash') {

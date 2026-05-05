@@ -858,7 +858,10 @@
 
   function pulseLiveSystem() {
     var menu = document.getElementById('sideMenu');
-    if (!menu || !menu.classList.contains('show')) return;
+    /* The sidebar uses the .open class (toggled by toggleMenu in app.js)
+       — not .show. Earlier versions of this file checked .show, so the
+       panel never repainted while the menu was visible. */
+    if (!menu || !menu.classList.contains('open')) return;
     var grid = document.getElementById('lssGrid');
     if (!grid) return;
 

@@ -34,8 +34,18 @@ try {
   notifHist = JSON.parse(localStorage.getItem('nxnh10') || '[]');
 } catch (e) {}
 
-function addNotifHist(icon, sym, type, body) {
-  notifHist.unshift({ icon: icon, sym: sym, type: type, body: body, time: Date.now() });
+function addNotifHist(icon, sym, type, body, time) {
+  /* `time` defaults to now for the in-app fast path; src/signal-sync.js
+     passes the real VPS detection timestamp so the user sees "منذ
+     ساعتين" labels for events that fired while the platform was
+     closed. */
+  notifHist.unshift({
+    icon: icon,
+    sym: sym,
+    type: type,
+    body: body,
+    time: typeof time === 'number' && time > 0 ? time : Date.now(),
+  });
   if (notifHist.length > 50) notifHist = notifHist.slice(0, 50);
   try {
     localStorage.setItem('nxnh10', JSON.stringify(notifHist));

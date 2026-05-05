@@ -792,6 +792,17 @@
      their always-on Telegram path is actually running, separately
      from the in-browser WebSocket health. */
   var lastVpsCheck = 0;
+  /* Stays false until the very first successful heartbeat lands. The
+     pill is hidden in that mode so deployments without heartbeat.py
+     wired up don't surface a misleading red OFFLINE — there's nothing
+     to be offline FROM yet. */
+  var vpsEverSeen = false;
+  function _hidePill(pill) {
+    pill.style.display = 'none';
+  }
+  function _showPill(pill) {
+    pill.style.display = '';
+  }
   function pulseVpsStatus() {
     var pill = document.getElementById('vpsPill');
     if (!pill) return;
@@ -799,20 +810,45 @@
     if (now - lastVpsCheck < 15000) return;
     lastVpsCheck = now;
     var proxy = typeof PROXY !== 'undefined' && PROXY ? PROXY : '';
-    if (!proxy) return;
+    if (!proxy) {
+      _hidePill(pill);
+      return;
+    }
     fetch(proxy + '/api/vps-status', { method: 'GET', cache: 'no-store' })
       .then(function (r) {
-        return r.ok ? r.json() : null;
+        /* Endpoint missing (404, 405, ...) — the deployed proxy
+           probably doesn't ship the /api/vps-status handler yet. Cache
+           a sentinel and keep the pill hidden. */
+        if (!r || !r.ok) return { __notWired: true };
+        return r.json();
       })
       .then(function (j) {
-        setVpsCache(j);
-        if (!j) {
-          pill.setAttribute('data-state', 'offline');
-          var s1 = document.getElementById('vpsPillState');
-          if (s1) s1.textContent = 'OFFLINE';
+        if (j && j.__notWired) {
+          setVpsCache(null);
+          _hidePill(pill);
           return;
         }
+        setVpsCache(j);
         var stateEl = document.getElementById('vpsPillState');
+        /* The endpoint replied 200 but we've never received an actual
+           heartbeat (last === null). That means the heartbeat module
+           on the VPS isn't installed yet — keep the pill hidden so
+           users only see it once they've wired it up. */
+        if (!j || !j.last) {
+          if (!vpsEverSeen) {
+            _hidePill(pill);
+            return;
+          }
+          /* We've seen heartbeats before but server memory got wiped
+             (e.g. proxy restart). Show OFFLINE as a real signal. */
+          _showPill(pill);
+          pill.setAttribute('data-state', 'offline');
+          if (stateEl) stateEl.textContent = 'OFFLINE';
+          pill.title = '24/7 VPS notifier — no heartbeat since proxy restart';
+          return;
+        }
+        vpsEverSeen = true;
+        _showPill(pill);
         if (j.alive) {
           pill.setAttribute('data-state', 'online');
           if (stateEl) stateEl.textContent = 'ONLINE';
@@ -833,10 +869,19 @@
         } else {
           pill.setAttribute('data-state', 'offline');
           if (stateEl) stateEl.textContent = 'OFFLINE';
-          pill.title = '24/7 VPS notifier — no heartbeat received';
+          pill.title = '24/7 VPS notifier — heartbeat stopped';
         }
       })
       .catch(function () {
+        /* Network failure or CORS — same conclusion as 404: keep the
+           pill hidden unless we've confirmed at least one heartbeat
+           in the past. */
+        setVpsCache(null);
+        if (!vpsEverSeen) {
+          _hidePill(pill);
+          return;
+        }
+        _showPill(pill);
         pill.setAttribute('data-state', 'offline');
         var s2 = document.getElementById('vpsPillState');
         if (s2) s2.textContent = 'OFFLINE';

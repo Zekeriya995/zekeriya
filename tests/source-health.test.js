@@ -142,6 +142,68 @@ test('pingSource — success after failure clears lastError but keeps failCount'
   assert.equal(sourceHealth.test.lastError, null, 'success clears lastError');
 });
 
+/* ─── pingSource verify (audit 1.8) ────────────────────────────────── */
+
+test('pingSource — verify returns null on healthy body, source ok', async () => {
+  reset();
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ status: 'healthy', ages: { tickers: { status: 'healthy' } } }),
+  });
+  const r = await pingSource({
+    id: 'proxy-test',
+    name: 'Proxy Test',
+    url: () => 'https://proxy.test/api/health',
+    verify: function (body) {
+      if (body.status === 'down') return 'down';
+      return null;
+    },
+  });
+  assert.equal(r.ok, true);
+  assert.equal(r.degraded, undefined);
+  assert.equal(sourceHealth['proxy-test'].successCount, 1);
+});
+
+test('pingSource — verify failure marks source degraded even on HTTP 200', async () => {
+  reset();
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({ status: 'down', ages: { tickers: { status: 'down', ageMs: null } } }),
+  });
+  const r = await pingSource({
+    id: 'proxy-test',
+    name: 'Proxy Test',
+    url: () => 'https://proxy.test/api/health',
+    verify: function (body) {
+      if (body.status === 'down') return 'proxy reports tickers cache is down';
+      return null;
+    },
+  });
+  assert.equal(r.ok, false);
+  assert.equal(r.degraded, true);
+  assert.equal(r.error, 'proxy reports tickers cache is down');
+  assert.equal(sourceHealth['proxy-test'].failCount, 1);
+  assert.match(sourceHealth['proxy-test'].lastError, /^DEGRADED:/);
+});
+
+test('NEXUS_SOURCES — proxy entry catches a downstream-dead body', async () => {
+  reset();
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      status: 'healthy',
+      ages: { tickers: { status: 'down', ageMs: null } },
+    }),
+  });
+  const proxySpec = NEXUS_SOURCES.find((s) => s.id === 'proxy');
+  const r = await pingSource(proxySpec);
+  assert.equal(r.ok, false, 'proxy whose tickers feed is dead must report degraded');
+  assert.equal(r.degraded, true);
+});
+
 /* ─── pingSource retry-on-transient ───────────────────────────────── */
 
 /* Drive the back-off to 0 in tests so we don't sleep 400 ms each retry. */

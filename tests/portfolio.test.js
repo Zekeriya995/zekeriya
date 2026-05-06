@@ -308,3 +308,46 @@ test('getAcc — predictions still inside their 12 h window are not scored', () 
   assert.equal(r.stale, 0);
   assert.equal(predictions[0].checked, false);
 });
+
+test('getAcc — predictions inside the resolution window skip scoring against stale ticker (AUDIT-3.6)', () => {
+  /* The 12 h mark just passed (within the 5-min fresh window) but
+     T.BTC.t is from minutes ago — i.e. the stream is dead and the
+     price is frozen. The resolver must not score against it. */
+  reset();
+  const justResolved = Date.now() - 12 * 3600 * 1000 - 60_000;
+  predictions.push({
+    sym: 'BTC',
+    price: 100,
+    target: 110,
+    score: 7,
+    time: justResolved,
+    checked: false,
+    hit: false,
+    partial: false,
+  });
+  /* 5 minutes old → way past PRED_PRICE_FRESH_MS (60 s) */
+  globalThis.T.BTC = { p: 106, t: Date.now() - 5 * 60 * 1000 };
+  const r = getAcc();
+  assert.equal(r.total, 0, 'stale ticker should not produce a hit');
+  assert.equal(predictions[0].checked, false, 'prediction stays unchecked');
+  assert.equal(predictions[0].stale, undefined, 'still inside window — try again later');
+});
+
+test('getAcc — fresh ticker inside the resolution window does score', () => {
+  reset();
+  const justResolved = Date.now() - 12 * 3600 * 1000 - 60_000;
+  predictions.push({
+    sym: 'BTC',
+    price: 100,
+    target: 110,
+    score: 7,
+    time: justResolved,
+    checked: false,
+    hit: false,
+    partial: false,
+  });
+  globalThis.T.BTC = { p: 106, t: Date.now() - 5_000 }; /* 5 s old → fresh */
+  const r = getAcc();
+  assert.equal(r.hits, 1);
+  assert.equal(predictions[0].finalPrice, 106);
+});

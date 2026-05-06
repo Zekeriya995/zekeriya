@@ -151,11 +151,14 @@ function startPriceStream() {
     for (var i = 0; i < msg.length; i++) {
       applyTicker(msg[i]);
     }
-    if (typeof lastDataTime !== 'undefined') {
-      /* lastDataTime is a var in app.js — plain assignment retargets the
-         global the connection-status tick reads from. */
-      lastDataTime = Date.now();
-    }
+    /* lastWsDataTime / lastDataTime / lastRestDataTime are vars in
+       app.js — plain assignment retargets the globals the
+       connection-status tick reads from. Writing to lastWsDataTime
+       lets getConnQuality() distinguish live-stream freshness from
+       fallback REST polling. */
+    var _now = Date.now();
+    if (typeof lastWsDataTime !== 'undefined') lastWsDataTime = _now;
+    if (typeof lastDataTime !== 'undefined') lastDataTime = _now;
   };
   ws.onclose = function () {
     if (typeof connMetrics !== 'undefined' && connMetrics) connMetrics.wsUp = false;

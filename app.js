@@ -114,7 +114,14 @@ var fgValue=null,fgTime=0,btcDom=null,btcDomTime=0;
 /* Hoisted from later in the file: getConnQuality() in src/connection.js
    reads lastDataTime on every updateConnStatus() tick, including calls
    that fire before the rest of this file has executed. Declaring it at
-   the top guarantees a real number instead of NaN. */
+   the top guarantees a real number instead of NaN.
+
+   We track WS vs REST freshness separately so the connection indicator
+   can distinguish a healthy live stream from a REST-only fallback (the
+   audit's "LIVE badge over a 5s-stale REST" scenario). lastDataTime
+   stays as the legacy max for any external reader. */
+var lastWsDataTime=0;
+var lastRestDataTime=0;
 var lastDataTime=Date.now();
 
 /* monitorState / factorLog / supervisorData + their save helpers
@@ -136,7 +143,7 @@ function trackWhaleOutcome() {
     });
     if (!existing.length) {
       var avgEntry = 0;
-      try { var we = calcWhaleAvgEntry(sym); if (we > 0) avgEntry = we; } catch(e) {}
+      try { var we = calcWhaleAvgEntry(sym); if (we > 0) avgEntry = we; } catch(e) { dbg('[calc] calcWhaleAvgEntry('+sym+') failed:', e && e.message); }
       supervisorData.whaleAudit.push({
         sym: sym, time: now, conf: ww.engine.confidence || 0, rank: ww.engine.rank || '',
         entryPrice: avgEntry || d.p, waves: ww.waves.length,
@@ -274,7 +281,7 @@ function captureFactorSnapshot(sym) {
   var oi = OI[sym];
   var ww = whaleWaves[sym];
   var wConf = ww && ww.engine ? ww.engine.confidence : 0;
-  var cvd = null; try { cvd = analyzeCVD(sym); } catch(e) {}
+  var cvd = null; try { cvd = analyzeCVD(sym); } catch(e) { dbg('[calc] analyzeCVD('+sym+') failed:', e && e.message); }
 
   var snapshot = {
     sym: sym,
@@ -748,9 +755,9 @@ function signalQualityGate(sym, type, score) {
       var topLatest = topTradersLS[sym].accounts[topTradersLS[sym].accounts.length - 1];
       if (topLatest.long > 0.55) hasStrongAlternative = true;
     }
-    try { var vp = calcVPIN(sym); if (vp && vp.vpin > 0.5) hasStrongAlternative = true; } catch(e) {}
-    try { var ice6 = detectIceberg(sym); if (ice6 && ice6.signal === 'ICEBERG_BUY') hasStrongAlternative = true; } catch(e) {}
-    try { var cvd6 = analyzeCVD(sym); if (cvd6 && cvd6.divergence === 'BULLISH') hasStrongAlternative = true; } catch(e) {}
+    try { var vp = calcVPIN(sym); if (vp && vp.vpin > 0.5) hasStrongAlternative = true; } catch(e) { dbg('[calc] calcVPIN('+sym+') failed:', e && e.message); }
+    try { var ice6 = detectIceberg(sym); if (ice6 && ice6.signal === 'ICEBERG_BUY') hasStrongAlternative = true; } catch(e) { dbg('[calc] detectIceberg('+sym+') failed:', e && e.message); }
+    try { var cvd6 = analyzeCVD(sym); if (cvd6 && cvd6.divergence === 'BULLISH') hasStrongAlternative = true; } catch(e) { dbg('[calc] analyzeCVD('+sym+') failed:', e && e.message); }
     if (CBP[sym] && T[sym] && T[sym].p > 0 && ((CBP[sym] - T[sym].p) / T[sym].p) > 0.002) hasStrongAlternative = true;
     if (hasStrongAlternative) g6 = true;
   }
@@ -1980,7 +1987,7 @@ async function loadTk(){
       if(m.bitfinex){Object.keys(m.bitfinex).forEach(function(s){bitfinexMargin[s]=m.bitfinex[s]})}
       if(m.cbPremium){Object.keys(m.cbPremium).forEach(function(s){var d=m.cbPremium[s];if(d){cbPremium[s]=d.diff||0;cbPremium[s+'_pct']=d.pct||0}});cbPremium.time=Date.now()}
     }
-    connMetrics.apiOk++;lastDataTime=Date.now();
+    connMetrics.apiOk++;lastDataTime=Date.now();lastRestDataTime=lastDataTime;
   }else{
     connMetrics.apiFail++;_proxyAlive=false;
     /* ═══ 🔌 DIRECT API FALLBACK — Binance + CoinGecko ═══ */
@@ -2009,7 +2016,7 @@ async function loadTk(){
             WL.forEach(function(s){newTier.add(s)});
             TIER1=newTier;
           }
-          lastDataTime=Date.now();connMetrics.apiOk++;
+          lastDataTime=Date.now();lastRestDataTime=lastDataTime;connMetrics.apiOk++;
         }
         /* Binance Futures FR */
         var bnFR=await fj(BF+'/premiumIndex');
@@ -6451,7 +6458,7 @@ function addVLog(type,msg){validatorLog.unshift({type:type,msg:msg,time:Date.now
 async function runValidator(){
   var issues=0,fixes=0;
   var tkAge=Date.now()-lastDataTime;
-  if(tkAge>120000){addVLog('🔴','البيانات قديمة '+Math.round(tkAge/60000)+' دقيقة — يعيد التحميل');issues++;try{await loadTk();lastDataTime=Date.now();fixes++;connMetrics.apiOk++;addVLog('🔧','تم إعادة تحميل البيانات ✅')}catch(e){connMetrics.apiFail++;addVLog('❌','فشل إعادة التحميل')}}
+  if(tkAge>120000){addVLog('🔴','البيانات قديمة '+Math.round(tkAge/60000)+' دقيقة — يعيد التحميل');issues++;try{await loadTk();lastDataTime=Date.now();lastRestDataTime=lastDataTime;fixes++;connMetrics.apiOk++;addVLog('🔧','تم إعادة تحميل البيانات ✅')}catch(e){connMetrics.apiFail++;addVLog('❌','فشل إعادة التحميل')}}
   else if(tkAge>90000){addVLog('🟡','البيانات عمرها '+Math.round(tkAge/60000)+' دقيقة');issues++}
   if(T.BTC&&T.BTC.by){var diff=Math.abs(T.BTC.p-T.BTC.by)/T.BTC.p*100;if(diff>2){addVLog('🔴','فرق BTC بين Binance/Bybit: '+diff.toFixed(1)+'%');issues++}else{addVLog('✅','BTC Binance/Bybit متطابق ('+diff.toFixed(2)+'%)')}}
   if(T.BTC&&CBP.BTC){var cbDiff=Math.abs(T.BTC.p-CBP.BTC)/T.BTC.p*100;if(cbDiff>3){addVLog('🔴','فرق BTC Binance/Coinbase: '+cbDiff.toFixed(1)+'%');issues++;CBP.BTC=T.BTC.p;fixes++;addVLog('🔧','صحح سعر Coinbase')}else{addVLog('✅','BTC Coinbase متطابق ('+cbDiff.toFixed(2)+'%)')}}
@@ -6469,7 +6476,7 @@ async function runValidator(){
   if(frCount<10){addVLog('🟡','FR: فقط '+frCount+' عملة — يعيد التحميل');issues++;try{await loadTk();fixes++;connMetrics.apiOk++;addVLog('🔧','أعاد تحميل من Proxy ✅')}catch(e){connMetrics.apiFail++}}
   else{addVLog('✅','FR: '+frCount+' عملة محمّلة')}
   var coinCount=Object.keys(T).length;
-  if(coinCount<100){addVLog('🔴','عملات: '+coinCount+' فقط');issues++;try{await loadTk();lastDataTime=Date.now();fixes++;connMetrics.apiOk++}catch(e){connMetrics.apiFail++}}
+  if(coinCount<100){addVLog('🔴','عملات: '+coinCount+' فقط');issues++;try{await loadTk();lastDataTime=Date.now();lastRestDataTime=lastDataTime;fixes++;connMetrics.apiOk++}catch(e){connMetrics.apiFail++}}
   else{addVLog('✅','عملات: '+coinCount+' محمّلة')}
   validatorStatus=issues===0?'ok':issues<=3?'ok':'warn';
   updateValidatorUI(issues,fixes);updateConnStatus();
@@ -6664,6 +6671,43 @@ function nxShowUpdateBanner() {
   div.appendChild(btnLater);
   document.body.appendChild(div);
 }
+/* Delegated event dispatcher (foundation for P3.3 phase A) — when an
+   element carries data-action="fnName", a single click listener on
+   document looks the function up on `window`, splits data-args on '|'
+   into positional arguments, and invokes it with the element + event
+   appended at the end. This lets us migrate `onclick="fn('a',this)"`
+   sites to `data-action="fn" data-args="a"` one section at a time
+   without committing to a large refactor in a single PR. The current
+   inline handlers continue to work — only elements that opt in via
+   data-action engage the dispatcher.
+
+   Element opt-in shapes:
+     <button data-action="addFav">…</button>
+     <button data-action="setScanTF" data-args="15m">…</button>
+     <button data-action="filterTrade" data-args="all">…</button>
+
+   The dispatcher silently ignores actions that don't resolve to a
+   function so a typo can't blow up the whole page. */
+(function () {
+  if (typeof document === 'undefined' || !document.addEventListener) return;
+  function dispatch(e) {
+    var el = e.target && e.target.closest && e.target.closest('[data-action]');
+    if (!el) return;
+    var name = el.getAttribute('data-action');
+    var fn = name && typeof window[name] === 'function' ? window[name] : null;
+    if (!fn) return;
+    var raw = el.getAttribute('data-args');
+    var args = raw ? raw.split('|') : [];
+    try {
+      fn.apply(el, args.concat([el, e]));
+    } catch (err) {
+      dbg('[action] ' + name + ' threw:', err && err.message);
+    }
+  }
+  document.addEventListener('click', dispatch);
+  document.addEventListener('change', dispatch);
+})();
+
 if ('serviceWorker' in navigator) {
   try {
     navigator.serviceWorker.register('./sw.js').then(function (reg) {

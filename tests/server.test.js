@@ -23,7 +23,16 @@ process.env.TG_CHAT_ID = '42';
 process.env.NEXUS_NOTIFY_SECRET = 'topsecret-test';
 process.env.ALLOWED_ORIGINS = 'https://example.test,https://other.test';
 
-const { app, cache, _resetApiAllSnapshot, safeFetch, upstreamMetrics } = require('../server.js');
+const {
+  app,
+  cache,
+  _resetApiAllSnapshot,
+  safeFetch,
+  upstreamMetrics,
+  upstreamByLabel,
+  responseMetrics,
+  evaluateAlerts,
+} = require('../server.js');
 
 /* Reset the /api/all TTL cache before each /api/all-touching test so
    stale snapshots don't bleed between cases. */
@@ -140,6 +149,101 @@ test('GET /api/health exposes per-cache ages with status classification', async 
   assert.equal(res.body.ages.fr.status, 'stale');
   assert.equal(res.body.ages.oi.status, 'down');
   assert.equal(res.body.ages.oi.ageMs, null);
+});
+
+/* ─── /api/metrics ────────────────────────────────────────────────── */
+
+function _resetUpstreamByLabel() {
+  for (const k of Object.keys(upstreamByLabel)) delete upstreamByLabel[k];
+}
+
+test('GET /api/metrics returns process + cache + upstream + alerts shape', async () => {
+  cache.lastUpdate.tickers = Date.now();
+  const res = await request(app).get('/api/metrics');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers['cache-control'], 'no-store');
+  assert.ok(typeof res.body.timestamp === 'number');
+  assert.ok(typeof res.body.uptime === 'number');
+  assert.ok(res.body.process);
+  assert.ok(typeof res.body.process.heapUsedMb === 'number');
+  assert.ok(res.body.cache);
+  assert.ok(res.body.ages);
+  assert.ok(res.body.upstream);
+  assert.ok(res.body.upstream.total);
+  assert.ok(res.body.upstream.byLabel);
+  assert.ok(res.body.requests);
+  assert.ok(Array.isArray(res.body.alerts));
+});
+
+test('GET /api/metrics tracks per-label upstream after a real safeFetch error', async () => {
+  _resetUpstreamMetrics();
+  _resetUpstreamByLabel();
+  axios.get = async () => {
+    const err = new Error('400');
+    err.response = { status: 400 };
+    throw err;
+  };
+  await safeFetch('https://api.binance.com/api/v3/ping', 'TEST-LABEL');
+  axios.get = realAxiosGet;
+  const res = await request(app).get('/api/metrics');
+  assert.equal(res.status, 200);
+  assert.ok(res.body.upstream.byLabel['TEST-LABEL']);
+  assert.equal(res.body.upstream.byLabel['TEST-LABEL'].failed, 1);
+  assert.equal(res.body.upstream.byLabel['TEST-LABEL'].lastError, 'HTTP 400');
+});
+
+test('evaluateAlerts surfaces a critical alert when tickers cache is down', () => {
+  cache.lastUpdate.tickers = 0;
+  const alerts = evaluateAlerts(Date.now());
+  const tickerAlert = alerts.find((a) => a.source === 'tickers');
+  assert.ok(tickerAlert);
+  assert.equal(tickerAlert.level, 'critical');
+});
+
+test('evaluateAlerts ignores low-volume failures (under min-call threshold)', () => {
+  _resetUpstreamMetrics();
+  _resetUpstreamByLabel();
+  cache.lastUpdate.tickers = Date.now();
+  /* One failed call → ratio 100 % but volume below threshold */
+  upstreamByLabel['LIGHT-LOAD'] = {
+    success: 0,
+    failed: 1,
+    retried: 0,
+    rateLimited: 0,
+    timeout: 0,
+    lastError: 'HTTP 500',
+    lastErrorAt: Date.now(),
+  };
+  const alerts = evaluateAlerts(Date.now());
+  assert.ok(!alerts.find((a) => a.source === 'LIGHT-LOAD'));
+});
+
+test('evaluateAlerts fires when failure ratio exceeds 20 % over enough calls', () => {
+  _resetUpstreamMetrics();
+  _resetUpstreamByLabel();
+  cache.lastUpdate.tickers = Date.now();
+  upstreamByLabel['HOT-LOAD'] = {
+    success: 30,
+    failed: 20 /* 40 % failure ratio over 50 calls */,
+    retried: 0,
+    rateLimited: 0,
+    timeout: 0,
+    lastError: 'HTTP 503',
+    lastErrorAt: Date.now(),
+  };
+  const alerts = evaluateAlerts(Date.now());
+  const hot = alerts.find((a) => a.source === 'HOT-LOAD');
+  assert.ok(hot);
+  assert.equal(hot.level, 'warning');
+});
+
+test('responseMetrics counters increment on the public endpoints', async () => {
+  cache.lastUpdate.tickers = Date.now();
+  const before = { ...responseMetrics };
+  await request(app).get('/api/health');
+  await request(app).get('/api/metrics');
+  assert.equal(responseMetrics.apiHealth, before.apiHealth + 1);
+  assert.equal(responseMetrics.apiMetrics, before.apiMetrics + 1);
 });
 
 /* ─── /api/all ────────────────────────────────────────────────────── */

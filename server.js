@@ -186,8 +186,10 @@ const cache = {
      unrelated host. */
 const safeAgent = createSafeAgent();
 
-/* Upstream call metrics — exposed by /api/health so monitors can spot
-   sustained 429s or timeouts even when the cache is still warm. */
+/* Upstream call metrics — exposed by /api/health and /api/metrics so
+   monitors can spot sustained 429s or timeouts even when the cache is
+   still warm. The per-label map carries the last error per source so
+   operators can see *which* upstream is hot without grepping logs. */
 const upstreamMetrics = {
   success: 0,
   retried: 0,
@@ -195,6 +197,30 @@ const upstreamMetrics = {
   rateLimited: 0,
   timeout: 0,
 };
+const upstreamByLabel = Object.create(null);
+function _bumpLabel(label, kind) {
+  if (!label) return;
+  let bucket = upstreamByLabel[label];
+  if (!bucket) {
+    bucket = upstreamByLabel[label] = {
+      success: 0,
+      failed: 0,
+      retried: 0,
+      rateLimited: 0,
+      timeout: 0,
+      lastError: null,
+      lastErrorAt: 0,
+    };
+  }
+  if (typeof kind === 'string') bucket[kind]++;
+}
+function _recordLabelError(label, status) {
+  if (!label) return;
+  const bucket = upstreamByLabel[label];
+  if (!bucket) return;
+  bucket.lastError = status ? 'HTTP ' + status : 'NETWORK';
+  bucket.lastErrorAt = Date.now();
+}
 function _isRetryable(err) {
   if (!err) return false;
   /* axios timeout / network errors expose a code but no response */
@@ -208,6 +234,8 @@ async function safeFetch(url, label, opts) {
   if (!isAllowedFetchUrl(url)) {
     console.error(`[${label}] Blocked: host not in allowlist`);
     upstreamMetrics.failed++;
+    _bumpLabel(label, 'failed');
+    _recordLabelError(label, 'BLOCKED');
     return null;
   }
   const maxAttempts = (opts && opts.retries != null ? opts.retries : 2) + 1;
@@ -220,13 +248,22 @@ async function safeFetch(url, label, opts) {
         httpsAgent: safeAgent,
       });
       upstreamMetrics.success++;
-      if (attempt > 0) upstreamMetrics.retried++;
+      _bumpLabel(label, 'success');
+      if (attempt > 0) {
+        upstreamMetrics.retried++;
+        _bumpLabel(label, 'retried');
+      }
       return res.data;
     } catch (err) {
       lastErr = err;
       const status = err && err.response && err.response.status;
-      if (status === 429) upstreamMetrics.rateLimited++;
-      else if (!err.response) upstreamMetrics.timeout++;
+      if (status === 429) {
+        upstreamMetrics.rateLimited++;
+        _bumpLabel(label, 'rateLimited');
+      } else if (!err.response) {
+        upstreamMetrics.timeout++;
+        _bumpLabel(label, 'timeout');
+      }
       const canRetry = attempt < maxAttempts - 1 && _isRetryable(err);
       if (!canRetry) break;
       const base = SAFE_FETCH_BACKOFF_MS[attempt] || 2000;
@@ -241,9 +278,11 @@ async function safeFetch(url, label, opts) {
     }
   }
   upstreamMetrics.failed++;
+  _bumpLabel(label, 'failed');
   /* Avoid leaking the URL (which may carry tokens) — only the upstream
      status code if the error came from a response. */
   const status = lastErr && lastErr.response && lastErr.response.status;
+  _recordLabelError(label, status);
   console.error(`[${label}] Failed${status ? ` (HTTP ${status})` : ''}`);
   return null;
 }
@@ -560,6 +599,10 @@ function buildApiAllSnapshot() {
   };
 }
 app.get('/api/all', (req, res) => {
+  /* responseMetrics is declared further down with the health threshold
+     block, but it's safe to bump here — module-level const initialises
+     before any request can arrive. */
+  if (typeof responseMetrics !== 'undefined') responseMetrics.apiAll++;
   const now = Date.now();
   if (!apiAllSnapshot || now - apiAllSnapshotAt > CONFIG.API_ALL_TTL_MS) {
     apiAllSnapshot = buildApiAllSnapshot();
@@ -568,6 +611,15 @@ app.get('/api/all', (req, res) => {
   res.set('Cache-Control', 'public, max-age=' + Math.ceil(CONFIG.API_ALL_TTL_MS / 1000));
   res.json(apiAllSnapshot);
 });
+
+/* Endpoint-hit counters — a thin observability layer that lets
+   /api/metrics show real traffic shape without an external APM. */
+const responseMetrics = {
+  apiAll: 0,
+  apiHealth: 0,
+  apiMetrics: 0,
+  notify: 0,
+};
 
 /* Health check — top-level `status` mirrors tickers freshness (the legacy
    contract), while `ages` adds a per-cache breakdown so monitors can see
@@ -592,12 +644,63 @@ function _classifyAge(last, thresholds, now) {
   else status = 'healthy';
   return { ageMs: age, status };
 }
-app.get('/api/health', (req, res) => {
-  const now = Date.now();
+
+/* Compute the per-cache age breakdown used by both /api/health and
+   /api/metrics so the contract stays consistent. */
+function _buildAges(now) {
   const ages = {};
   for (const [key, t] of Object.entries(HEALTH_THRESHOLDS)) {
     ages[key] = _classifyAge(cache.lastUpdate[key] || 0, t, now);
   }
+  return ages;
+}
+
+/* Translate cache + upstream state into a list of human-readable
+   alerts. Drives the `alerts` field on /api/health and /api/metrics
+   so monitors can lift them straight into a notification without any
+   threshold logic of their own. */
+const ALERT_FAILURE_RATIO = 0.2; /* 20 % of recent calls failed */
+const ALERT_MIN_CALLS_FOR_RATIO = 25; /* don't fire on a quiet startup */
+function evaluateAlerts(now) {
+  const alerts = [];
+  const ages = _buildAges(now);
+  for (const [key, info] of Object.entries(ages)) {
+    if (info.status === 'down') {
+      alerts.push({
+        level: 'critical',
+        source: key,
+        message:
+          info.ageMs == null
+            ? `cache "${key}" has never been populated`
+            : `cache "${key}" is down (age ${Math.round(info.ageMs / 1000)} s)`,
+      });
+    } else if (info.status === 'stale') {
+      alerts.push({
+        level: 'warning',
+        source: key,
+        message: `cache "${key}" is stale (age ${Math.round(info.ageMs / 1000)} s)`,
+      });
+    }
+  }
+  for (const [label, b] of Object.entries(upstreamByLabel)) {
+    const total = b.success + b.failed;
+    if (total < ALERT_MIN_CALLS_FOR_RATIO) continue;
+    const ratio = b.failed / total;
+    if (ratio >= ALERT_FAILURE_RATIO) {
+      alerts.push({
+        level: 'warning',
+        source: label,
+        message: `upstream "${label}" failure ratio ${(ratio * 100).toFixed(1)} % over ${total} calls`,
+      });
+    }
+  }
+  return alerts;
+}
+
+app.get('/api/health', (req, res) => {
+  responseMetrics.apiHealth++;
+  const now = Date.now();
+  const ages = _buildAges(now);
   const status = ages.tickers.status;
   const httpStatus = status === 'down' ? 503 : 200;
   res.set('Cache-Control', 'no-store');
@@ -611,6 +714,44 @@ app.get('/api/health', (req, res) => {
     lastUpdate: cache.lastUpdate,
     ages,
     upstream: { ...upstreamMetrics },
+    alerts: evaluateAlerts(now),
+  });
+});
+
+/* Metrics endpoint — superset of /api/health intended for dashboards
+   and Prometheus-style scrapers. JSON shape (no external dependency).
+   Distinct from /api/health because health is the binary "is it up"
+   read used by load balancers; metrics is the rich diagnostic view. */
+app.get('/api/metrics', (req, res) => {
+  responseMetrics.apiMetrics++;
+  const now = Date.now();
+  const ages = _buildAges(now);
+  const mem = process.memoryUsage();
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    timestamp: now,
+    uptime: Math.floor(process.uptime()),
+    process: {
+      rssMb: +(mem.rss / 1024 / 1024).toFixed(1),
+      heapUsedMb: +(mem.heapUsed / 1024 / 1024).toFixed(1),
+      heapTotalMb: +(mem.heapTotal / 1024 / 1024).toFixed(1),
+      externalMb: +(mem.external / 1024 / 1024).toFixed(1),
+    },
+    cache: {
+      coins: Object.keys(cache.tickers).length,
+      fr: Object.keys(cache.fr).length,
+      oi: Object.keys(cache.oi).length,
+      ls: Object.keys(cache.ls).length,
+      taker: Object.keys(cache.taker).length,
+      depth: Object.keys(cache.depth).length,
+    },
+    ages,
+    upstream: {
+      total: { ...upstreamMetrics },
+      byLabel: Object.fromEntries(Object.entries(upstreamByLabel).map(([k, v]) => [k, { ...v }])),
+    },
+    requests: { ...responseMetrics },
+    alerts: evaluateAlerts(now),
   });
 });
 
@@ -618,6 +759,7 @@ app.get('/api/health', (req, res) => {
    they can be unit-tested without booting Express. */
 
 app.post('/notify', async (req, res) => {
+  responseMetrics.notify++;
   if (!CONFIG.TG_BOT_TOKEN || !CONFIG.TG_CHAT_ID) {
     return res.status(503).json({ ok: false, error: 'Telegram not configured' });
   }
@@ -755,7 +897,16 @@ function _resetApiAllSnapshot() {
   apiAllSnapshotAt = 0;
 }
 
-module.exports = { app, cache, _resetApiAllSnapshot, safeFetch, upstreamMetrics };
+module.exports = {
+  app,
+  cache,
+  _resetApiAllSnapshot,
+  safeFetch,
+  upstreamMetrics,
+  upstreamByLabel,
+  responseMetrics,
+  evaluateAlerts,
+};
 
 /* Graceful shutdown — stop accepting new connections, cancel all refresh
    timers, then exit. Gives in-flight requests a 10s grace window. */

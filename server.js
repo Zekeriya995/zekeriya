@@ -186,25 +186,66 @@ const cache = {
      unrelated host. */
 const safeAgent = createSafeAgent();
 
-async function safeFetch(url, label) {
+/* Upstream call metrics — exposed by /api/health so monitors can spot
+   sustained 429s or timeouts even when the cache is still warm. */
+const upstreamMetrics = {
+  success: 0,
+  retried: 0,
+  failed: 0,
+  rateLimited: 0,
+  timeout: 0,
+};
+function _isRetryable(err) {
+  if (!err) return false;
+  /* axios timeout / network errors expose a code but no response */
+  if (!err.response) return true;
+  const s = err.response.status;
+  return s === 429 || s === 408 || (s >= 500 && s <= 599);
+}
+const SAFE_FETCH_BACKOFF_MS = [500, 2000];
+
+async function safeFetch(url, label, opts) {
   if (!isAllowedFetchUrl(url)) {
     console.error(`[${label}] Blocked: host not in allowlist`);
+    upstreamMetrics.failed++;
     return null;
   }
-  try {
-    const res = await axios.get(url, {
-      timeout: CONFIG.TIMEOUT,
-      maxRedirects: 0,
-      httpsAgent: safeAgent,
-    });
-    return res.data;
-  } catch (err) {
-    /* Avoid leaking the URL (which may carry tokens) — only the upstream
-       status code if the error came from a response. */
-    const status = err && err.response && err.response.status;
-    console.error(`[${label}] Failed${status ? ` (HTTP ${status})` : ''}`);
-    return null;
+  const maxAttempts = (opts && opts.retries != null ? opts.retries : 2) + 1;
+  let lastErr = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const res = await axios.get(url, {
+        timeout: CONFIG.TIMEOUT,
+        maxRedirects: 0,
+        httpsAgent: safeAgent,
+      });
+      upstreamMetrics.success++;
+      if (attempt > 0) upstreamMetrics.retried++;
+      return res.data;
+    } catch (err) {
+      lastErr = err;
+      const status = err && err.response && err.response.status;
+      if (status === 429) upstreamMetrics.rateLimited++;
+      else if (!err.response) upstreamMetrics.timeout++;
+      const canRetry = attempt < maxAttempts - 1 && _isRetryable(err);
+      if (!canRetry) break;
+      const base = SAFE_FETCH_BACKOFF_MS[attempt] || 2000;
+      const jitter = Math.floor(Math.random() * 250);
+      const wait = base + jitter;
+      console.warn(
+        `[${label}] Retry ${attempt + 1}/${maxAttempts - 1} after ${wait} ms${
+          status ? ` (HTTP ${status})` : ' (network)'
+        }`
+      );
+      await new Promise((r) => setTimeout(r, wait));
+    }
   }
+  upstreamMetrics.failed++;
+  /* Avoid leaking the URL (which may carry tokens) — only the upstream
+     status code if the error came from a response. */
+  const status = lastErr && lastErr.response && lastErr.response.status;
+  console.error(`[${label}] Failed${status ? ` (HTTP ${status})` : ''}`);
+  return null;
 }
 
 /* ═══ DATA FETCHERS ═══ */
@@ -569,6 +610,7 @@ app.get('/api/health', (req, res) => {
     uptime: Math.floor(process.uptime()),
     lastUpdate: cache.lastUpdate,
     ages,
+    upstream: { ...upstreamMetrics },
   });
 });
 
@@ -713,7 +755,7 @@ function _resetApiAllSnapshot() {
   apiAllSnapshotAt = 0;
 }
 
-module.exports = { app, cache, _resetApiAllSnapshot };
+module.exports = { app, cache, _resetApiAllSnapshot, safeFetch, upstreamMetrics };
 
 /* Graceful shutdown — stop accepting new connections, cancel all refresh
    timers, then exit. Gives in-flight requests a 10s grace window. */

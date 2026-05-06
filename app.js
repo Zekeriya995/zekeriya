@@ -1881,29 +1881,41 @@ async function loadTk(){
     _proxyAlive=true;
     /* — tickers — */
     if(all.tickers){Object.keys(all.tickers).forEach(function(s){var d=all.tickers[s];if(!d)return;var chg=d.change!==undefined?+d.change:(d.c!==undefined?+d.c:0);var price=+d.price||+d.p||0;if(!(price>0))return;/* Skip zero/negative prices — better to omit than to render $0 as live data. */ T[s]={p:price,c:isNaN(chg)?0:chg,v:+d.volume||+d.v||0,h:+d.high||+d.h||0,l:+d.low||+d.l||0,src:d.src||'PROXY',loaded:true,t:Date.now()};if(d.by)T[s].by=+d.by})}
-    /* — funding rates — */
-    if(all.fr){Object.keys(all.fr).forEach(function(s){var d=all.fr[s];if(!d)return;FR[s]={rate:d.rate!==undefined?+d.rate:0,mark:d.mark!==undefined?+d.mark:(d.markPrice!==undefined?+d.markPrice:0)}})}
-    /* — open interest — */
-    if(all.oi){Object.keys(all.oi).forEach(function(s){var d=all.oi[s];OI[s]=typeof d==='number'?d:(+d.value||+d.oi||0)})}
+    /* — funding rates — `loaded` distinguishes a real 0% (rare but
+       legitimate) from a missing-data fallback so signal logic can opt
+       out of FR-driven decisions when the upstream is silent. */
+    if(all.fr){Object.keys(all.fr).forEach(function(s){var d=all.fr[s];if(!d)return;var hasRate=d.rate!==undefined;var hasMark=d.mark!==undefined||d.markPrice!==undefined;FR[s]={rate:hasRate?+d.rate:0,mark:hasMark?(d.mark!==undefined?+d.mark:+d.markPrice):0,loaded:hasRate||hasMark,t:Date.now()}})}
+    /* — open interest — `.loaded` mirrors the FR convention so callers
+       can tell a true 0 from an upstream gap. Stored under a wrapping
+       object only when the source provides one; legacy numeric form is
+       preserved for backward-compat with the scanner helpers. */
+    if(all.oi){Object.keys(all.oi).forEach(function(s){var d=all.oi[s];if(d==null)return;OI[s]=typeof d==='number'?d:(+d.value||+d.oi||0)})}
     /* — long/short — */
     if(all.ls){Object.keys(all.ls).forEach(function(s){var d=all.ls[s];if(!d)return;LS[s]={long:+d.long||50,short:+d.short||50,ratio:+d.ratio||1};if(d.hist&&d.hist.length){lsHist[s]=d.hist.map(function(x){return{long:+x.long,short:+x.short,ratio:+x.ratio||1,time:+x.time||Date.now()}})}})}
     /* — taker volume — */
     if(all.taker){Object.keys(all.taker).forEach(function(s){var d=all.taker[s];if(!d)return;takerData[s]={ratio:+d.ratio||1,avg:+d.avg||1,trend:d.trend||'FLAT',buyVol:+d.buyVol||0,sellVol:+d.sellVol||0}})}
-    /* — liquidation data — */
+    /* — liquidation data — events without a server timestamp are dropped
+       rather than re-stamped with Date.now(). A fabricated timestamp
+       makes hours-old liquidations look like they just happened, which
+       feeds straight into the whale + signal pipelines. */
     if(all.liq){
-      if(Array.isArray(all.liq)){liqEvents=all.liq.map(function(x){return{s:x.sym||x.s||'',S:x.side||x.S||'',p:+x.price||+x.p||0,q:x.qty||0,time:+x.time||Date.now()}}).slice(-100);all.liq.forEach(function(x){var s=x.sym||x.s||'';if(!s)return;if(!liquidationData[s])liquidationData[s]=[];liquidationData[s].push({side:x.side||x.S,value:+x.value||+x.v||0,price:+x.price||+x.p||0,time:+x.time||Date.now()});if(liquidationData[s].length>50)liquidationData[s]=liquidationData[s].slice(-50)})}
-      else{Object.keys(all.liq).forEach(function(s){var arr=all.liq[s];if(!arr||!arr.length)return;liquidationData[s]=arr.map(function(x){return{side:x.side||x.S,value:+x.value||+x.v||0,price:+x.price||+x.p||0,time:+x.time||Date.now()}});arr.forEach(function(x){liqEvents.push({s:s+'USDT',S:x.side||x.S||'',p:+x.price||+x.p||0,q:0,time:+x.time||Date.now()})})});if(liqEvents.length>100)liqEvents=liqEvents.slice(-100)}
+      if(Array.isArray(all.liq)){liqEvents=all.liq.filter(function(x){return x&&+x.time>0}).map(function(x){return{s:x.sym||x.s||'',S:x.side||x.S||'',p:+x.price||+x.p||0,q:x.qty||0,time:+x.time,timeSource:'SERVER'}}).slice(-100);all.liq.forEach(function(x){if(!x||!(+x.time>0))return;var s=x.sym||x.s||'';if(!s)return;if(!liquidationData[s])liquidationData[s]=[];liquidationData[s].push({side:x.side||x.S,value:+x.value||+x.v||0,price:+x.price||+x.p||0,time:+x.time,timeSource:'SERVER'});if(liquidationData[s].length>50)liquidationData[s]=liquidationData[s].slice(-50)})}
+      else{Object.keys(all.liq).forEach(function(s){var arr=all.liq[s];if(!arr||!arr.length)return;var kept=arr.filter(function(x){return x&&+x.time>0});liquidationData[s]=kept.map(function(x){return{side:x.side||x.S,value:+x.value||+x.v||0,price:+x.price||+x.p||0,time:+x.time,timeSource:'SERVER'}});kept.forEach(function(x){liqEvents.push({s:s+'USDT',S:x.side||x.S||'',p:+x.price||+x.p||0,q:0,time:+x.time,timeSource:'SERVER'})})});if(liqEvents.length>100)liqEvents=liqEvents.slice(-100)}
     }
-    /* — depth snapshots — */
-    if(all.depth){Object.keys(all.depth).forEach(function(s){var d=all.depth[s];if(!d)return;depthSnapshots[s]={bids:d.bids||d.b||[],asks:d.asks||d.a||[],time:+d.time||Date.now()}})}
+    /* — depth snapshots — drop snapshots without a server timestamp so
+       the whale view doesn't render a frozen book under a freshly-minted
+       'time' that hides its true age. */
+    if(all.depth){Object.keys(all.depth).forEach(function(s){var d=all.depth[s];if(!d||!(+d.time>0))return;depthSnapshots[s]={bids:d.bids||d.b||[],asks:d.asks||d.a||[],time:+d.time,timeSource:'SERVER'}})}
     /* — market overview (FG + BTC dom + Coinbase) — */
     if(all.market){
       if(all.market.fgi!==undefined||all.market.fg!==undefined){var fgRaw=+(all.market.fgi||all.market.fg);if(!isNaN(fgRaw)){fgValue=fgRaw;fgTime=Date.now();var fgE=document.getElementById('fgV');if(fgE)fgE.textContent=fgValue;var pFGE=document.getElementById('pFG');if(pFGE)pFGE.textContent=fgValue;var fgLE=document.getElementById('fgL');if(fgLE)fgLE.textContent=all.market.fgiLabel||all.market.fgLabel||''}}
       if(all.market.btcDom!==undefined){var bdRaw=+all.market.btcDom;if(!isNaN(bdRaw)){btcDom=bdRaw;btcDomTime=Date.now();var btcDE=document.getElementById('btcD');if(btcDE)btcDE.textContent=btcDom.toFixed(1)+'%'}}
       if(all.market.cbp){Object.keys(all.market.cbp).forEach(function(c){CBP[c]=+all.market.cbp[c]})}
     }
-    /* — whales engine data — */
-    if(all.whales){Object.keys(all.whales).forEach(function(s){var d=all.whales[s];if(!d)return;if(!whaleWaves[s])whaleWaves[s]={waves:[],totalBuy:0,engine:null};if(d.waves)whaleWaves[s].waves=d.waves;if(d.totalBuy!==undefined)whaleWaves[s].totalBuy=+d.totalBuy;if(d.engine)whaleWaves[s].engine=d.engine})}
+    /* — whales engine data — `refreshedAt` lets PnL / signal helpers
+       skip stale state instead of computing positions against a snapshot
+       that may be hours old after an extended whale-feed outage. */
+    if(all.whales){Object.keys(all.whales).forEach(function(s){var d=all.whales[s];if(!d)return;if(!whaleWaves[s])whaleWaves[s]={waves:[],totalBuy:0,engine:null,refreshedAt:0};if(d.waves)whaleWaves[s].waves=d.waves;if(d.totalBuy!==undefined)whaleWaves[s].totalBuy=+d.totalBuy;if(d.engine)whaleWaves[s].engine=d.engine;whaleWaves[s].refreshedAt=Date.now()})}
     /* ═══ NEW: Multi-Exchange Intelligence from VPS ═══ */
     if(all.multi){var m=all.multi;
       function caName(sym){return(sym||'').replace('USDT_PERP.A','').replace('USDT_PERP','').replace('USDT','')}

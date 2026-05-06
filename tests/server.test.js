@@ -32,6 +32,8 @@ const {
   upstreamByLabel,
   responseMetrics,
   evaluateAlerts,
+  processAlertTransitions,
+  _resetAlertState,
 } = require('../server.js');
 
 /* Reset the /api/all TTL cache before each /api/all-touching test so
@@ -244,6 +246,49 @@ test('responseMetrics counters increment on the public endpoints', async () => {
   await request(app).get('/api/metrics');
   assert.equal(responseMetrics.apiHealth, before.apiHealth + 1);
   assert.equal(responseMetrics.apiMetrics, before.apiMetrics + 1);
+});
+
+/* ─── alert manager transitions (Telegram) ────────────────────────── */
+
+test('processAlertTransitions fires once on a new alert and respects cooldown', async () => {
+  /* Stub axios.post to count Telegram calls without hitting the API. */
+  const calls = [];
+  const realPost = axios.post;
+  axios.post = async (url, body) => {
+    calls.push({ url, body });
+    return { data: { ok: true } };
+  };
+  _resetAlertState();
+  cache.lastUpdate.tickers = 0; /* makes evaluateAlerts() emit a critical for tickers */
+  /* First tick — should fire one Telegram call for the tickers alert. */
+  const sent1 = await processAlertTransitions(Date.now());
+  /* Second tick within cooldown — already-firing key, no resend. */
+  const sent2 = await processAlertTransitions(Date.now());
+  axios.post = realPost;
+  assert.ok(
+    sent1.some((s) => s.type === 'firing' && /tickers/.test(s.key)),
+    'first tick fires a tickers alert'
+  );
+  assert.equal(sent2.length, 0, 'cooldown blocks re-fire on the next tick');
+});
+
+test('processAlertTransitions emits a RESOLVED on alert clear', async () => {
+  const calls = [];
+  const realPost = axios.post;
+  axios.post = async (url, body) => {
+    calls.push({ url, body });
+    return { data: { ok: true } };
+  };
+  _resetAlertState();
+  cache.lastUpdate.tickers = 0; /* fire */
+  await processAlertTransitions(Date.now());
+  cache.lastUpdate.tickers = Date.now(); /* clear */
+  const sent = await processAlertTransitions(Date.now());
+  axios.post = realPost;
+  assert.ok(
+    sent.some((s) => s.type === 'resolved'),
+    'a RESOLVED transition is emitted when an alert clears'
+  );
 });
 
 /* ─── /api/all ────────────────────────────────────────────────────── */

@@ -768,6 +768,108 @@ app.get('/api/metrics', (req, res) => {
 /* sanitizeTelegramHtml + safeEqual now live in src/server-helpers.js so
    they can be unit-tested without booting Express. */
 
+/* ═══ TELEGRAM ALERT MANAGER ═══
+
+   Pulls evaluateAlerts() on a 60 s loop. New alerts (not present in
+   the previous tick) fire one Telegram message per source; cleared
+   alerts fire a "RESOLVED" message. A per-source 5-minute cooldown
+   prevents flapping. Opt-in via ENABLE_TELEGRAM_ALERTS=true so the
+   loop never runs in dev or test environments — the loop also requires
+   TG_BOT_TOKEN + TG_CHAT_ID to be configured. */
+
+const ALERT_LOOP_INTERVAL_MS = 60 * 1000;
+const ALERT_COOLDOWN_MS = 5 * 60 * 1000;
+const ALERTS_ENABLED = process.env.ENABLE_TELEGRAM_ALERTS === 'true';
+const _alertState = { firing: Object.create(null), lastSentAt: Object.create(null) };
+let _alertTimer = null;
+
+function _alertKey(alert) {
+  return alert.source + '|' + alert.level;
+}
+
+async function _sendAlertTelegram(text) {
+  if (!CONFIG.TG_BOT_TOKEN || !CONFIG.TG_CHAT_ID) return false;
+  try {
+    await axios.post(
+      'https://api.telegram.org/bot' + encodeURIComponent(CONFIG.TG_BOT_TOKEN) + '/sendMessage',
+      { chat_id: CONFIG.TG_CHAT_ID, text: sanitizeTelegramHtml(text), parse_mode: 'HTML' },
+      { timeout: 8000 }
+    );
+    return true;
+  } catch (e) {
+    console.error('[ALERT-TG] send failed:', (e && e.message) || e);
+    return false;
+  }
+}
+
+/* One pass: diff current alerts against last-known-firing, post to
+   Telegram for any new firing or resolved transition that's outside
+   its cooldown. Exported so tests + an operator can drive it on
+   demand without spinning up the timer. */
+async function processAlertTransitions(now) {
+  const t = typeof now === 'number' ? now : Date.now();
+  const current = evaluateAlerts(t);
+  const currentKeys = new Set(current.map(_alertKey));
+  const sent = [];
+
+  /* New / re-firing alerts */
+  for (const a of current) {
+    const key = _alertKey(a);
+    const lastSent = _alertState.lastSentAt[key] || 0;
+    const wasFiring = !!_alertState.firing[key];
+    if (!wasFiring && t - lastSent >= ALERT_COOLDOWN_MS) {
+      const icon = a.level === 'critical' ? '🚨' : '⚠️';
+      const text = `${icon} <b>${a.level.toUpperCase()}</b>\nsource: <code>${a.source}</code>\n${a.message}`;
+      const ok = await _sendAlertTelegram(text);
+      if (ok) {
+        _alertState.lastSentAt[key] = t;
+        sent.push({ key, type: 'firing' });
+      }
+    }
+    _alertState.firing[key] = a;
+  }
+
+  /* Cleared alerts: previously firing, now absent */
+  for (const key of Object.keys(_alertState.firing)) {
+    if (currentKeys.has(key)) continue;
+    const last = _alertState.firing[key];
+    delete _alertState.firing[key];
+    const text = `✅ <b>RESOLVED</b>\nsource: <code>${last.source}</code>\n${last.message}`;
+    const ok = await _sendAlertTelegram(text);
+    if (ok) sent.push({ key, type: 'resolved' });
+  }
+  return sent;
+}
+
+function startAlertLoop() {
+  if (_alertTimer) return;
+  if (!ALERTS_ENABLED) return;
+  if (!CONFIG.TG_BOT_TOKEN || !CONFIG.TG_CHAT_ID) {
+    console.warn('[ALERT-TG] ENABLE_TELEGRAM_ALERTS=true but Telegram not configured — skipping');
+    return;
+  }
+  _alertTimer = setInterval(function () {
+    processAlertTransitions().catch(function (e) {
+      console.error('[ALERT-TG] tick failed:', (e && e.message) || e);
+    });
+  }, ALERT_LOOP_INTERVAL_MS);
+  console.log('[ALERT-TG] alert loop started (' + ALERT_LOOP_INTERVAL_MS / 1000 + 's interval)');
+}
+
+function stopAlertLoop() {
+  if (_alertTimer) {
+    clearInterval(_alertTimer);
+    _alertTimer = null;
+  }
+}
+
+/* Test helper — wipe the in-memory firing/cooldown state so unit tests
+   don't bleed across cases. */
+function _resetAlertState() {
+  for (const k of Object.keys(_alertState.firing)) delete _alertState.firing[k];
+  for (const k of Object.keys(_alertState.lastSentAt)) delete _alertState.lastSentAt[k];
+}
+
 app.post('/notify', async (req, res) => {
   responseMetrics.notify++;
   if (!CONFIG.TG_BOT_TOKEN || !CONFIG.TG_CHAT_ID) {
@@ -872,6 +974,10 @@ async function startDataLoops() {
     setInterval(fetchLiquidations, jitter(CONFIG.LIQ_INTERVAL)),
     setInterval(fetchMarket, jitter(CONFIG.MARKET_INTERVAL))
   );
+
+  /* Telegram alerts on cache-down / sustained-failure transitions.
+     No-op unless ENABLE_TELEGRAM_ALERTS=true and Telegram is wired. */
+  startAlertLoop();
 }
 
 /* Process-level safety nets. An unhandled rejection or uncaught exception
@@ -916,6 +1022,10 @@ module.exports = {
   upstreamByLabel,
   responseMetrics,
   evaluateAlerts,
+  processAlertTransitions,
+  startAlertLoop,
+  stopAlertLoop,
+  _resetAlertState,
 };
 
 /* Graceful shutdown — stop accepting new connections, cancel all refresh

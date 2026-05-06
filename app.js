@@ -949,10 +949,25 @@ var OBI_WINDOW_MS=10*60*1000;
     if(!obiHistory[s].length)delete obiHistory[s];
   });
 })();
+/* Debounce obiHistory persistence. sampleOBI() runs on every depth tick
+   (often >5/s during whale activity), and the prior 2 s debounce + sync
+   localStorage write blocked the main thread for 2-5 ms each pass — a
+   ~15 % CPU spike during heavy order flow. Stretch the debounce to 5 s
+   and defer the write to an idle callback so it never lands inside a
+   paint frame. requestIdleCallback isn't available everywhere (older
+   Safari), so fall back to setTimeout. */
 var _saveOBITimer=null;
+function _saveOBIFlush(){safeSetJSON('nxObi',obiHistory)}
 function saveOBI(){
   if(_saveOBITimer)clearTimeout(_saveOBITimer);
-  _saveOBITimer=setTimeout(function(){safeSetJSON('nxObi',obiHistory)},2000);
+  _saveOBITimer=setTimeout(function(){
+    _saveOBITimer=null;
+    if(typeof requestIdleCallback==='function'){
+      requestIdleCallback(_saveOBIFlush,{timeout:2000});
+    }else{
+      _saveOBIFlush();
+    }
+  },5000);
 }
 function sampleOBI(sym,ratio){
   if(!ratio||!isFinite(ratio)||ratio<=0)return;

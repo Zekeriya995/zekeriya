@@ -104,3 +104,66 @@ test('makeDebouncedSaver — saveFn that throws does not crash the caller', asyn
   await new Promise((r) => setTimeout(r, 30));
   assert.equal(attempts, 2, 'wrapper must remain usable after a thrown save');
 });
+
+test('measureStorageSize — sums utf-16 byte size across keys + values', () => {
+  reset();
+  safeSet('a', 'xx');
+  safeSet('bb', 'yyyy');
+  /* "a" + "xx" = 3 chars; "bb" + "yyyy" = 6 chars. */
+  assert.equal(measureStorageSize(), (3 + 6) * 2);
+});
+
+test('measureStorageSize — returns 0 when localStorage throws', () => {
+  globalThis.localStorage = {
+    get length() {
+      throw new Error('SecurityError');
+    },
+    key: () => null,
+    getItem: () => null,
+    setItem: () => {},
+    removeItem: () => {},
+  };
+  assert.equal(measureStorageSize(), 0);
+});
+
+test('safeSetJSON — pruner runs on quota error and write succeeds after prune', () => {
+  /* Simulated storage that rejects writes once, then accepts them. */
+  let storedFailureUsed = false;
+  globalThis.localStorage = {
+    length: 0,
+    key: () => null,
+    getItem: () => null,
+    setItem() {
+      if (!storedFailureUsed) {
+        storedFailureUsed = true;
+        const e = new Error('QuotaExceededError');
+        e.name = 'QuotaExceededError';
+        throw e;
+      }
+    },
+    removeItem: () => {},
+  };
+  let pruneCalls = 0;
+  registerQuotaPruner(() => {
+    pruneCalls++;
+    return 5; /* freed 5 entries */
+  });
+  assert.equal(safeSetJSON('k', { x: 1 }), true);
+  assert.equal(pruneCalls, 1, 'pruner should fire exactly once');
+});
+
+test('safeSetJSON — returns false when pruner cannot reclaim space', () => {
+  globalThis.localStorage = {
+    length: 0,
+    key: () => null,
+    getItem: () => null,
+    setItem() {
+      const e = new Error('QuotaExceededError');
+      e.name = 'QuotaExceededError';
+      throw e;
+    },
+    removeItem: () => {},
+  };
+  registerQuotaPruner(() => 0); /* nothing to free */
+  assert.equal(safeSetJSON('k', { x: 1 }), false);
+});

@@ -969,6 +969,23 @@ function saveOBI(){
     }
   },5000);
 }
+/* On a quota error, drop half of every per-symbol OBI buffer so the
+   write that triggered the error has room to land. The 10-minute
+   rolling window will refill within a few minutes. */
+if(typeof registerQuotaPruner==='function'){
+  registerQuotaPruner(function(){
+    var dropped=0;
+    Object.keys(obiHistory).forEach(function(s){
+      var arr=obiHistory[s];
+      if(Array.isArray(arr)&&arr.length>4){
+        var keep=Math.floor(arr.length/2);
+        dropped+=arr.length-keep;
+        obiHistory[s]=arr.slice(-keep);
+      }
+    });
+    return dropped;
+  });
+}
 function sampleOBI(sym,ratio){
   if(!ratio||!isFinite(ratio)||ratio<=0)return;
   if(!obiHistory[sym])obiHistory[sym]=[];
@@ -1363,6 +1380,22 @@ function recentTierRates(limit){
    _pending is capped at 200 entries (oldest evicted) to bound storage. */
 var TAG_PERF_KEY='nxTagPerf10';
 var tagPerf={_pending:{}};
+/* On quota pressure, halve the pending evaluation queue. The 200-cap
+   in addToTagPending keeps the queue bounded under normal use, but a
+   long-lived tab combined with a near-full localStorage from other
+   keys can still tip over. Halving sheds 100 oldest pending signals
+   without touching the win/loss tag totals that drive scoring. */
+if(typeof registerQuotaPruner==='function'){
+  registerQuotaPruner(function(){
+    var p=tagPerf._pending||{};
+    var keys=Object.keys(p);
+    if(keys.length<10)return 0;
+    keys.sort(function(a,b){return(p[a].time||0)-(p[b].time||0)});
+    var drop=Math.floor(keys.length/2);
+    for(var i=0;i<drop;i++)delete p[keys[i]];
+    return drop;
+  });
+}
 try{var _saved=JSON.parse(localStorage.getItem(TAG_PERF_KEY)||'null');if(_saved&&typeof _saved==='object'){tagPerf=_saved;if(!tagPerf._pending)tagPerf._pending={}}}catch(e){tagPerf={_pending:{}}}
 var _saveTagPerfTimer=null;
 function saveTagPerf(){

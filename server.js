@@ -528,17 +528,47 @@ app.get('/api/all', (req, res) => {
   res.json(apiAllSnapshot);
 });
 
-/* Health check */
+/* Health check — top-level `status` mirrors tickers freshness (the legacy
+   contract), while `ages` adds a per-cache breakdown so monitors can see
+   exactly which upstream is stale. Returns 503 when tickers is 'down' so
+   external monitors / load balancers can alert without parsing the body. */
+const HEALTH_THRESHOLDS = {
+  tickers: { stale: 30000, down: 60000 },
+  fr: { stale: 120000, down: 300000 },
+  oi: { stale: 120000, down: 300000 },
+  ls: { stale: 120000, down: 300000 },
+  taker: { stale: 120000, down: 300000 },
+  depth: { stale: 60000, down: 180000 },
+  liq: { stale: 120000, down: 600000 },
+  market: { stale: 600000, down: 1800000 },
+};
+function _classifyAge(last, thresholds, now) {
+  if (!last) return { ageMs: null, status: 'down' };
+  const age = now - last;
+  let status;
+  if (age >= thresholds.down) status = 'down';
+  else if (age >= thresholds.stale) status = 'stale';
+  else status = 'healthy';
+  return { ageMs: age, status };
+}
 app.get('/api/health', (req, res) => {
-  const age = Date.now() - (cache.lastUpdate.tickers || 0);
-  res.json({
-    status: age < 30000 ? 'healthy' : age < 60000 ? 'stale' : 'down',
+  const now = Date.now();
+  const ages = {};
+  for (const [key, t] of Object.entries(HEALTH_THRESHOLDS)) {
+    ages[key] = _classifyAge(cache.lastUpdate[key] || 0, t, now);
+  }
+  const status = ages.tickers.status;
+  const httpStatus = status === 'down' ? 503 : 200;
+  res.set('Cache-Control', 'no-store');
+  res.status(httpStatus).json({
+    status,
     coins: Object.keys(cache.tickers).length,
     fr: Object.keys(cache.fr).length,
     oi: Object.keys(cache.oi).length,
     ls: Object.keys(cache.ls).length,
     uptime: Math.floor(process.uptime()),
     lastUpdate: cache.lastUpdate,
+    ages,
   });
 });
 

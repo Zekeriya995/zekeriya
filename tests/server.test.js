@@ -36,10 +36,10 @@ test.after(() => {
 
 /* ─── /api/health ─────────────────────────────────────────────────── */
 
-test('GET /api/health returns down before any tickers are loaded', async () => {
+test('GET /api/health returns 503 + status=down before any tickers are loaded', async () => {
   cache.lastUpdate.tickers = 0;
   const res = await request(app).get('/api/health');
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 503);
   assert.equal(res.body.status, 'down');
   assert.equal(res.body.coins, Object.keys(cache.tickers).length);
 });
@@ -47,13 +47,29 @@ test('GET /api/health returns down before any tickers are loaded', async () => {
 test('GET /api/health reports healthy with a fresh tickers timestamp', async () => {
   cache.lastUpdate.tickers = Date.now();
   const res = await request(app).get('/api/health');
+  assert.equal(res.status, 200);
   assert.equal(res.body.status, 'healthy');
 });
 
 test('GET /api/health flips to stale between 30 s and 60 s', async () => {
   cache.lastUpdate.tickers = Date.now() - 45_000;
   const res = await request(app).get('/api/health');
+  assert.equal(res.status, 200);
   assert.equal(res.body.status, 'stale');
+});
+
+test('GET /api/health exposes per-cache ages with status classification', async () => {
+  const now = Date.now();
+  cache.lastUpdate.tickers = now;
+  cache.lastUpdate.fr = now - 200_000;
+  cache.lastUpdate.oi = 0;
+  const res = await request(app).get('/api/health');
+  assert.equal(res.status, 200);
+  assert.ok(res.body.ages, 'ages object is present');
+  assert.equal(res.body.ages.tickers.status, 'healthy');
+  assert.equal(res.body.ages.fr.status, 'stale');
+  assert.equal(res.body.ages.oi.status, 'down');
+  assert.equal(res.body.ages.oi.ageMs, null);
 });
 
 /* ─── /api/all ────────────────────────────────────────────────────── */

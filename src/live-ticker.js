@@ -68,6 +68,32 @@
     }
   }
 
+  /* Toggle the .lt-stale visual marker on `el` based on T[sym].t age.
+     Renderers that update price text usually leave the displayed value
+     in place when nothing changed — but a price that has not changed
+     because the *stream is dead* must visually distinguish itself from
+     a price that is genuinely flat. Centralising the check here keeps
+     the threshold consistent across pulses. */
+  function _applyStale(el, sym) {
+    if (!el || !el.classList) return false;
+    var info = typeof getPriceAge === 'function' ? getPriceAge(sym) : null;
+    var stale = !info || info.stale;
+    if (stale) {
+      if (!el.classList.contains('lt-stale')) {
+        el.classList.add('lt-stale');
+        if (info && info.ageMs != null) {
+          el.title = 'Price is ' + Math.round(info.ageMs / 1000) + ' s old';
+        } else {
+          el.title = 'Price has no fresh timestamp';
+        }
+      }
+    } else if (el.classList.contains('lt-stale')) {
+      el.classList.remove('lt-stale');
+      if (el.title) el.title = '';
+    }
+    return stale;
+  }
+
   /* ---------- per-page handlers ---------- */
   function pulseDashboard() {
     if (typeof T === 'undefined' || !T) return;
@@ -81,15 +107,14 @@
         var d = T[s];
         if (!d || !(d.p > 0)) continue;
         var pp = prevPrice['top:' + s];
+        var card = topEl.children[i];
+        var priceEl = card && card.querySelector('.coin-card-price');
         if (pp != null && pp !== d.p) {
           changedAny = true;
-          var card = topEl.children[i];
-          if (card) {
-            var priceEl = card.querySelector('.coin-card-price');
-            flick(priceEl, d.p > pp ? 1 : -1);
-          }
+          if (priceEl) flick(priceEl, d.p > pp ? 1 : -1);
         }
         prevPrice['top:' + s] = d.p;
+        _applyStale(priceEl, s);
       }
       if (changedAny && typeof renderTopCoins === 'function') {
         try {
@@ -378,6 +403,7 @@
           if (prev != null && prev !== d.p) flick(pe, d.p > prev ? 1 : -1);
         }
         prevPrice['scan:' + s] = d.p;
+        _applyStale(pe, s);
       }
       if (ce) {
         var ch = typeof d.c === 'number' ? d.c : 0;
@@ -774,6 +800,7 @@
           if (prev != null && prev !== d.p) flick(n, d.p > prev ? 1 : -1);
           prevPrice['mkt:' + sym] = d.p;
         }
+        _applyStale(n, sym);
       } else if (kind === 'change') {
         var ch = typeof d.c === 'number' ? d.c : 0;
         var ctx = (ch >= 0 ? '+' : '') + ch.toFixed(1) + '% (24h)';

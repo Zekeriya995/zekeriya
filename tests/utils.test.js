@@ -268,3 +268,35 @@ test('calcPearson — known hand-computed value', () => {
   const r = calcPearson([1, 2, 3, 4, 5], [2, 4, 5, 4, 5]);
   assert.ok(Math.abs(r - 6 / Math.sqrt(60)) < 1e-12);
 });
+
+test('getPriceAge — fresh tick within threshold is not stale', () => {
+  globalThis.T = { BTC: { p: 50000, t: 1_700_000_000_000 } };
+  const r = getPriceAge('BTC', 30000, 1_700_000_005_000);
+  assert.equal(r.price, 50000);
+  assert.equal(r.ageMs, 5000);
+  assert.equal(r.stale, false);
+});
+
+test('getPriceAge — tick older than threshold is stale', () => {
+  globalThis.T = { BTC: { p: 50000, t: 1_700_000_000_000 } };
+  const r = getPriceAge('BTC', 30000, 1_700_000_045_000);
+  assert.equal(r.price, 50000);
+  assert.equal(r.ageMs, 45000);
+  assert.equal(r.stale, true);
+});
+
+test('getPriceAge — entry without timestamp is treated as stale', () => {
+  globalThis.T = { BTC: { p: 50000 } };
+  const r = getPriceAge('BTC');
+  assert.equal(r.price, 50000);
+  assert.equal(r.ageMs, null);
+  assert.equal(r.stale, true);
+});
+
+test('getPriceAge — missing symbol is stale with null price', () => {
+  globalThis.T = {};
+  const r = getPriceAge('GHOST');
+  assert.equal(r.price, null);
+  assert.equal(r.ageMs, null);
+  assert.equal(r.stale, true);
+});

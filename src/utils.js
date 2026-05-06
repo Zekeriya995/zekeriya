@@ -39,6 +39,25 @@ function fP(p) {
   return '$' + p.toFixed(6);
 }
 
+/* Price freshness — checks how old the cached T[sym] tick is so the UI
+   can grey out a price the moment its stream stops feeding. Returns:
+     { price, ageMs, stale }
+   `stale` is true when the price is missing, has no timestamp, or is
+   older than `thresholdMs` (default 30 s). T[sym].t is set by the
+   WebSocket ticker stream and the REST loadTk(); if neither has run
+   for the symbol the entry may have a price but no timestamp, which
+   we treat as stale. */
+var PRICE_STALE_DEFAULT_MS = 30000;
+function getPriceAge(sym, thresholdMs, now) {
+  var ts = thresholdMs == null ? PRICE_STALE_DEFAULT_MS : +thresholdMs;
+  var n = now == null ? Date.now() : +now;
+  var d = sym && typeof T !== 'undefined' && T ? T[sym] : null;
+  if (!d || !(d.p > 0)) return { price: null, ageMs: null, stale: true };
+  if (!d.t) return { price: d.p, ageMs: null, stale: true };
+  var age = n - d.t;
+  return { price: d.p, ageMs: age, stale: age > ts };
+}
+
 /* HTML escape — wrap API-derived strings that enter innerHTML */
 function esc(s) {
   if (s == null) return '';

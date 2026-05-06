@@ -144,6 +144,8 @@ export default [
         safeSet: 'readonly',
         safeRemove: 'readonly',
         makeDebouncedSaver: 'readonly',
+        measureStorageSize: 'readonly',
+        registerQuotaPruner: 'readonly',
         /* Declared in src/translations.js */
         TR: 'readonly',
         t: 'readonly',
@@ -360,6 +362,8 @@ export default [
         safeSetJSON: 'readonly',
         safeRemove: 'readonly',
         makeDebouncedSaver: 'readonly',
+        measureStorageSize: 'readonly',
+        registerQuotaPruner: 'readonly',
         /* From src/notifications.js (loaded in tests/load.test.js) */
         notify: 'readonly',
         /* From src/price-stream.js (loaded in tests/price-stream.test.js) */

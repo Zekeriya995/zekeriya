@@ -690,6 +690,28 @@
   /* =====================================================================
    *                          MULTI-TICKER STRIP
    * =====================================================================*/
+  /* The mini-ticker grid is rebuilt via innerHTML on every render pass
+     (~1.7 Hz). The previous code attached a fresh click handler to every
+     button on every rebuild — at SYMBOLS.length × ~6000 renders per hour
+     that orphans tens of thousands of listeners on detached buttons over
+     a long session, leaking ~10 MB / 8 h.
+
+     Switch to a single delegated listener on the container, attached
+     once on the first render. The listener walks event.target up to the
+     nearest .lv-mini-card and reads data-sym from there, so it works
+     against the freshly-rebuilt children without ever needing to know
+     about them. */
+  var _miniGridDelegationBound = false;
+  function _ensureMiniGridDelegation(el) {
+    if (_miniGridDelegationBound || !el) return;
+    el.addEventListener('click', function (e) {
+      var card = e.target && e.target.closest && e.target.closest('.lv-mini-card');
+      if (!card || !el.contains(card)) return;
+      var sym = card.getAttribute('data-sym');
+      if (sym && sym !== state.symbol) LiveTrading.setSymbol(sym);
+    });
+    _miniGridDelegationBound = true;
+  }
   function renderMiniTickers() {
     var el = document.getElementById('lvMiniGrid');
     if (!el) return;
@@ -725,13 +747,7 @@
         '</button>';
     }
     el.innerHTML = html;
-    var btns = el.querySelectorAll('.lv-mini-card');
-    for (var j = 0; j < btns.length; j++) {
-      btns[j].addEventListener('click', function () {
-        var sym = this.getAttribute('data-sym');
-        if (sym && sym !== state.symbol) LiveTrading.setSymbol(sym);
-      });
-    }
+    _ensureMiniGridDelegation(el);
   }
 
   /* =====================================================================

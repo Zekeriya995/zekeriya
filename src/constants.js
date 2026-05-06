@@ -26,7 +26,7 @@ const PROXY = (function () {
       return String(window.NEXUS_PROXY).replace(/\/+$/, '');
     }
   } catch (e) {}
-  return 'https://cemetery-contacting-survive-disposition.trycloudflare.com';
+  return 'https://screenshot-upgrading-boating-excellent.trycloudflare.com';
 })();
 
 /* Watchlist — seeded with the top 100 by market cap; updateTop100() replaces

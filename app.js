@@ -6671,6 +6671,43 @@ function nxShowUpdateBanner() {
   div.appendChild(btnLater);
   document.body.appendChild(div);
 }
+/* Delegated event dispatcher (foundation for P3.3 phase A) — when an
+   element carries data-action="fnName", a single click listener on
+   document looks the function up on `window`, splits data-args on '|'
+   into positional arguments, and invokes it with the element + event
+   appended at the end. This lets us migrate `onclick="fn('a',this)"`
+   sites to `data-action="fn" data-args="a"` one section at a time
+   without committing to a large refactor in a single PR. The current
+   inline handlers continue to work — only elements that opt in via
+   data-action engage the dispatcher.
+
+   Element opt-in shapes:
+     <button data-action="addFav">…</button>
+     <button data-action="setScanTF" data-args="15m">…</button>
+     <button data-action="filterTrade" data-args="all">…</button>
+
+   The dispatcher silently ignores actions that don't resolve to a
+   function so a typo can't blow up the whole page. */
+(function () {
+  if (typeof document === 'undefined' || !document.addEventListener) return;
+  function dispatch(e) {
+    var el = e.target && e.target.closest && e.target.closest('[data-action]');
+    if (!el) return;
+    var name = el.getAttribute('data-action');
+    var fn = name && typeof window[name] === 'function' ? window[name] : null;
+    if (!fn) return;
+    var raw = el.getAttribute('data-args');
+    var args = raw ? raw.split('|') : [];
+    try {
+      fn.apply(el, args.concat([el, e]));
+    } catch (err) {
+      dbg('[action] ' + name + ' threw:', err && err.message);
+    }
+  }
+  document.addEventListener('click', dispatch);
+  document.addEventListener('change', dispatch);
+})();
+
 if ('serviceWorker' in navigator) {
   try {
     navigator.serviceWorker.register('./sw.js').then(function (reg) {

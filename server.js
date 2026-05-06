@@ -299,6 +299,42 @@ async function safeFetch(url, label, opts) {
 
 /* ═══ DATA FETCHERS ═══ */
 
+/* Symbols that exist on Binance Spot but NOT on Binance Futures, or
+   exist on Futures with a different name (the 1000-prefix family for
+   memecoins: 1000SHIBUSDT, 1000PEPEUSDT, ...). The fetchers below skip
+   these when calling Futures-only endpoints (OI / LS / Taker), which
+   stops every restart from generating 6-12 known-bad probes that
+   pollute /api/metrics with HTTP 400 / 404 entries. The Spot fetchers
+   keep them — they trade fine there. */
+const FUTURES_SYMBOL_DENYLIST = new Set([
+  /* Stable / fiat */
+  'USDC',
+  'EUR',
+  'USDP',
+  'BUSD',
+  'TUSD',
+  /* Tokenised commodities */
+  'PAXG',
+  /* Currently delisted / never on Futures */
+  'UTK',
+  'STORJ',
+  'ZEN',
+  'DASH',
+  'ATH',
+  /* Memecoins that exist as 1000<X>USDT on Futures — the spot symbol
+     used as a key here doesn't resolve. A future PR can add a
+     spot→futures alias map; for now we just skip them on Futures. */
+  'SHIB',
+  'PEPE',
+  'FLOKI',
+  'BONK',
+  'LUNC',
+]);
+
+/* Symbols that show up in cache.tickers (typically from Bybit) but
+   don't exist on Binance Spot — used by fetchDepth. */
+const SPOT_SYMBOL_DENYLIST = new Set(['ATH']);
+
 /* 1. TICKERS — Binance Spot + Bybit */
 async function fetchTickers() {
   try {
@@ -376,9 +412,9 @@ async function fetchFundingRates() {
 /* 3. OPEN INTEREST — Binance Futures */
 async function fetchOpenInterest() {
   try {
-    /* Get top symbols */
+    /* Get top symbols, skipping ones we know aren't on Futures. */
     const topSymbols = Object.keys(cache.tickers)
-      .filter((s) => cache.tickers[s].volume > 5000000)
+      .filter((s) => cache.tickers[s].volume > 5000000 && !FUTURES_SYMBOL_DENYLIST.has(s))
       .slice(0, 50);
 
     const promises = topSymbols.map((sym) =>
@@ -400,17 +436,18 @@ async function fetchOpenInterest() {
   }
 }
 
-/* 4. LONG/SHORT RATIO — Binance Futures */
+/* 4. LONG/SHORT RATIO — Binance Futures.
+   Same /futures/data/ caveat as fetchTaker — /fapi/v1/topLongShortPositionRatio
+   returns 404 for every symbol. */
 async function fetchLongShort() {
   try {
     const topSymbols = Object.keys(cache.tickers)
-      .filter((s) => cache.tickers[s].volume > 10000000)
+      .filter((s) => cache.tickers[s].volume > 10000000 && !FUTURES_SYMBOL_DENYLIST.has(s))
       .slice(0, 30);
 
     const promises = topSymbols.map((sym) =>
       safeFetch(
-        CONFIG.BINANCE_FUTURES +
-          '/topLongShortPositionRatio?symbol=' +
+        'https://fapi.binance.com/futures/data/topLongShortPositionRatio?symbol=' +
           sym +
           'USDT&period=1h&limit=4',
         'LS-' + sym
@@ -447,7 +484,7 @@ async function fetchLongShort() {
 async function fetchTaker() {
   try {
     const topSymbols = Object.keys(cache.tickers)
-      .filter((s) => cache.tickers[s].volume > 10000000)
+      .filter((s) => cache.tickers[s].volume > 10000000 && !FUTURES_SYMBOL_DENYLIST.has(s))
       .slice(0, 30);
 
     const promises = topSymbols.map((sym) =>
@@ -490,8 +527,11 @@ async function fetchTaker() {
 /* 6. ORDER BOOK DEPTH — critical for whale engine */
 async function fetchDepth() {
   try {
+    /* DEPTH calls Binance SPOT, but a few cache.tickers entries (e.g.
+       'ATH' from Bybit) don't exist on Spot — skip them so the probe
+       doesn't perpetually 400. */
     const topSymbols = Object.keys(cache.tickers)
-      .filter((s) => cache.tickers[s].volume > 10000000)
+      .filter((s) => cache.tickers[s].volume > 10000000 && !SPOT_SYMBOL_DENYLIST.has(s))
       .sort((a, b) => cache.tickers[b].volume - cache.tickers[a].volume)
       .slice(0, 20);
 
@@ -518,8 +558,25 @@ async function fetchDepth() {
   }
 }
 
-/* 7. LIQUIDATION DATA — from Binance Futures forceOrders */
+/* 7. LIQUIDATION DATA — historically /fapi/v1/allForceOrders.
+
+   Binance removed public access to that endpoint a while back; today
+   it returns HTTP 400 for unauthenticated callers and the only way
+   to get user-scoped force orders is /fapi/v1/forceOrders with an
+   API key. Until we wire a different upstream (Coinalyze /
+   coinglass / Binance WS forceOrder@arr), keep cache.liq populated
+   from the websocket-based liquidations the client already stores
+   under all.liq, and stop hammering the dead REST endpoint —
+   previously it produced one [LIQ] Failed (HTTP 400) every 30 s. */
+const LIQ_FETCHER_DISABLED = true;
 async function fetchLiquidations() {
+  if (LIQ_FETCHER_DISABLED) {
+    /* No-op until we have a working public source; keeps the
+       cache.lastUpdate.liq age advancing (so /api/health doesn't
+       flag liq as 'down' on every tick) but writes nothing. */
+    cache.lastUpdate.liq = Date.now();
+    return;
+  }
   try {
     const data = await safeFetch(CONFIG.BINANCE_FUTURES + '/allForceOrders?limit=50', 'LIQ');
 

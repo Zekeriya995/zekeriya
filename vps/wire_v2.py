@@ -6,8 +6,11 @@ Safe: backup → inject → syntax-check → auto-rollback on syntax error.
 Idempotent: detects prior wiring and exits without changes.
 
 Usage on VPS:
-    python3 /root/wire_v2.py
+    python3 /root/wire_v2.py            # apply
+    python3 /root/wire_v2.py --dry-run  # show patch, write nothing
 """
+import argparse
+import hashlib
 import re
 import shutil
 import subprocess
@@ -50,42 +53,82 @@ def fail(msg, code=1):
     sys.exit(code)
 
 
+def sha256_of(path: Path) -> str:
+    h = hashlib.sha256()
+    h.update(path.read_bytes())
+    return h.hexdigest()
+
+
+def transform(src: str) -> str:
+    """Apply both injections + the import line. Raises ValueError on
+    any anchor mismatch so the caller can decide whether to abort or
+    retry against a different snapshot."""
+    if IMPORT_LINE in src or "v2_gate" in src:
+        raise ValueError("already wired")
+
+    lines = src.split("\n")
+    imp_indices = [
+        i for i, l in enumerate(lines) if re.match(r"^(import |from )", l)
+    ]
+    if not imp_indices:
+        raise ValueError("no import statements found in target")
+    lines.insert(imp_indices[-1] + 1, IMPORT_LINE)
+    out = "\n".join(lines)
+
+    out, n = ULTRA_ANCHOR.subn(ULTRA_INJECT, out, count=1)
+    if n != 1:
+        raise ValueError("ULTRA anchor not found")
+
+    out, n = GEM_ANCHOR.subn(GEM_INJECT, out, count=1)
+    if n != 1:
+        raise ValueError("GEM anchor not found")
+    return out
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what would change without writing the file",
+    )
+    args = parser.parse_args()
+
     if not TARGET.exists():
         fail(f"missing: {TARGET}")
     if not PATCH.exists():
         fail(f"missing: {PATCH} — re-run the curl from Phase 2")
 
     src = TARGET.read_text()
+    before_hash = sha256_of(TARGET)
 
-    if IMPORT_LINE in src or "v2_gate" in src:
-        print("✅ already wired — no changes made")
+    try:
+        new_src = transform(src)
+    except ValueError as e:
+        msg = str(e)
+        if msg == "already wired":
+            print("✅ already wired — no changes made")
+            sys.exit(0)
+        fail(f"{msg} — file structure changed; aborted")
+
+    if args.dry_run:
+        added = len(new_src) - len(src)
+        print("🔍 dry run — no file written")
+        print(f"   target:        {TARGET}")
+        print(f"   sha256 before: {before_hash}")
+        print(f"   bytes added:   +{added}")
+        print(f"   would write to: {TARGET}")
         sys.exit(0)
 
     shutil.copy(TARGET, BACKUP)
     print(f"📦 backup → {BACKUP}")
 
-    lines = src.split("\n")
-    last_imp = max(i for i, l in enumerate(lines)
-                   if re.match(r"^(import |from )", l))
-    lines.insert(last_imp + 1, IMPORT_LINE)
-    src = "\n".join(lines)
-
-    new_src, n = ULTRA_ANCHOR.subn(ULTRA_INJECT, src, count=1)
-    if n != 1:
-        fail("ULTRA anchor not found — file structure changed; aborted")
-    src = new_src
-
-    new_src, n = GEM_ANCHOR.subn(GEM_INJECT, src, count=1)
-    if n != 1:
-        fail("GEM anchor not found — file structure changed; aborted")
-    src = new_src
-
-    TARGET.write_text(src)
+    TARGET.write_text(new_src)
 
     result = subprocess.run(
         ["python3", "-m", "py_compile", str(TARGET)],
-        capture_output=True, text=True
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         print("⚠️  syntax error after wiring — restoring backup")
@@ -93,17 +136,22 @@ def main():
         shutil.copy(BACKUP, TARGET)
         fail("rolled back; nothing changed")
 
-    print(f"✅ wired successfully")
-    print(f"   import added after line {last_imp + 1}")
+    after_hash = sha256_of(TARGET)
+    print("✅ wired successfully")
+    print(f"   sha256 before: {before_hash}")
+    print(f"   sha256 after:  {after_hash}")
     print(f"   _check_ultra: 1 gate inserted")
     print(f"   _check_gem:   1 gate inserted (with synth score)")
     print(f"   syntax check: OK")
     print(f"   backup:       {BACKUP}")
     print()
-    print("Next: DRY_RUN test")
+    print("Next: refresh the drift manifest and run the DRY_RUN test")
+    print("  bash /root/verify_drift.sh --record")
     print("  sudo systemctl stop nexus-notifier")
     print("  timeout 1800 env NEXUS_DRY_RUN=1 PYTHONUNBUFFERED=1 \\")
-    print("      python3 /root/nexus_notifier.py 2>&1 | tee /tmp/v2_dry.log | grep '\\[V2'")
+    print(
+        "      python3 /root/nexus_notifier.py 2>&1 | tee /tmp/v2_dry.log | grep '\\[V2'"
+    )
 
 
 if __name__ == "__main__":

@@ -104,3 +104,40 @@ sudo systemctl restart nexus-notifier
 ```
 
 `v2_patch.py` is otherwise inert — leaving the file in place causes no side effects.
+
+## Drift detection
+
+The `wire_*.py` scripts inject code at fragile regex anchors. To catch
+out-of-band edits — manual nano sessions, partial updates, swapped
+versions — the repo ships a checksum-based detector.
+
+```bash
+# After every clean wiring, snapshot the known-good state:
+bash /root/verify_drift.sh --record
+
+# Before any future wire run (or as a cron):
+bash /root/verify_drift.sh
+```
+
+`verify_drift.sh` watches:
+
+- `/root/nexus_notifier.py`
+- `/root/v2_patch.py`
+- `/root/wire_v2.py`
+- `/root/wire_whale.py`
+
+`--check` (default) returns exit 1 on drift so a cron can alert. `--report`
+prints a human-readable status table.
+
+Both wire scripts now also accept `--dry-run` and print the SHA-256 of
+the file before/after the patch on success, so the manifest can be
+updated automatically by an orchestration script.
+
+```bash
+# preview without writing:
+python3 /root/wire_v2.py --dry-run
+
+# normal apply, then refresh the manifest:
+python3 /root/wire_v2.py
+bash /root/verify_drift.sh --record
+```

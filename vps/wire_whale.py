@@ -5,10 +5,16 @@ Wire v2 gate into _maybe_emit_whale().
 Idempotent. Requires wire_v2.py to have run first (for the v2 import line).
 Inserts gate AFTER dedup + waves checks, BEFORE render_whale().
 
+Usage on VPS:
+    python3 /root/wire_whale.py            # apply
+    python3 /root/wire_whale.py --dry-run  # show patch, write nothing
+
 Tier derivation:
   1. Try sum(w["amount"]) → tier_whale(total) — uses v1's existing thresholds
   2. Fallback if schema differs: kind=whale_single → Gold, else Silver
 """
+import argparse
+import hashlib
 import re
 import shutil
 import subprocess
@@ -52,31 +58,69 @@ def fail(msg, code=1):
     sys.exit(code)
 
 
+def sha256_of(path: Path) -> str:
+    h = hashlib.sha256()
+    h.update(path.read_bytes())
+    return h.hexdigest()
+
+
+def transform(src: str) -> str:
+    """Inject the whale gate. Raises ValueError on prior wiring or
+    missing prerequisites so the caller can decide to abort."""
+    if "v2_gate(\n        sym, 'WHALE'" in src or "v2_gate(sym, 'WHALE'" in src:
+        raise ValueError("already wired")
+    if "from v2_patch import" not in src:
+        raise ValueError("v2 import not found — run wire_v2.py first")
+
+    out, n = WHALE_ANCHOR.subn(WHALE_INJECT, src, count=1)
+    if n != 1:
+        raise ValueError("whale anchor not found")
+    return out
+
+
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="report what would change without writing the file",
+    )
+    args = parser.parse_args()
+
     if not TARGET.exists():
         fail(f"missing: {TARGET}")
 
     src = TARGET.read_text()
+    before_hash = sha256_of(TARGET)
 
-    if "v2_gate(\n        sym, 'WHALE'" in src or "v2_gate(sym, 'WHALE'" in src:
-        print("✅ whale already gated — no changes")
+    try:
+        new_src = transform(src)
+    except ValueError as e:
+        msg = str(e)
+        if msg == "already wired":
+            print("✅ whale already gated — no changes")
+            sys.exit(0)
+        if "v2 import not found" in msg:
+            fail(msg)
+        fail(f"{msg} — _maybe_emit_whale structure changed")
+
+    if args.dry_run:
+        added = len(new_src) - len(src)
+        print("🔍 dry run — no file written")
+        print(f"   target:        {TARGET}")
+        print(f"   sha256 before: {before_hash}")
+        print(f"   bytes added:   +{added}")
         sys.exit(0)
-
-    if "from v2_patch import" not in src:
-        fail("v2 import not found — run wire_v2.py first")
 
     shutil.copy(TARGET, BACKUP)
     print(f"📦 backup → {BACKUP}")
-
-    new_src, n = WHALE_ANCHOR.subn(WHALE_INJECT, src, count=1)
-    if n != 1:
-        fail("whale anchor not found — _maybe_emit_whale structure changed")
 
     TARGET.write_text(new_src)
 
     result = subprocess.run(
         ["python3", "-m", "py_compile", str(TARGET)],
-        capture_output=True, text=True
+        capture_output=True,
+        text=True,
     )
     if result.returncode != 0:
         print("⚠️  syntax error — restoring backup")
@@ -84,14 +128,20 @@ def main():
         shutil.copy(BACKUP, TARGET)
         fail("rolled back")
 
+    after_hash = sha256_of(TARGET)
     print("✅ whale wired + syntax OK")
+    print(f"   sha256 before: {before_hash}")
+    print(f"   sha256 after:  {after_hash}")
     print(f"   backup: {BACKUP}")
     print()
-    print("Next: 5-min DRY_RUN to see whale rejections")
+    print("Next: refresh the drift manifest then run the DRY_RUN test")
+    print("  bash /root/verify_drift.sh --record")
     print("  > /tmp/v2_dry.log")
     print("  sudo systemctl stop nexus-notifier")
     print("  timeout 300 env NEXUS_DRY_RUN=1 PYTHONUNBUFFERED=1 \\")
-    print("      python3 /root/nexus_notifier.py 2>&1 | tee /tmp/v2_dry.log | grep '\\[V2'")
+    print(
+        "      python3 /root/nexus_notifier.py 2>&1 | tee /tmp/v2_dry.log | grep '\\[V2'"
+    )
 
 
 if __name__ == "__main__":

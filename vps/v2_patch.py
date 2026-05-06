@@ -95,6 +95,16 @@ def get_tier(score):
 # ============================================================
 # Layer 4: Rate Limits (per tier, sliding 1h window)
 # ============================================================
+# How the sliding window works:
+#   * Each accepted signal appends `now` to its tier's deque.
+#   * Every call pops entries older than (now - 3600) before checking,
+#     so the rolling 1 h count stays correct even after long silences.
+#   * Diamond's effective cap (9999) means we never block, but we still
+#     trim its deque on every call so it doesn't grow unbounded.
+# Memory note: cleanup is incremental (only runs on rate_limit_ok()
+# calls). A tier that goes silent for many hours retains its old
+# entries in memory until the next call, when they all get popped at
+# once. With per-tier deques and tens of entries this is negligible.
 RATE_LIMITS = {"Silver": 5, "Gold": 3, "Diamond": 9999}
 _RATE_BUCKETS = defaultdict(deque)
 
@@ -108,6 +118,21 @@ def rate_limit_ok(tier):
         return False
     bucket.append(now)
     return True
+
+
+def rate_limit_status():
+    """Return per-tier (kept, limit) snapshot for diagnostics. Pops
+    expired entries on the way through so the count is always live.
+    Used by `v2_log` callers and operator scripts to see how close to
+    the cap each tier is sitting."""
+    now = time.time()
+    out = {}
+    for tier in RATE_LIMITS:
+        bucket = _RATE_BUCKETS[tier]
+        while bucket and bucket[0] < now - 3600:
+            bucket.popleft()
+        out[tier] = {"used": len(bucket), "limit": RATE_LIMITS[tier]}
+    return out
 
 
 # ============================================================

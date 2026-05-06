@@ -75,6 +75,11 @@
     };
     ws.onclose = function () {
       st.ws = null;
+      /* Drop the cached order book so a late subscriber that joins
+         during the reconnect window doesn't get replayed a frozen
+         book that may be many seconds old. The next real message
+         will repopulate st.last. */
+      st.last = null;
       if (st.subs.length) _scheduleReconnect(key);
     };
     ws.onerror = function () {

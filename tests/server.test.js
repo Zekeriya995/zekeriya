@@ -13,6 +13,7 @@ const request = require('supertest');
    doesn't try to make a real Telegram API call. */
 const axios = require('axios');
 const realAxiosPost = axios.post;
+const realAxiosGet = axios.get;
 axios.post = async () => ({ data: { ok: true, result: { message_id: 1 } } });
 
 /* Configure the server before loading it. */
@@ -22,7 +23,7 @@ process.env.TG_CHAT_ID = '42';
 process.env.NEXUS_NOTIFY_SECRET = 'topsecret-test';
 process.env.ALLOWED_ORIGINS = 'https://example.test,https://other.test';
 
-const { app, cache, _resetApiAllSnapshot } = require('../server.js');
+const { app, cache, _resetApiAllSnapshot, safeFetch, upstreamMetrics } = require('../server.js');
 
 /* Reset the /api/all TTL cache before each /api/all-touching test so
    stale snapshots don't bleed between cases. */
@@ -32,14 +33,83 @@ function freshSnapshot() {
 
 test.after(() => {
   axios.post = realAxiosPost;
+  axios.get = realAxiosGet;
+});
+
+/* ─── safeFetch retries ───────────────────────────────────────────── */
+
+function _resetUpstreamMetrics() {
+  upstreamMetrics.success = 0;
+  upstreamMetrics.retried = 0;
+  upstreamMetrics.failed = 0;
+  upstreamMetrics.rateLimited = 0;
+  upstreamMetrics.timeout = 0;
+}
+
+test('safeFetch retries on 429 and succeeds on the second attempt', async () => {
+  _resetUpstreamMetrics();
+  let calls = 0;
+  axios.get = async () => {
+    calls++;
+    if (calls === 1) {
+      const err = new Error('429');
+      err.response = { status: 429 };
+      throw err;
+    }
+    return { data: { ok: true } };
+  };
+  const result = await safeFetch('https://api.binance.com/api/v3/ping', 'TEST-429');
+  axios.get = realAxiosGet;
+  assert.equal(calls, 2);
+  assert.deepEqual(result, { ok: true });
+  assert.equal(upstreamMetrics.success, 1);
+  assert.equal(upstreamMetrics.retried, 1);
+  assert.equal(upstreamMetrics.rateLimited, 1);
+  assert.equal(upstreamMetrics.failed, 0);
+});
+
+test('safeFetch does not retry on 4xx other than 429', async () => {
+  _resetUpstreamMetrics();
+  let calls = 0;
+  axios.get = async () => {
+    calls++;
+    const err = new Error('400');
+    err.response = { status: 400 };
+    throw err;
+  };
+  const result = await safeFetch('https://api.binance.com/api/v3/ping', 'TEST-400');
+  axios.get = realAxiosGet;
+  assert.equal(calls, 1);
+  assert.equal(result, null);
+  assert.equal(upstreamMetrics.failed, 1);
+  assert.equal(upstreamMetrics.retried, 0);
+});
+
+test('safeFetch retries on network errors and gives up after the configured cap', async () => {
+  _resetUpstreamMetrics();
+  let calls = 0;
+  axios.get = async () => {
+    calls++;
+    const err = new Error('timeout');
+    /* No err.response → treated as a network/timeout error */
+    throw err;
+  };
+  const result = await safeFetch('https://api.binance.com/api/v3/ping', 'TEST-NET', {
+    retries: 1,
+  });
+  axios.get = realAxiosGet;
+  assert.equal(calls, 2);
+  assert.equal(result, null);
+  assert.equal(upstreamMetrics.failed, 1);
+  assert.equal(upstreamMetrics.timeout, 2);
 });
 
 /* ─── /api/health ─────────────────────────────────────────────────── */
 
-test('GET /api/health returns down before any tickers are loaded', async () => {
+test('GET /api/health returns 503 + status=down before any tickers are loaded', async () => {
   cache.lastUpdate.tickers = 0;
   const res = await request(app).get('/api/health');
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 503);
   assert.equal(res.body.status, 'down');
   assert.equal(res.body.coins, Object.keys(cache.tickers).length);
 });
@@ -47,13 +117,29 @@ test('GET /api/health returns down before any tickers are loaded', async () => {
 test('GET /api/health reports healthy with a fresh tickers timestamp', async () => {
   cache.lastUpdate.tickers = Date.now();
   const res = await request(app).get('/api/health');
+  assert.equal(res.status, 200);
   assert.equal(res.body.status, 'healthy');
 });
 
 test('GET /api/health flips to stale between 30 s and 60 s', async () => {
   cache.lastUpdate.tickers = Date.now() - 45_000;
   const res = await request(app).get('/api/health');
+  assert.equal(res.status, 200);
   assert.equal(res.body.status, 'stale');
+});
+
+test('GET /api/health exposes per-cache ages with status classification', async () => {
+  const now = Date.now();
+  cache.lastUpdate.tickers = now;
+  cache.lastUpdate.fr = now - 200_000;
+  cache.lastUpdate.oi = 0;
+  const res = await request(app).get('/api/health');
+  assert.equal(res.status, 200);
+  assert.ok(res.body.ages, 'ages object is present');
+  assert.equal(res.body.ages.tickers.status, 'healthy');
+  assert.equal(res.body.ages.fr.status, 'stale');
+  assert.equal(res.body.ages.oi.status, 'down');
+  assert.equal(res.body.ages.oi.ageMs, null);
 });
 
 /* ─── /api/all ────────────────────────────────────────────────────── */

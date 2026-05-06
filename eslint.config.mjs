@@ -56,6 +56,8 @@ export default [
         calcPearson: 'readonly',
         dbg: 'readonly',
         NEXUS_DEBUG_ENABLED: 'readonly',
+        getPriceAge: 'readonly',
+        PRICE_STALE_DEFAULT_MS: 'readonly',
         /* Declared in src/scanner-helpers.js */
         isConfirmedBreakout: 'readonly',
         tfAlignment: 'readonly',
@@ -302,6 +304,8 @@ export default [
         calcPearson: 'readonly',
         dbg: 'readonly',
         NEXUS_DEBUG_ENABLED: 'readonly',
+        getPriceAge: 'readonly',
+        PRICE_STALE_DEFAULT_MS: 'readonly',
         /* From src/scanner-helpers.js */
         isConfirmedBreakout: 'readonly',
         tfAlignment: 'readonly',

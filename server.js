@@ -186,25 +186,66 @@ const cache = {
      unrelated host. */
 const safeAgent = createSafeAgent();
 
-async function safeFetch(url, label) {
+/* Upstream call metrics — exposed by /api/health so monitors can spot
+   sustained 429s or timeouts even when the cache is still warm. */
+const upstreamMetrics = {
+  success: 0,
+  retried: 0,
+  failed: 0,
+  rateLimited: 0,
+  timeout: 0,
+};
+function _isRetryable(err) {
+  if (!err) return false;
+  /* axios timeout / network errors expose a code but no response */
+  if (!err.response) return true;
+  const s = err.response.status;
+  return s === 429 || s === 408 || (s >= 500 && s <= 599);
+}
+const SAFE_FETCH_BACKOFF_MS = [500, 2000];
+
+async function safeFetch(url, label, opts) {
   if (!isAllowedFetchUrl(url)) {
     console.error(`[${label}] Blocked: host not in allowlist`);
+    upstreamMetrics.failed++;
     return null;
   }
-  try {
-    const res = await axios.get(url, {
-      timeout: CONFIG.TIMEOUT,
-      maxRedirects: 0,
-      httpsAgent: safeAgent,
-    });
-    return res.data;
-  } catch (err) {
-    /* Avoid leaking the URL (which may carry tokens) — only the upstream
-       status code if the error came from a response. */
-    const status = err && err.response && err.response.status;
-    console.error(`[${label}] Failed${status ? ` (HTTP ${status})` : ''}`);
-    return null;
+  const maxAttempts = (opts && opts.retries != null ? opts.retries : 2) + 1;
+  let lastErr = null;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      const res = await axios.get(url, {
+        timeout: CONFIG.TIMEOUT,
+        maxRedirects: 0,
+        httpsAgent: safeAgent,
+      });
+      upstreamMetrics.success++;
+      if (attempt > 0) upstreamMetrics.retried++;
+      return res.data;
+    } catch (err) {
+      lastErr = err;
+      const status = err && err.response && err.response.status;
+      if (status === 429) upstreamMetrics.rateLimited++;
+      else if (!err.response) upstreamMetrics.timeout++;
+      const canRetry = attempt < maxAttempts - 1 && _isRetryable(err);
+      if (!canRetry) break;
+      const base = SAFE_FETCH_BACKOFF_MS[attempt] || 2000;
+      const jitter = Math.floor(Math.random() * 250);
+      const wait = base + jitter;
+      console.warn(
+        `[${label}] Retry ${attempt + 1}/${maxAttempts - 1} after ${wait} ms${
+          status ? ` (HTTP ${status})` : ' (network)'
+        }`
+      );
+      await new Promise((r) => setTimeout(r, wait));
+    }
   }
+  upstreamMetrics.failed++;
+  /* Avoid leaking the URL (which may carry tokens) — only the upstream
+     status code if the error came from a response. */
+  const status = lastErr && lastErr.response && lastErr.response.status;
+  console.error(`[${label}] Failed${status ? ` (HTTP ${status})` : ''}`);
+  return null;
 }
 
 /* ═══ DATA FETCHERS ═══ */
@@ -528,17 +569,48 @@ app.get('/api/all', (req, res) => {
   res.json(apiAllSnapshot);
 });
 
-/* Health check */
+/* Health check — top-level `status` mirrors tickers freshness (the legacy
+   contract), while `ages` adds a per-cache breakdown so monitors can see
+   exactly which upstream is stale. Returns 503 when tickers is 'down' so
+   external monitors / load balancers can alert without parsing the body. */
+const HEALTH_THRESHOLDS = {
+  tickers: { stale: 30000, down: 60000 },
+  fr: { stale: 120000, down: 300000 },
+  oi: { stale: 120000, down: 300000 },
+  ls: { stale: 120000, down: 300000 },
+  taker: { stale: 120000, down: 300000 },
+  depth: { stale: 60000, down: 180000 },
+  liq: { stale: 120000, down: 600000 },
+  market: { stale: 600000, down: 1800000 },
+};
+function _classifyAge(last, thresholds, now) {
+  if (!last) return { ageMs: null, status: 'down' };
+  const age = now - last;
+  let status;
+  if (age >= thresholds.down) status = 'down';
+  else if (age >= thresholds.stale) status = 'stale';
+  else status = 'healthy';
+  return { ageMs: age, status };
+}
 app.get('/api/health', (req, res) => {
-  const age = Date.now() - (cache.lastUpdate.tickers || 0);
-  res.json({
-    status: age < 30000 ? 'healthy' : age < 60000 ? 'stale' : 'down',
+  const now = Date.now();
+  const ages = {};
+  for (const [key, t] of Object.entries(HEALTH_THRESHOLDS)) {
+    ages[key] = _classifyAge(cache.lastUpdate[key] || 0, t, now);
+  }
+  const status = ages.tickers.status;
+  const httpStatus = status === 'down' ? 503 : 200;
+  res.set('Cache-Control', 'no-store');
+  res.status(httpStatus).json({
+    status,
     coins: Object.keys(cache.tickers).length,
     fr: Object.keys(cache.fr).length,
     oi: Object.keys(cache.oi).length,
     ls: Object.keys(cache.ls).length,
     uptime: Math.floor(process.uptime()),
     lastUpdate: cache.lastUpdate,
+    ages,
+    upstream: { ...upstreamMetrics },
   });
 });
 
@@ -683,7 +755,7 @@ function _resetApiAllSnapshot() {
   apiAllSnapshotAt = 0;
 }
 
-module.exports = { app, cache, _resetApiAllSnapshot };
+module.exports = { app, cache, _resetApiAllSnapshot, safeFetch, upstreamMetrics };
 
 /* Graceful shutdown — stop accepting new connections, cancel all refresh
    timers, then exit. Gives in-flight requests a 10s grace window. */

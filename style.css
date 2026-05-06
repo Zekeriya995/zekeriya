@@ -664,3 +664,10 @@ canvas{width:100%!important;border-radius:4px}
   0%{background:rgba(255,56,96,.28);text-shadow:0 0 14px rgba(255,56,96,.6)}
   100%{background:transparent;text-shadow:0 0 0 transparent}
 }
+/* Stale price marker — applied to a row or price element when its T[sym].t
+   timestamp is older than the freshness threshold. Greyed-out + dimmed so
+   the user immediately sees the data is no longer live, without yanking
+   the value off-screen. cursor:help nudges them to hover for the tooltip
+   set by the renderer. */
+.lt-stale{opacity:.5;filter:grayscale(1);cursor:help}
+.lt-stale::after{content:" ⏱"}

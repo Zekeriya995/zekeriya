@@ -126,8 +126,12 @@
     var sub = { fn: fn, key: key };
     st.subs.push(sub);
     /* Replay the cached candle so the UI gets a frame immediately
-       instead of waiting up to a second for the next push. */
-    if (st.last) {
+       instead of waiting up to a second for the next push — but only
+       if the cache is still fresh. During a reconnect window the
+       cached candle can be many seconds old, and replaying it as
+       isFinal=false makes the chart show a phantom live bar. */
+    var KLINE_CACHE_TTL_MS = 10000;
+    if (st.last && st.lastMsgAt && Date.now() - st.lastMsgAt <= KLINE_CACHE_TTL_MS) {
       try {
         fn(st.last, false);
       } catch (e) {

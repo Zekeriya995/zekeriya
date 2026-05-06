@@ -15,8 +15,13 @@
    * `startPriceStream()` is called once from init() in app.js.
    * Any drop (onclose, transport error) triggers exponential
      backoff reconnect: 1s, 2s, 4s, …, capped at 30s.
-   * A watchdog pings every 30s — if no message has arrived for
-     90s the socket is closed so the backoff path rebuilds it.
+   * A watchdog pings every 5s — if no message has arrived for
+     20s the socket is closed so the backoff path rebuilds it.
+     Binance's !ticker@arr stream pushes once per second, so a
+     20-second silence is unambiguously a zombie connection
+     (TCP up, no data flowing) and the platform should fall
+     back to REST polling immediately rather than show users a
+     "LIVE" badge over a frozen price for over a minute.
    * `stopPriceStream()` disarms everything and keeps it down;
      currently unused but exported for future wiring (e.g., an
      explicit offline mode toggle).
@@ -84,20 +89,29 @@ function _priceStreamScheduleReconnect() {
   }, delay);
 }
 
+/* Zombie-detection thresholds. Binance pushes ~1 ticker/s, so a 20-second
+   silence is unambiguously dead — close the socket and let the backoff
+   reconnect path rebuild it. The 5-second tick keeps detection latency
+   tight without any meaningful CPU cost. */
+var PRICE_STREAM_ZOMBIE_MS = 20000;
+var PRICE_STREAM_WATCHDOG_TICK_MS = 5000;
 function _priceStreamArmWatchdog() {
   if (priceStreamState.watchdogTimer) {
     clearInterval(priceStreamState.watchdogTimer);
   }
   priceStreamState.watchdogTimer = setInterval(function () {
     var age = Date.now() - priceStreamState.lastMessageTime;
-    if (age > 90000 && priceStreamState.ws) {
+    if (age > PRICE_STREAM_ZOMBIE_MS && priceStreamState.ws) {
+      /* Mark the connection down immediately so any UI tick that fires
+         between this close() and the onclose handler reflects reality. */
+      if (typeof connMetrics !== 'undefined' && connMetrics) connMetrics.wsUp = false;
       try {
         priceStreamState.ws.close();
       } catch (e) {
         /* fall through to onclose handler */
       }
     }
-  }, 30000);
+  }, PRICE_STREAM_WATCHDOG_TICK_MS);
 }
 
 function startPriceStream() {

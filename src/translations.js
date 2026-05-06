@@ -195,6 +195,14 @@ const TR = {
 
   /* VIP */
   top3: { ar: '🏆 أقوى 3 صفقات مضاربة VIP', en: '🏆 Top 3 VIP Trades' },
+
+  /* Service-worker update banner */
+  updateAvailable: {
+    ar: 'تحديث جديد متاح',
+    en: 'A new version is available',
+  },
+  updateNow: { ar: 'تحديث الآن', en: 'Update now' },
+  updateLater: { ar: 'لاحقاً', en: 'Later' },
 };
 
 /* Translate helper — resolves the current value of `lang` at call time

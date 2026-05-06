@@ -6576,5 +6576,49 @@ async function init(){try{document.getElementById('sInp').placeholder=t('search_
   setTimeout(function() { try { if (!supervisorData.dailyReport) supervisorDailyReport(); } catch(e) {} }, 60000);
 }
 init();
-/* PWA Service Worker */
-if('serviceWorker' in navigator){try{navigator.serviceWorker.register('./sw.js')}catch(e){}}
+/* PWA Service Worker — register and notify the user when a new version is
+   installed, so hot-fixes don't sit dormant in long-lived tabs. */
+function nxShowUpdateBanner() {
+  if (document.getElementById('nxUpdateBanner')) return;
+  var dir = (typeof lang !== 'undefined' && lang === 'ar') ? 'rtl' : 'ltr';
+  var msg = (typeof t === 'function') ? t('updateAvailable') : 'A new version is available';
+  var ok = (typeof t === 'function') ? t('updateNow') : 'Update now';
+  var later = (typeof t === 'function') ? t('updateLater') : 'Later';
+  var div = document.createElement('div');
+  div.id = 'nxUpdateBanner';
+  div.setAttribute('role', 'status');
+  div.setAttribute('dir', dir);
+  div.style.cssText = 'position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:99999;background:#0d0d12;color:#fff;border:1px solid #2a2a35;border-radius:12px;padding:12px 16px;display:flex;gap:12px;align-items:center;font-family:inherit;font-size:14px;box-shadow:0 8px 32px rgba(0,0,0,.5);max-width:90vw';
+  var span = document.createElement('span');
+  span.textContent = msg;
+  var btnOk = document.createElement('button');
+  btnOk.textContent = ok;
+  btnOk.style.cssText = 'background:#22c55e;color:#0d0d12;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer';
+  btnOk.onclick = function () { try { location.reload(); } catch (e) { /* noop */ } };
+  var btnLater = document.createElement('button');
+  btnLater.textContent = later;
+  btnLater.style.cssText = 'background:transparent;color:#aaa;border:0;cursor:pointer;font-size:13px';
+  btnLater.onclick = function () { try { div.remove(); } catch (e) { /* noop */ } };
+  div.appendChild(span);
+  div.appendChild(btnOk);
+  div.appendChild(btnLater);
+  document.body.appendChild(div);
+}
+if ('serviceWorker' in navigator) {
+  try {
+    navigator.serviceWorker.register('./sw.js').then(function (reg) {
+      reg.addEventListener('updatefound', function () {
+        var nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', function () {
+          /* Only prompt when this is an *update* over an existing SW; first
+             install (no controller yet) is the user's first visit and needs
+             no banner. */
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            nxShowUpdateBanner();
+          }
+        });
+      });
+    }).catch(function () { /* noop */ });
+  } catch (e) { /* noop */ }
+}

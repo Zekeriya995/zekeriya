@@ -13,9 +13,20 @@ const CB = 'https://api.coinbase.com/v2';
    deployments. Only http(s):// URLs are accepted; trailing slashes are
    stripped so callers can safely append '/notify' etc.
 
-   The default MUST match the host listed in index.html's CSP connect-src,
-   otherwise the browser will silently block all API calls and the app will
-   appear to be permanently offline. */
+   Resolution order:
+     1. localStorage.nxProxyOverride       (user override, highest)
+     2. window.NEXUS_PROXY                 (build-time injection)
+     3. window.location.origin             (same-origin: when nginx serves
+                                            both static + /api/, this just
+                                            works without any extra config
+                                            and survives tunnel-URL churn)
+     4. https://jolly-bush-9254.nexus-proxy.workers.dev (legacy fallback)
+
+   The same-origin step is what makes the platform tolerant of the
+   single-VPS setup behind a quick-tunnel: when the user opens the
+   tunnel URL directly, every API call lands back on the same host,
+   so neither the index.html CSP nor a hardcoded PROXY needs to be
+   updated each time the tunnel name changes. */
 const PROXY = (function () {
   try {
     var o = localStorage.getItem('nxProxyOverride');
@@ -28,6 +39,21 @@ const PROXY = (function () {
       /^https?:\/\//.test(window.NEXUS_PROXY)
     ) {
       return String(window.NEXUS_PROXY).replace(/\/+$/, '');
+    }
+  } catch (e) {}
+  /* Same-origin: only adopt when the document is loaded over http(s)
+     (i.e. not file://) and the origin isn't the legacy worker URL
+     itself — that case keeps the explicit fallback below so an
+     accidental hot-fix on the worker doesn't loop on itself. */
+  try {
+    if (
+      typeof window !== 'undefined' &&
+      window.location &&
+      /^https?:/.test(window.location.protocol) &&
+      window.location.origin &&
+      window.location.origin.indexOf('jolly-bush-9254') === -1
+    ) {
+      return window.location.origin.replace(/\/+$/, '');
     }
   } catch (e) {}
   return 'https://jolly-bush-9254.nexus-proxy.workers.dev';

@@ -136,7 +136,7 @@ function trackWhaleOutcome() {
     });
     if (!existing.length) {
       var avgEntry = 0;
-      try { var we = calcWhaleAvgEntry(sym); if (we > 0) avgEntry = we; } catch(e) {}
+      try { var we = calcWhaleAvgEntry(sym); if (we > 0) avgEntry = we; } catch(e) { dbg('[calc] calcWhaleAvgEntry('+sym+') failed:', e && e.message); }
       supervisorData.whaleAudit.push({
         sym: sym, time: now, conf: ww.engine.confidence || 0, rank: ww.engine.rank || '',
         entryPrice: avgEntry || d.p, waves: ww.waves.length,
@@ -274,7 +274,7 @@ function captureFactorSnapshot(sym) {
   var oi = OI[sym];
   var ww = whaleWaves[sym];
   var wConf = ww && ww.engine ? ww.engine.confidence : 0;
-  var cvd = null; try { cvd = analyzeCVD(sym); } catch(e) {}
+  var cvd = null; try { cvd = analyzeCVD(sym); } catch(e) { dbg('[calc] analyzeCVD('+sym+') failed:', e && e.message); }
 
   var snapshot = {
     sym: sym,
@@ -748,9 +748,9 @@ function signalQualityGate(sym, type, score) {
       var topLatest = topTradersLS[sym].accounts[topTradersLS[sym].accounts.length - 1];
       if (topLatest.long > 0.55) hasStrongAlternative = true;
     }
-    try { var vp = calcVPIN(sym); if (vp && vp.vpin > 0.5) hasStrongAlternative = true; } catch(e) {}
-    try { var ice6 = detectIceberg(sym); if (ice6 && ice6.signal === 'ICEBERG_BUY') hasStrongAlternative = true; } catch(e) {}
-    try { var cvd6 = analyzeCVD(sym); if (cvd6 && cvd6.divergence === 'BULLISH') hasStrongAlternative = true; } catch(e) {}
+    try { var vp = calcVPIN(sym); if (vp && vp.vpin > 0.5) hasStrongAlternative = true; } catch(e) { dbg('[calc] calcVPIN('+sym+') failed:', e && e.message); }
+    try { var ice6 = detectIceberg(sym); if (ice6 && ice6.signal === 'ICEBERG_BUY') hasStrongAlternative = true; } catch(e) { dbg('[calc] detectIceberg('+sym+') failed:', e && e.message); }
+    try { var cvd6 = analyzeCVD(sym); if (cvd6 && cvd6.divergence === 'BULLISH') hasStrongAlternative = true; } catch(e) { dbg('[calc] analyzeCVD('+sym+') failed:', e && e.message); }
     if (CBP[sym] && T[sym] && T[sym].p > 0 && ((CBP[sym] - T[sym].p) / T[sym].p) > 0.002) hasStrongAlternative = true;
     if (hasStrongAlternative) g6 = true;
   }

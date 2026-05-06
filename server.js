@@ -313,6 +313,7 @@ const FUTURES_SYMBOL_DENYLIST = new Set([
   'USDP',
   'BUSD',
   'TUSD',
+  'FDUSD',
   /* Tokenised commodities */
   'PAXG',
   /* Currently delisted / never on Futures */

@@ -11,7 +11,11 @@ const CB = 'https://api.coinbase.com/v2';
 /* PROXY endpoint — overridable via localStorage('nxProxyOverride') or
    window.NEXUS_PROXY (set before this script loads) for dev / self-hosted
    deployments. Only http(s):// URLs are accepted; trailing slashes are
-   stripped so callers can safely append '/notify' etc. */
+   stripped so callers can safely append '/notify' etc.
+
+   The default MUST match the host listed in index.html's CSP connect-src,
+   otherwise the browser will silently block all API calls and the app will
+   appear to be permanently offline. */
 const PROXY = (function () {
   try {
     var o = localStorage.getItem('nxProxyOverride');
@@ -26,7 +30,7 @@ const PROXY = (function () {
       return String(window.NEXUS_PROXY).replace(/\/+$/, '');
     }
   } catch (e) {}
-  return 'https://screenshot-upgrading-boating-excellent.trycloudflare.com';
+  return 'https://jolly-bush-9254.nexus-proxy.workers.dev';
 })();
 
 /* Watchlist — seeded with the top 100 by market cap; updateTop100() replaces

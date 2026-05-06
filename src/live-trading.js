@@ -690,17 +690,23 @@
   /* =====================================================================
    *                          MULTI-TICKER STRIP
    * =====================================================================*/
-  /* The mini-ticker grid is rebuilt via innerHTML on every render pass
-     (~1.7 Hz). The previous code attached a fresh click handler to every
-     button on every rebuild — at SYMBOLS.length × ~6000 renders per hour
-     that orphans tens of thousands of listeners on detached buttons over
-     a long session, leaking ~10 MB / 8 h.
+  /* Two performance fixes folded together:
 
-     Switch to a single delegated listener on the container, attached
-     once on the first render. The listener walks event.target up to the
-     nearest .lv-mini-card and reads data-sym from there, so it works
-     against the freshly-rebuilt children without ever needing to know
-     about them. */
+     1. The grid used to be rebuilt via innerHTML at ~1.7 Hz. innerHTML
+        on a container with N buttons forces a full reflow on every
+        pass and produces 40-60 ms render times on mid-range devices.
+        Build the DOM once, then on each render walk SYMBOLS and only
+        update textContent / class on the cached children that need it.
+     2. The previous code attached a fresh click handler to every
+        .lv-mini-card on every rebuild, leaking ~10 MB / 8 h. A single
+        delegated listener bound once on the container survives every
+        rebuild without re-binding anything.
+
+     If the container's children have been swapped out from underneath
+     us (page navigation, dev hot reload), _miniCardCache is rebuilt
+     on the next render — no stale reference can survive a real DOM
+     replacement. */
+  var _miniCardCache = null;
   var _miniGridDelegationBound = false;
   function _ensureMiniGridDelegation(el) {
     if (_miniGridDelegationBound || !el) return;
@@ -712,74 +718,144 @@
     });
     _miniGridDelegationBound = true;
   }
+  function _buildMiniCards(el) {
+    var frag = document.createDocumentFragment();
+    var cache = {};
+    for (var i = 0; i < SYMBOLS.length; i++) {
+      var s = SYMBOLS[i];
+      var card = document.createElement('button');
+      card.className = 'lv-mini-card';
+      card.setAttribute('data-sym', s);
+      var symDiv = document.createElement('div');
+      symDiv.className = 'lv-mini-sym';
+      symDiv.textContent = s.replace('USDT', '');
+      var priceDiv = document.createElement('div');
+      priceDiv.className = 'lv-mini-price';
+      priceDiv.textContent = '--';
+      var chDiv = document.createElement('div');
+      chDiv.className = 'lv-mini-ch';
+      chDiv.textContent = '--';
+      card.appendChild(symDiv);
+      card.appendChild(priceDiv);
+      card.appendChild(chDiv);
+      frag.appendChild(card);
+      cache[s] = { card: card, price: priceDiv, ch: chDiv };
+    }
+    el.innerHTML = '';
+    el.appendChild(frag);
+    return cache;
+  }
   function renderMiniTickers() {
     var el = document.getElementById('lvMiniGrid');
     if (!el) return;
-    var keys = SYMBOLS;
-    var html = '';
-    for (var i = 0; i < keys.length; i++) {
-      var s = keys[i];
+    /* Detect a stale cache: if any cached card no longer lives in the
+       container (page rebuilt elsewhere), throw it away and rebuild. */
+    if (
+      !_miniCardCache ||
+      !_miniCardCache[SYMBOLS[0]] ||
+      _miniCardCache[SYMBOLS[0]].card.parentNode !== el
+    ) {
+      _miniCardCache = _buildMiniCards(el);
+    }
+    for (var i = 0; i < SYMBOLS.length; i++) {
+      var s = SYMBOLS[i];
+      var entry = _miniCardCache[s];
+      if (!entry) continue;
       var t = state.miniTickers[s];
-      var sym = s.replace('USDT', '');
-      var price = t ? fmtPrice(t.c) : '--';
-      var ch = t ? fmtPct(t.ch) : '--';
+      var nextPrice = t ? fmtPrice(t.c) : '--';
+      var nextCh = t ? fmtPct(t.ch) : '--';
       var dir = t && t.c > t.prevC ? 'up' : t && t.c < t.prevC ? 'dn' : '';
       var chCls = t && t.ch >= 0 ? 'up' : 'dn';
-      var active = s === state.symbol ? ' lv-mini-active' : '';
-      html +=
-        '<button class="lv-mini-card ' +
-        dir +
-        active +
-        '" data-sym="' +
-        s +
-        '">' +
-        '<div class="lv-mini-sym">' +
-        sym +
-        '</div>' +
-        '<div class="lv-mini-price">' +
-        price +
-        '</div>' +
-        '<div class="lv-mini-ch ' +
-        chCls +
-        '">' +
-        ch +
-        '</div>' +
-        '</button>';
+      var active = s === state.symbol ? 'lv-mini-active' : '';
+      var nextCardCls = ('lv-mini-card ' + dir + ' ' + active).replace(/\s+/g, ' ').trim();
+      if (entry.card.className !== nextCardCls) entry.card.className = nextCardCls;
+      if (entry.price.textContent !== nextPrice) entry.price.textContent = nextPrice;
+      var nextChCls = 'lv-mini-ch ' + chCls;
+      if (entry.ch.className !== nextChCls) entry.ch.className = nextChCls;
+      if (entry.ch.textContent !== nextCh) entry.ch.textContent = nextCh;
     }
-    el.innerHTML = html;
     _ensureMiniGridDelegation(el);
   }
 
   /* =====================================================================
    *                          SCROLLING TICKER TAPE
    * =====================================================================*/
+  /* Same fragment-cache pattern as renderMiniTickers. The tape is doubled
+     (pass=0,1) for the marquee scroll effect, so we maintain two pools
+     of cached spans and only update text/class on the children. */
+  var _tapeCache = null;
+  var _tapeFallbackShown = false;
+  function _buildTapeNodes(el) {
+    var pools = [{}, {}];
+    var frag = document.createDocumentFragment();
+    for (var pass = 0; pass < 2; pass++) {
+      for (var i = 0; i < SYMBOLS.length; i++) {
+        var s = SYMBOLS[i];
+        var wrap = document.createElement('span');
+        wrap.className = 'lv-tt-i';
+        var b = document.createElement('b');
+        b.textContent = s.replace('USDT', '');
+        var price = document.createElement('span');
+        price.textContent = '--';
+        var ch = document.createElement('span');
+        ch.className = 'lv-tt-c';
+        ch.textContent = '--';
+        wrap.appendChild(b);
+        wrap.appendChild(document.createTextNode(' '));
+        wrap.appendChild(price);
+        wrap.appendChild(document.createTextNode(' '));
+        wrap.appendChild(ch);
+        frag.appendChild(wrap);
+        pools[pass][s] = { wrap: wrap, price: price, ch: ch };
+      }
+    }
+    el.innerHTML = '';
+    el.appendChild(frag);
+    _tapeFallbackShown = false;
+    return pools;
+  }
   function renderTickerTape() {
     var el = document.getElementById('lvTickerTape');
     if (!el) return;
-    var html = '';
-    var keys = SYMBOLS;
-    for (var pass = 0; pass < 2; pass++) {
-      for (var i = 0; i < keys.length; i++) {
-        var s = keys[i];
-        var t = state.miniTickers[s];
-        if (!t) continue;
-        var ch = fmtPct(t.ch);
-        var cls = t.ch >= 0 ? 'up' : 'dn';
-        html +=
-          '<span class="lv-tt-i"><b>' +
-          s.replace('USDT', '') +
-          '</b> ' +
-          '<span>' +
-          fmtPrice(t.c) +
-          '</span> ' +
-          '<span class="lv-tt-c ' +
-          cls +
-          '">' +
-          ch +
-          '</span></span>';
+    /* If no symbol has any tick yet, keep the streaming placeholder
+       visible — building the tape against a sea of '--' looks worse. */
+    var anyTicker = false;
+    for (var k = 0; k < SYMBOLS.length; k++) {
+      if (state.miniTickers[SYMBOLS[k]]) {
+        anyTicker = true;
+        break;
       }
     }
-    el.innerHTML = html || '<span class="lv-tt-i muted">streaming…</span>';
+    if (!anyTicker) {
+      if (!_tapeFallbackShown) {
+        el.innerHTML = '<span class="lv-tt-i muted">streaming…</span>';
+        _tapeCache = null;
+        _tapeFallbackShown = true;
+      }
+      return;
+    }
+    if (
+      !_tapeCache ||
+      !_tapeCache[0][SYMBOLS[0]] ||
+      _tapeCache[0][SYMBOLS[0]].wrap.parentNode !== el
+    ) {
+      _tapeCache = _buildTapeNodes(el);
+    }
+    for (var pass = 0; pass < 2; pass++) {
+      for (var i = 0; i < SYMBOLS.length; i++) {
+        var s = SYMBOLS[i];
+        var entry = _tapeCache[pass][s];
+        if (!entry) continue;
+        var t = state.miniTickers[s];
+        if (!t) continue;
+        var nextPrice = fmtPrice(t.c);
+        var nextCh = fmtPct(t.ch);
+        var nextChCls = 'lv-tt-c ' + (t.ch >= 0 ? 'up' : 'dn');
+        if (entry.price.textContent !== nextPrice) entry.price.textContent = nextPrice;
+        if (entry.ch.textContent !== nextCh) entry.ch.textContent = nextCh;
+        if (entry.ch.className !== nextChCls) entry.ch.className = nextChCls;
+      }
+    }
   }
 
   /* =====================================================================

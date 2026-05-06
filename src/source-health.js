@@ -41,6 +41,19 @@ var NEXUS_SOURCES = [
       return (typeof PROXY === 'string' ? PROXY : '') + '/api/health';
     },
     critical: true,
+    /* The proxy answers 200 even when its egress to Binance is broken —
+       cache.tickers stays empty, status flips to 'down', but the HTTP
+       layer is fine. Read the JSON body and mark the source degraded
+       when the body itself reports the proxy is starving. Closes the
+       audit's "all green operator view, broken user experience" gap. */
+    verify: function (body) {
+      if (!body || typeof body !== 'object') return null;
+      if (body.status === 'down') return 'proxy reports tickers cache is down';
+      if (body.ages && body.ages.tickers && body.ages.tickers.status === 'down') {
+        return 'proxy → Binance tickers feed is dead';
+      }
+      return null;
+    },
   },
   {
     id: 'bn-spot',
@@ -172,7 +185,7 @@ var _RETRYABLE_STATUS = { 429: 1, 408: 1, 500: 1, 502: 1, 503: 1, 504: 1 };
 /* Single fetch attempt — returns a uniform `{ ok, status, ms, errorMsg }`
    shape so the public pingSource() can decide whether to retry without
    duplicating the try/catch + AbortController plumbing. */
-async function _probeOnce(url) {
+async function _probeOnce(url, opts) {
   var t0 = _now();
   var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
   var timeoutId = null;
@@ -188,11 +201,23 @@ async function _probeOnce(url) {
   try {
     var r = await fetch(url, ctrl ? { signal: ctrl.signal } : {});
     if (timeoutId !== null) clearTimeout(timeoutId);
-    return { ok: r.ok, status: r.status, ms: Math.round(_now() - t0), errorMsg: null };
+    var body = null;
+    /* Only read the body when the caller asks AND the response is OK.
+       JSON parse errors are non-fatal — the probe still reports the
+       HTTP-level outcome. */
+    if (opts && opts.parseJson && r.ok) {
+      try {
+        body = await r.json();
+      } catch (e) {
+        /* malformed body is itself useful telemetry */
+        body = null;
+      }
+    }
+    return { ok: r.ok, status: r.status, ms: Math.round(_now() - t0), errorMsg: null, body: body };
   } catch (e) {
     if (timeoutId !== null) clearTimeout(timeoutId);
     var msg = e && e.name === 'AbortError' ? 'TIMEOUT' : (e && e.message) || 'NETWORK_ERROR';
-    return { ok: false, status: 0, ms: Math.round(_now() - t0), errorMsg: msg };
+    return { ok: false, status: 0, ms: Math.round(_now() - t0), errorMsg: msg, body: null };
   }
 }
 
@@ -208,8 +233,9 @@ async function _probeOnce(url) {
 async function pingSource(spec) {
   var url = typeof spec.url === 'function' ? spec.url() : String(spec.url || '');
   var stat = _stat(spec.id);
+  var probeOpts = spec.verify ? { parseJson: true } : null;
 
-  var first = await _probeOnce(url);
+  var first = await _probeOnce(url, probeOpts);
   var final = first;
 
   if (!first.ok && (first.status === 0 || _RETRYABLE_STATUS[first.status])) {
@@ -223,16 +249,30 @@ async function pingSource(spec) {
       await new Promise(function (r) {
         setTimeout(r, delayMs);
       });
-    var second = await _probeOnce(url);
+    var second = await _probeOnce(url, probeOpts);
     /* Only adopt the retry if it's strictly better. */
     if (second.ok || (second.status > 0 && first.status === 0)) {
       final = second;
     }
   }
 
+  /* Spec-level verifier runs only on a HTTP-OK response. It can mark
+     the source as degraded even though the upstream answered — this
+     closes the audit gap where the proxy itself was reachable but
+     its egress to Binance was broken. The verifier returns null on
+     ok, or a string describing the problem. */
+  var verifyError = null;
+  if (final.ok && spec.verify && final.body !== null) {
+    try {
+      verifyError = spec.verify(final.body);
+    } catch (e) {
+      verifyError = (e && e.message) || 'VERIFY_THREW';
+    }
+  }
+
   stat.lastLatencyMs = final.ms;
   stat.lastStatus = final.status;
-  if (final.ok) {
+  if (final.ok && !verifyError) {
     stat.successCount++;
     stat.lastSuccessAt = Date.now();
     stat.lastError = null;
@@ -240,6 +280,19 @@ async function pingSource(spec) {
   }
   stat.failCount++;
   stat.lastFailAt = Date.now();
+  if (verifyError) {
+    stat.lastError = 'DEGRADED: ' + verifyError;
+    var degraded = {
+      id: spec.id,
+      name: spec.name,
+      ok: false,
+      status: final.status,
+      ms: final.ms,
+      degraded: true,
+      error: verifyError,
+    };
+    return degraded;
+  }
   stat.lastError = final.errorMsg || 'HTTP ' + final.status;
   var ret = { id: spec.id, name: spec.name, ok: false, status: final.status, ms: final.ms };
   if (final.errorMsg) ret.error = final.errorMsg;

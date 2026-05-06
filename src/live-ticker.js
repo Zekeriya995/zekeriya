@@ -30,8 +30,15 @@
      against T[sym].p before each repaint to decide whether the
      'flicker' classes need to be reapplied. */
   var prevPrice = {};
-  /* Key → { cls, until } for elements currently mid-flash. We strip
-     the class once the timer expires so animations can replay. */
+  /* Pending flicker entries. Each entry holds a *weak* reference to the
+     element so a re-render that swaps the DOM node out (renderTopCoins
+     rebuilds the card grid every tick a price changes, scanner rows
+     are recycled, modals open/close) doesn't leave us pinning detached
+     nodes for up to 420 ms. Browsers without WeakRef fall back to a
+     strong reference; the consequence there is the original short-lived
+     pin, which is the existing behaviour. */
+  var FLICK_HOLD_MS = 420;
+  var HAS_WEAKREF = typeof WeakRef === 'function';
   var flickerEls = [];
 
   /* ---------- helpers ---------- */
@@ -53,18 +60,26 @@
        same direction class is reapplied a second later */
     void el.offsetWidth;
     el.classList.add(cls);
-    flickerEls.push({ el: el, until: Date.now() + 420 });
+    flickerEls.push({
+      ref: HAS_WEAKREF ? new WeakRef(el) : null,
+      el: HAS_WEAKREF ? null : el,
+      until: Date.now() + FLICK_HOLD_MS,
+    });
   }
 
   function reapPendingFlickers() {
     var now = Date.now();
     for (var i = flickerEls.length - 1; i >= 0; i--) {
-      if (flickerEls[i].until <= now) {
-        if (flickerEls[i].el && flickerEls[i].el.classList) {
-          flickerEls[i].el.classList.remove('lt-flick-up', 'lt-flick-dn');
-        }
-        flickerEls.splice(i, 1);
+      var entry = flickerEls[i];
+      if (entry.until > now) continue;
+      var el = entry.ref ? entry.ref.deref() : entry.el;
+      /* el === undefined means the WeakRef target was GC'd between
+         flick() and reap(); the class is moot — the node is gone — so
+         we just drop the entry. */
+      if (el && el.classList) {
+        el.classList.remove('lt-flick-up', 'lt-flick-dn');
       }
+      flickerEls.splice(i, 1);
     }
   }
 

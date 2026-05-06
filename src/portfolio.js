@@ -116,6 +116,13 @@ function savePred(sym, p, tgt, sc) {
    common case where the user is online around T+12h. */
 var PRED_FRESH_WINDOW_MS = 5 * 60 * 1000;
 
+/* When resolving a 12 h prediction, the ticker we score it against
+   must itself be current — otherwise an offline period or zombie WS
+   produces a "hit" / "miss" against a price that's minutes or hours
+   stale. Anything older than this is treated like the resolution
+   window was missed and the prediction is marked stale instead. */
+var PRED_PRICE_FRESH_MS = 60 * 1000;
+
 function _resolveDuePredictions(now) {
   var changed = false;
   predictions.forEach(function (p) {
@@ -130,6 +137,12 @@ function _resolveDuePredictions(now) {
     }
     var cur = T[p.sym];
     if (!cur) return; /* no ticker yet — try again on the next tick */
+    /* Reject stale ticks: the prediction window is small enough that
+       a 60-second-old price is "good enough", but a multi-minute gap
+       almost always means we're scoring against a frozen value. Skip
+       and let the next tick (within PRED_FRESH_WINDOW_MS) try again
+       with a fresh tick — or fall through to the stale branch above. */
+    if (cur.t && now - cur.t > PRED_PRICE_FRESH_MS) return;
     p.checked = true;
     var gain = ((cur.p - p.price) / p.price) * 100;
     p.hit = gain >= 5;

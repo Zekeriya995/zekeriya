@@ -87,11 +87,21 @@ const CONFIG = {
         })
     : [],
 
-  /* /api/all TTL cache — one snapshot shared across all clients */
-  API_ALL_TTL_MS: 3000,
+  /* /api/all TTL cache — one snapshot shared across all clients.
+     5 s instead of 3 s: with 500+ concurrent dashboards each pull the
+     same /api/all every few seconds, and the 3 s window forced
+     buildApiAllSnapshot() to run almost every poll under load. 5 s
+     halves CPU spikes during peak traffic without making any visible
+     UI lag — the WS price stream + per-symbol REST refresh keep the
+     critical fields fresh inside the cache window. */
+  API_ALL_TTL_MS: 5000,
 
-  /* Request timeout */
-  TIMEOUT: 8000,
+  /* Request timeout — 12 s instead of 8 s. The earlier value rejected
+     legitimate large responses (the FNG / global endpoints can ship
+     several MB once a day), and tripped on otherwise-healthy traffic
+     from high-latency regions. 12 s is still well under the rate-
+     limiter's 60 s window and won't pile up requests. */
+  TIMEOUT: 12000,
 };
 
 /* ═══ MIDDLEWARE ═══ */

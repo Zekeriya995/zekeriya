@@ -440,7 +440,10 @@ async function fetchLongShort() {
   }
 }
 
-/* 5. TAKER BUY/SELL — Binance Futures */
+/* 5. TAKER BUY/SELL — Binance Futures.
+   Note: this endpoint lives under /futures/data/, NOT under /fapi/v1/.
+   The two paths look interchangeable but Binance routes them to
+   different services — /fapi/v1/takerlongshortRatio returns 404. */
 async function fetchTaker() {
   try {
     const topSymbols = Object.keys(cache.tickers)
@@ -449,7 +452,9 @@ async function fetchTaker() {
 
     const promises = topSymbols.map((sym) =>
       safeFetch(
-        CONFIG.BINANCE_FUTURES + '/takerlongshortRatio?symbol=' + sym + 'USDT&period=1h&limit=4',
+        'https://fapi.binance.com/futures/data/takerlongshortRatio?symbol=' +
+          sym +
+          'USDT&period=1h&limit=4',
         'TAKER-' + sym
       ).then((data) => {
         if (data && data.length) {

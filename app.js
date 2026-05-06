@@ -114,7 +114,14 @@ var fgValue=null,fgTime=0,btcDom=null,btcDomTime=0;
 /* Hoisted from later in the file: getConnQuality() in src/connection.js
    reads lastDataTime on every updateConnStatus() tick, including calls
    that fire before the rest of this file has executed. Declaring it at
-   the top guarantees a real number instead of NaN. */
+   the top guarantees a real number instead of NaN.
+
+   We track WS vs REST freshness separately so the connection indicator
+   can distinguish a healthy live stream from a REST-only fallback (the
+   audit's "LIVE badge over a 5s-stale REST" scenario). lastDataTime
+   stays as the legacy max for any external reader. */
+var lastWsDataTime=0;
+var lastRestDataTime=0;
 var lastDataTime=Date.now();
 
 /* monitorState / factorLog / supervisorData + their save helpers
@@ -1980,7 +1987,7 @@ async function loadTk(){
       if(m.bitfinex){Object.keys(m.bitfinex).forEach(function(s){bitfinexMargin[s]=m.bitfinex[s]})}
       if(m.cbPremium){Object.keys(m.cbPremium).forEach(function(s){var d=m.cbPremium[s];if(d){cbPremium[s]=d.diff||0;cbPremium[s+'_pct']=d.pct||0}});cbPremium.time=Date.now()}
     }
-    connMetrics.apiOk++;lastDataTime=Date.now();
+    connMetrics.apiOk++;lastDataTime=Date.now();lastRestDataTime=lastDataTime;
   }else{
     connMetrics.apiFail++;_proxyAlive=false;
     /* ═══ 🔌 DIRECT API FALLBACK — Binance + CoinGecko ═══ */
@@ -2009,7 +2016,7 @@ async function loadTk(){
             WL.forEach(function(s){newTier.add(s)});
             TIER1=newTier;
           }
-          lastDataTime=Date.now();connMetrics.apiOk++;
+          lastDataTime=Date.now();lastRestDataTime=lastDataTime;connMetrics.apiOk++;
         }
         /* Binance Futures FR */
         var bnFR=await fj(BF+'/premiumIndex');
@@ -6451,7 +6458,7 @@ function addVLog(type,msg){validatorLog.unshift({type:type,msg:msg,time:Date.now
 async function runValidator(){
   var issues=0,fixes=0;
   var tkAge=Date.now()-lastDataTime;
-  if(tkAge>120000){addVLog('🔴','البيانات قديمة '+Math.round(tkAge/60000)+' دقيقة — يعيد التحميل');issues++;try{await loadTk();lastDataTime=Date.now();fixes++;connMetrics.apiOk++;addVLog('🔧','تم إعادة تحميل البيانات ✅')}catch(e){connMetrics.apiFail++;addVLog('❌','فشل إعادة التحميل')}}
+  if(tkAge>120000){addVLog('🔴','البيانات قديمة '+Math.round(tkAge/60000)+' دقيقة — يعيد التحميل');issues++;try{await loadTk();lastDataTime=Date.now();lastRestDataTime=lastDataTime;fixes++;connMetrics.apiOk++;addVLog('🔧','تم إعادة تحميل البيانات ✅')}catch(e){connMetrics.apiFail++;addVLog('❌','فشل إعادة التحميل')}}
   else if(tkAge>90000){addVLog('🟡','البيانات عمرها '+Math.round(tkAge/60000)+' دقيقة');issues++}
   if(T.BTC&&T.BTC.by){var diff=Math.abs(T.BTC.p-T.BTC.by)/T.BTC.p*100;if(diff>2){addVLog('🔴','فرق BTC بين Binance/Bybit: '+diff.toFixed(1)+'%');issues++}else{addVLog('✅','BTC Binance/Bybit متطابق ('+diff.toFixed(2)+'%)')}}
   if(T.BTC&&CBP.BTC){var cbDiff=Math.abs(T.BTC.p-CBP.BTC)/T.BTC.p*100;if(cbDiff>3){addVLog('🔴','فرق BTC Binance/Coinbase: '+cbDiff.toFixed(1)+'%');issues++;CBP.BTC=T.BTC.p;fixes++;addVLog('🔧','صحح سعر Coinbase')}else{addVLog('✅','BTC Coinbase متطابق ('+cbDiff.toFixed(2)+'%)')}}
@@ -6469,7 +6476,7 @@ async function runValidator(){
   if(frCount<10){addVLog('🟡','FR: فقط '+frCount+' عملة — يعيد التحميل');issues++;try{await loadTk();fixes++;connMetrics.apiOk++;addVLog('🔧','أعاد تحميل من Proxy ✅')}catch(e){connMetrics.apiFail++}}
   else{addVLog('✅','FR: '+frCount+' عملة محمّلة')}
   var coinCount=Object.keys(T).length;
-  if(coinCount<100){addVLog('🔴','عملات: '+coinCount+' فقط');issues++;try{await loadTk();lastDataTime=Date.now();fixes++;connMetrics.apiOk++}catch(e){connMetrics.apiFail++}}
+  if(coinCount<100){addVLog('🔴','عملات: '+coinCount+' فقط');issues++;try{await loadTk();lastDataTime=Date.now();lastRestDataTime=lastDataTime;fixes++;connMetrics.apiOk++}catch(e){connMetrics.apiFail++}}
   else{addVLog('✅','عملات: '+coinCount+' محمّلة')}
   validatorStatus=issues===0?'ok':issues<=3?'ok':'warn';
   updateValidatorUI(issues,fixes);updateConnStatus();

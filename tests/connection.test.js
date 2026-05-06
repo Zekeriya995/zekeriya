@@ -177,3 +177,57 @@ test('getConnQuality — 80-100 range when everything is healthy', () => {
   globalThis.lastDataTime = Date.now() - 1000;
   assert.equal(getConnQuality(), 100);
 });
+
+/* ─── WS / REST split (audit 1.5) ──────────────────────────────────── */
+
+test('getConnQuality — penalises a known-zombie WS (had data, then went silent)', () => {
+  reset();
+  for (let i = 0; i < 350; i++) globalThis.T['C' + i] = { p: 1 };
+  connMetrics.apiOk = 100;
+  connMetrics.apiFail = 0;
+  globalThis.lastDataTime = Date.now() - 1000;
+  globalThis.lastWsDataTime = Date.now() - 30_000; /* 30 s ago */
+  globalThis.lastRestDataTime = Date.now() - 1000;
+  /* 100 - 15 (WS zombie) = 85 */
+  assert.equal(getConnQuality(), 85);
+  delete globalThis.lastWsDataTime;
+  delete globalThis.lastRestDataTime;
+});
+
+test('getConnQuality — penalises wsUp=false once WS has been seen alive', () => {
+  reset();
+  for (let i = 0; i < 350; i++) globalThis.T['C' + i] = { p: 1 };
+  connMetrics.apiOk = 100;
+  connMetrics.apiFail = 0;
+  connMetrics.wsUp = false;
+  globalThis.lastWsDataTime = Date.now() - 1000; /* received recently then went down */
+  globalThis.lastDataTime = Date.now() - 500;
+  /* wsKnownDown fires → -15 */
+  assert.equal(getConnQuality(), 85);
+  delete globalThis.lastWsDataTime;
+  connMetrics.wsUp = false;
+});
+
+test('getConnMode — returns "live" when WS is fresh', () => {
+  globalThis.lastWsDataTime = Date.now() - 5_000;
+  globalThis.lastRestDataTime = Date.now() - 60_000;
+  assert.equal(getConnMode(), 'live');
+  delete globalThis.lastWsDataTime;
+  delete globalThis.lastRestDataTime;
+});
+
+test('getConnMode — returns "rest" when only REST is fresh', () => {
+  globalThis.lastWsDataTime = Date.now() - 60_000;
+  globalThis.lastRestDataTime = Date.now() - 5_000;
+  assert.equal(getConnMode(), 'rest');
+  delete globalThis.lastWsDataTime;
+  delete globalThis.lastRestDataTime;
+});
+
+test('getConnMode — returns "down" when both feeds are silent', () => {
+  globalThis.lastWsDataTime = 0;
+  globalThis.lastRestDataTime = 0;
+  assert.equal(getConnMode(), 'down');
+  delete globalThis.lastWsDataTime;
+  delete globalThis.lastRestDataTime;
+});

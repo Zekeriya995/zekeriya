@@ -90,13 +90,39 @@ async function fj(u) {
 
 /* Returns a 0-100 connection-health score that combines data freshness,
    API success rate, and how many coins we currently have prices for.
-   A fresh tab with no requests yet scores 100 and decays from there. */
+   A fresh tab with no requests yet scores 100 and decays from there.
+
+   The freshness check is split between WS and REST so a healthy 5-second
+   REST poll can't mask a dead WebSocket — we want the indicator to drop
+   to "Fair / REST" the moment the WS goes silent, not stay green. */
 function getConnQuality() {
   var score = 100;
-  /* Data freshness */
-  var age = Date.now() - lastDataTime;
-  if (age > 30000) score -= 40;
-  else if (age > 15000) score -= 15;
+  var now = Date.now();
+  var wsAge =
+    typeof lastWsDataTime !== 'undefined' && lastWsDataTime > 0 ? now - lastWsDataTime : Infinity;
+  var restAge =
+    typeof lastRestDataTime !== 'undefined' && lastRestDataTime > 0
+      ? now - lastRestDataTime
+      : Infinity;
+  /* Best-of-both for the legacy comparison so a working REST keeps the
+     score within the same band as before this split. */
+  var bestAge = Math.min(wsAge, restAge);
+  if (typeof lastDataTime !== 'undefined' && lastDataTime > 0) {
+    bestAge = Math.min(bestAge, now - lastDataTime);
+  }
+  if (bestAge > 30000) score -= 40;
+  else if (bestAge > 15000) score -= 15;
+  /* WS-down penalty: even if REST is fresh, a dead live stream means
+     the user is on multi-second-old REST data. Apply only after the
+     WS has been connected at least once (lastWsDataTime > 0) AND has
+     since gone silent, OR when connMetrics.wsUp explicitly went
+     false. Skipping the penalty during the very first seconds of a
+     fresh tab matches the existing test contract for getConnQuality. */
+  var hasWsHistory = typeof lastWsDataTime !== 'undefined' && lastWsDataTime > 0;
+  var wsKnownDown =
+    typeof connMetrics !== 'undefined' && connMetrics && connMetrics.wsUp === false && hasWsHistory;
+  var wsZombie = hasWsHistory && wsAge > 15000;
+  if (wsKnownDown || wsZombie) score -= 15;
   /* API success rate */
   var total = connMetrics.apiOk + connMetrics.apiFail;
   if (total > 0) {
@@ -111,9 +137,25 @@ function getConnQuality() {
   return Math.max(0, Math.min(100, score));
 }
 
+/* Returns 'live' | 'rest' | 'down' so the UI can label the connection
+   indicator honestly when only the REST fallback is feeding data. */
+function getConnMode() {
+  var now = Date.now();
+  var wsFresh =
+    typeof lastWsDataTime !== 'undefined' && lastWsDataTime > 0 && now - lastWsDataTime <= 15000;
+  var restFresh =
+    typeof lastRestDataTime !== 'undefined' &&
+    lastRestDataTime > 0 &&
+    now - lastRestDataTime <= 30000;
+  if (wsFresh) return 'live';
+  if (restFresh) return 'rest';
+  return 'down';
+}
+
 /* Paint the score onto the header status text + the validator dot. */
 function updateConnStatus() {
   var q = getConnQuality();
+  var mode = getConnMode();
   var el = document.getElementById('connStatus');
   var dot = document.getElementById('validatorDot');
   var txt;
@@ -131,6 +173,10 @@ function updateConnStatus() {
     txt = lang === 'ar' ? 'ضعيفة' : 'Poor';
     col = 'var(--dn)';
   }
+  /* When only REST is feeding data, suffix the label so the user knows
+     the live stream is down and prices are tens of seconds old at best. */
+  if (mode === 'rest') txt += ' · REST';
+  else if (mode === 'down') txt += ' · OFFLINE';
   if (el) {
     el.textContent = txt;
     el.style.color = col;

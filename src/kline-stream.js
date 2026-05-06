@@ -26,12 +26,45 @@
 (function () {
   'use strict';
 
-  /* key = sym + '|' + tf → { ws, last, subs[], backoff, t, lastMsgAt } */
+  /* key = sym + '|' + tf → { ws, last, subs[], backoff, t, lastMsgAt,
+                              watchdog } */
   var streams = {};
   var metrics = { latencyMs: null, connected: 0, reconnects: 0 };
 
+  /* Binance kline_<tf> streams push at least once per second on the
+     in-progress candle, regardless of timeframe. 30 s of silence is
+     unambiguously dead — close the socket so the backoff reconnect
+     path rebuilds it instead of leaving subscribers staring at a
+     frozen chart for minutes. Mirrors price-stream's watchdog (P1.3). */
+  var KLINE_ZOMBIE_MS = 30000;
+  var KLINE_WATCHDOG_TICK_MS = 10000;
+
   function _key(sym, tf) {
     return String(sym).toUpperCase() + '|' + String(tf);
+  }
+
+  function _armWatchdog(key) {
+    var st = streams[key];
+    if (!st) return;
+    if (st.watchdog) clearInterval(st.watchdog);
+    st.watchdog = setInterval(function () {
+      var s = streams[key];
+      if (!s || !s.ws || !s.lastMsgAt) return;
+      if (Date.now() - s.lastMsgAt > KLINE_ZOMBIE_MS) {
+        try {
+          s.ws.close();
+        } catch (e) {
+          /* fall through to onclose */
+        }
+      }
+    }, KLINE_WATCHDOG_TICK_MS);
+  }
+
+  function _disarmWatchdog(st) {
+    if (st && st.watchdog) {
+      clearInterval(st.watchdog);
+      st.watchdog = null;
+    }
   }
 
   function _open(key) {
@@ -51,7 +84,9 @@
     st.ws = ws;
     ws.onopen = function () {
       st.backoff = 1000;
+      st.lastMsgAt = Date.now();
       metrics.connected++;
+      _armWatchdog(key);
     };
     ws.onmessage = function (ev) {
       var msg;
@@ -85,6 +120,7 @@
     };
     ws.onclose = function () {
       st.ws = null;
+      _disarmWatchdog(st);
       metrics.connected = Math.max(0, metrics.connected - 1);
       if (st.subs.length) _scheduleReconnect(key);
     };
@@ -146,6 +182,7 @@
         if (idx !== -1) s.subs.splice(idx, 1);
         if (!s.subs.length) {
           /* tear the socket down once nobody cares */
+          _disarmWatchdog(s);
           if (s.ws) {
             try {
               s.ws.close();

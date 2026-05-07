@@ -39,6 +39,8 @@ export default [
         CG: 'readonly',
         CB: 'readonly',
         PROXY: 'readonly',
+        ACTIVE_VPS_TUNNEL: 'readonly',
+        STATIC_ONLY_HOST_RE: 'readonly',
         WL: 'writable',
         COL: 'writable',
         /* Declared in src/utils.js */

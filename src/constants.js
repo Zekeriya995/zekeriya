@@ -13,20 +13,25 @@ const CB = 'https://api.coinbase.com/v2';
    deployments. Only http(s):// URLs are accepted; trailing slashes are
    stripped so callers can safely append '/notify' etc.
 
-   Resolution order:
-     1. localStorage.nxProxyOverride       (user override, highest)
+   Resolution order (top to bottom):
+     1. localStorage.nxProxyOverride       (manual user override)
      2. window.NEXUS_PROXY                 (build-time injection)
-     3. window.location.origin             (same-origin: when nginx serves
-                                            both static + /api/, this just
-                                            works without any extra config
-                                            and survives tunnel-URL churn)
-     4. https://jolly-bush-9254.nexus-proxy.workers.dev (legacy fallback)
+     3. Static-host shortcut               (NEW) — when the page loads
+        from a host that obviously can't serve /api/* (GitHub Pages,
+        Cloudflare Pages, the legacy workers.dev, file://) jump
+        straight to the active VPS tunnel rather than try same-origin.
+     4. window.location.origin             (same-origin: when nginx
+        serves both static + /api/ — the trycloudflare tunnel, a
+        named tunnel, or localhost during dev)
+     5. ACTIVE_VPS_TUNNEL fallback         (last-resort hard-coded)
 
-   The same-origin step is what makes the platform tolerant of the
-   single-VPS setup behind a quick-tunnel: when the user opens the
-   tunnel URL directly, every API call lands back on the same host,
-   so neither the index.html CSP nor a hardcoded PROXY needs to be
-   updated each time the tunnel name changes. */
+   This tiered chain lets a single bundle work in three deployment
+   surfaces: directly via the tunnel, via Telegram Mini App, or via
+   GitHub Pages — without per-deploy config. When the tunnel URL
+   churns the only thing that needs updating is ACTIVE_VPS_TUNNEL
+   (one line) and any user-set localStorage override. */
+const ACTIVE_VPS_TUNNEL = 'https://screenshot-upgrading-boating-excellent.trycloudflare.com';
+const STATIC_ONLY_HOST_RE = /(\.github\.io|\.pages\.dev|\.workers\.dev|jolly-bush-9254)$/i;
 const PROXY = (function () {
   try {
     var o = localStorage.getItem('nxProxyOverride');
@@ -41,22 +46,29 @@ const PROXY = (function () {
       return String(window.NEXUS_PROXY).replace(/\/+$/, '');
     }
   } catch (e) {}
-  /* Same-origin: only adopt when the document is loaded over http(s)
-     (i.e. not file://) and the origin isn't the legacy worker URL
-     itself — that case keeps the explicit fallback below so an
-     accidental hot-fix on the worker doesn't loop on itself. */
+  /* Step 3 — static-only host shortcut. */
+  try {
+    if (
+      typeof window !== 'undefined' &&
+      window.location &&
+      window.location.hostname &&
+      STATIC_ONLY_HOST_RE.test(window.location.hostname)
+    ) {
+      return ACTIVE_VPS_TUNNEL.replace(/\/+$/, '');
+    }
+  } catch (e) {}
+  /* Step 4 — same-origin (the happy path on the tunnel itself). */
   try {
     if (
       typeof window !== 'undefined' &&
       window.location &&
       /^https?:/.test(window.location.protocol) &&
-      window.location.origin &&
-      window.location.origin.indexOf('jolly-bush-9254') === -1
+      window.location.origin
     ) {
       return window.location.origin.replace(/\/+$/, '');
     }
   } catch (e) {}
-  return 'https://jolly-bush-9254.nexus-proxy.workers.dev';
+  return ACTIVE_VPS_TUNNEL.replace(/\/+$/, '');
 })();
 
 /* Watchlist — seeded with the top 100 by market cap; updateTop100() replaces

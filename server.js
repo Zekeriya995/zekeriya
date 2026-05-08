@@ -56,7 +56,13 @@ const CONFIG = {
   LIQ_INTERVAL: 30000 /* 30 seconds */,
   BITFINEX_INTERVAL: 120000 /* 2 minutes — pos.size only changes slowly + 2 calls per symbol */,
   HYPERLIQUID_INTERVAL: 60000 /* 1 minute — single batch POST returns every perp */,
-  NEWS_INTERVAL: 300000 /* 5 minutes — CryptoCompare aggregates ~1/min upstream */,
+  NEWS_INTERVAL: 300000 /* 5 minutes — CoinTelegraph RSS publishes a few items per hour */,
+  /* Local-only bridge to data_server.py (the legacy Python data engine
+     that still drives the Telegram notifier). Pulls whales / mcap /
+     multi every 5 s — its internal refresh is faster than that, so
+     this just keeps our snapshot fresh without piling on. */
+  DATA_SERVER_INTERVAL: 5000,
+  DATA_SERVER_URL: 'http://127.0.0.1:8080/api/all',
 
   /* API URLs */
   BINANCE_SPOT: 'https://api.binance.com/api/v3',
@@ -184,13 +190,22 @@ const cache = {
     cbp: {} /* Coinbase prices */,
   },
   /* Multi-exchange enrichment caches — populated from Bitfinex margin
-     position size, Hyperliquid asset contexts, and CryptoCompare news.
+     position size, Hyperliquid asset contexts, and CoinTelegraph RSS news.
      The PWA reads these from /api/all under m.bitfinex / m.hyperliquid
      / m.news / m.newsSentiment (see app.js around line 1977). */
   bitfinex: {} /* { BTC: { longPct, shortPct, ratio } } */,
   hyperliquid: {} /* { BTC: { funding, openInterest } } */,
   news: [] /* [ { title, url, body, publishedOn, source, sentiment } ] */,
   newsSentiment: { positive: 0, negative: 0, neutral: 0 },
+  /* Bridge caches — mirror the whales / mcap / multi blocks served by
+     data_server.py on 127.0.0.1:8080. The PWA reads these as top-level
+     m.whales / m.mcap / m.coinalyze / m.blockchain after the snapshot
+     flattens multi.*. data_server.py is preferred over our own
+     bitfinex / hyperliquid / news fetchers when both populate the
+     same field — see buildApiAllSnapshot below. */
+  dsWhales: [] /* list of { sym, side, value, price, time } */,
+  dsMcap: {} /* { BTC: { rank, mcap, ath, atl } } */,
+  dsMulti: {} /* { coinalyze, hyperliquid, blockchain, news, newsSentiment, ... } */,
   lastUpdate: {},
 };
 
@@ -267,6 +282,7 @@ async function safeFetch(url, label, opts) {
     maxRedirects: 0,
     httpsAgent: safeAgent,
   };
+  if (opts && opts.responseType) axiosOpts.responseType = opts.responseType;
   let lastErr = null;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -748,11 +764,13 @@ async function fetchHyperliquid() {
   }
 }
 
-/* 11. CRYPTOCOMPARE NEWS — public aggregator over Coindesk, CoinTelegraph,
-   Decrypt, etc. Lang=EN keeps the response under ~50 KB. We project the
-   payload down to fields the PWA actually renders, and run a tiny
-   keyword-based sentiment classifier so app.js's newsSentiment block
-   has something to read without a second upstream. */
+/* 11. COINTELEGRAPH NEWS — public RSS feed, no auth. CryptoCompare
+   was the original source but they moved /v2/news behind a paid key
+   in May 2026, so we switched to CoinTelegraph's RSS (~30 items per
+   pull, stable XML shape). The feed is plain XML — we slice on
+   <item>, pull title/link/description/pubDate with regex, and run a
+   small keyword classifier so app.js's newsSentiment block has
+   something to read without a second upstream. */
 const NEWS_POS_RE =
   /\b(surge|rally|soar|breakout|bullish|gain|gains|jump|jumps|rise|rises|rising|adopt|approval|approved|boost|boosts|growth|partnership|launch|launches|upgrade|upgrades|all[- ]time high|ath)\b/i;
 const NEWS_NEG_RE =
@@ -768,23 +786,69 @@ function classifyNewsSentiment(text) {
   return 'neutral';
 }
 
+/* RSS helpers — minimal CDATA / tag / entity strippers. The PWA only
+   renders plain text, so a perfect XML decoder isn't worth the
+   dependency. */
+function _stripCdata(s) {
+  if (!s) return '';
+  const m = s.match(/^<!\[CDATA\[([\s\S]*?)\]\]>$/);
+  return m ? m[1] : s;
+}
+function _stripTags(s) {
+  return (s || '').replace(/<[^>]+>/g, '');
+}
+function _decodeEntities(s) {
+  return (s || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'");
+}
+function _grab(block, re) {
+  const m = block.match(re);
+  return m ? m[1] : '';
+}
+
 async function fetchNews() {
   try {
-    const data = await safeFetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN', 'NEWS');
-    if (!data || !Array.isArray(data.Data)) return;
-    const totals = { positive: 0, negative: 0, neutral: 0 };
-    cache.news = data.Data.slice(0, 30).map((n) => {
-      const sentiment = classifyNewsSentiment(n.title + ' ' + (n.body || '').slice(0, 240));
-      totals[sentiment]++;
-      return {
-        title: String(n.title || '').slice(0, 200),
-        url: typeof n.url === 'string' ? n.url : '',
-        body: String(n.body || '').slice(0, 400),
-        publishedOn: Number(n.published_on) * 1000 || Date.now(),
-        source: String((n.source_info && n.source_info.name) || n.source || '').slice(0, 60),
-        sentiment: sentiment,
-      };
+    const xml = await safeFetch('https://cointelegraph.com/rss', 'NEWS', {
+      responseType: 'text',
     });
+    if (typeof xml !== 'string' || !xml.includes('<item>')) {
+      cache.news = [];
+      cache.newsSentiment = { positive: 0, negative: 0, neutral: 0 };
+      return;
+    }
+    const itemBlocks = xml.split('<item>').slice(1, 31);
+    const totals = { positive: 0, negative: 0, neutral: 0 };
+    cache.news = itemBlocks
+      .map((block) => {
+        const title = _decodeEntities(_stripCdata(_grab(block, /<title>([\s\S]*?)<\/title>/)))
+          .trim()
+          .slice(0, 200);
+        const link = _stripCdata(_grab(block, /<link>([\s\S]*?)<\/link>/))
+          .trim()
+          .slice(0, 300);
+        const desc = _decodeEntities(
+          _stripTags(_stripCdata(_grab(block, /<description>([\s\S]*?)<\/description>/)))
+        )
+          .trim()
+          .slice(0, 400);
+        const pubDate = _grab(block, /<pubDate>([\s\S]*?)<\/pubDate>/).trim();
+        const sentiment = classifyNewsSentiment(title + ' ' + desc);
+        totals[sentiment]++;
+        return {
+          title,
+          url: link,
+          body: desc,
+          publishedOn: pubDate ? new Date(pubDate).getTime() || Date.now() : Date.now(),
+          source: 'CoinTelegraph',
+          sentiment,
+        };
+      })
+      .filter((n) => n.title);
     cache.newsSentiment = totals;
     cache.lastUpdate.news = Date.now();
     console.log(
@@ -792,6 +856,36 @@ async function fetchNews() {
     );
   } catch (err) {
     console.error('[NEWS] Error:', err.message);
+  }
+}
+
+/* 12. DATA-SERVER BRIDGE — pulls the legacy Python engine's snapshot
+   off the loopback. data_server.py is heavyweight (whale engine,
+   blockchain ingestion, multi-exchange aggregation) and already feeds
+   the Telegram notifier; rather than reimplement those upstreams in
+   Node, we just import the fields the PWA needs. Failure is silent —
+   the rest of the proxy keeps serving without these enrichment keys. */
+async function fetchFromDataServer() {
+  try {
+    /* Bypass safeFetch: it would reject 127.0.0.1 via the
+       DNS-rebinding guard (which exists for *external* upstreams). The
+       loopback is intentionally allowed here, with no retries and a
+       short timeout so a stuck data_server.py can't pile up requests. */
+    const res = await axios.get(CONFIG.DATA_SERVER_URL, {
+      timeout: 8000,
+      maxRedirects: 0,
+    });
+    const d = res.data;
+    if (!d || typeof d !== 'object') return;
+    if (Array.isArray(d.whales)) cache.dsWhales = d.whales;
+    if (d.mcap && typeof d.mcap === 'object') cache.dsMcap = d.mcap;
+    if (d.multi && typeof d.multi === 'object') cache.dsMulti = d.multi;
+    cache.lastUpdate.dataServer = Date.now();
+    console.log(
+      `[DATA-SERVER] whales=${cache.dsWhales.length}, mcap=${Object.keys(cache.dsMcap).length}, multi=[${Object.keys(cache.dsMulti).join(',')}]`
+    );
+  } catch (err) {
+    console.error('[DATA-SERVER] Error:', err.message);
   }
 }
 
@@ -811,6 +905,14 @@ function buildApiAllSnapshot() {
      responses. Cloning at snapshot time pays an O(coins) copy in the
      refresh path (≤ 3 s, capped by API_ALL_TTL_MS) instead of risking
      interleaved writes during JSON serialisation. */
+  /* Override chain: data_server.py is preferred for fields it populates
+     (hyperliquid + multi.* + whales + mcap), with our own fetchers as
+     a fallback if :8080 is dead. bitfinex stays ours-only because the
+     legacy engine never collected it. The PWA reads m.coinalyze /
+     m.hyperliquid / m.news / m.newsSentiment / m.blockchain at the
+     top level (app.js:1977-1987), so the snapshot flattens multi.*
+     instead of nesting it. */
+  const ds = cache.dsMulti || {};
   return {
     tickers: { ...cache.tickers },
     fr: { ...cache.fr },
@@ -821,9 +923,13 @@ function buildApiAllSnapshot() {
     depth: { ...cache.depth },
     market: { ...cache.market, cbp: { ...cache.market.cbp } },
     bitfinex: { ...cache.bitfinex },
-    hyperliquid: { ...cache.hyperliquid },
-    news: cache.news.slice(),
-    newsSentiment: { ...cache.newsSentiment },
+    hyperliquid: ds.hyperliquid ? { ...ds.hyperliquid } : { ...cache.hyperliquid },
+    news: Array.isArray(ds.news) && ds.news.length ? ds.news.slice() : cache.news.slice(),
+    newsSentiment: ds.newsSentiment ? { ...ds.newsSentiment } : { ...cache.newsSentiment },
+    coinalyze: ds.coinalyze ? { ...ds.coinalyze } : {},
+    blockchain: ds.blockchain ? { ...ds.blockchain } : {},
+    whales: cache.dsWhales.slice(),
+    mcap: { ...cache.dsMcap },
     meta: {
       coins: Object.keys(cache.tickers).length,
       lastUpdate: { ...cache.lastUpdate },
@@ -1188,7 +1294,12 @@ async function startDataLoops() {
   await fetchMarket();
 
   console.log('[INIT] Loading multi-exchange enrichment...');
-  await Promise.allSettled([fetchBitfinex(), fetchHyperliquid(), fetchNews()]);
+  await Promise.allSettled([
+    fetchBitfinex(),
+    fetchHyperliquid(),
+    fetchNews(),
+    fetchFromDataServer(),
+  ]);
 
   console.log(`[INIT] ✅ Ready — ${Object.keys(cache.tickers).length} coins loaded`);
 
@@ -1210,7 +1321,8 @@ async function startDataLoops() {
     setInterval(fetchMarket, jitter(CONFIG.MARKET_INTERVAL)),
     setInterval(fetchBitfinex, jitter(CONFIG.BITFINEX_INTERVAL)),
     setInterval(fetchHyperliquid, jitter(CONFIG.HYPERLIQUID_INTERVAL)),
-    setInterval(fetchNews, jitter(CONFIG.NEWS_INTERVAL))
+    setInterval(fetchNews, jitter(CONFIG.NEWS_INTERVAL)),
+    setInterval(fetchFromDataServer, jitter(CONFIG.DATA_SERVER_INTERVAL))
   );
 
   /* Telegram alerts on cache-down / sustained-failure transitions.

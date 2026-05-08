@@ -21,13 +21,14 @@ const FETCH_HOST_ALLOWLIST = new Set([
   'api.coinbase.com',
   'api.alternative.me',
   /* Multi-exchange enrichment sources used by app.js (Bitfinex margin
-     pos.size, Hyperliquid funding+OI, CryptoCompare news). All three
+     pos.size, Hyperliquid funding+OI, CoinTelegraph RSS news). All three
      are public read-only endpoints — they don't accept credentials so
      the user-info-smuggling guard further down is the only thing that
-     matters for them. */
+     matters for them. CoinTelegraph replaced CryptoCompare after the
+     latter moved /v2/news/ behind a paid API key in May 2026. */
   'api-pub.bitfinex.com',
   'api.hyperliquid.xyz',
-  'min-api.cryptocompare.com',
+  'cointelegraph.com',
 ]);
 
 function isAllowedFetchUrl(url) {

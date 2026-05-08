@@ -849,6 +849,10 @@ async function fetchNews() {
         };
       })
       .filter((n) => n.title);
+    /* app.js:3895 reads newsSentiment.total to render the News row in
+       the data-spectrum panel ("نضارة البيانات"). Without this the row
+       sticks at 0 ❌ even when news.length > 0. */
+    totals.total = totals.positive + totals.negative + totals.neutral;
     cache.newsSentiment = totals;
     cache.lastUpdate.news = Date.now();
     console.log(
@@ -913,6 +917,23 @@ function buildApiAllSnapshot() {
      top level (app.js:1977-1987), so the snapshot flattens multi.*
      instead of nesting it. */
   const ds = cache.dsMulti || {};
+  /* If data_server.py supplies its own newsSentiment we forward it,
+     but only after backfilling the .total field that app.js:3895
+     keys the data-spectrum row off — the legacy engine returns just
+     positive/negative/neutral, so without this the News row reports
+     0 ❌ even when news.length > 0. */
+  let newsSentimentOut;
+  if (ds.newsSentiment) {
+    newsSentimentOut = { ...ds.newsSentiment };
+    if (newsSentimentOut.total == null) {
+      newsSentimentOut.total =
+        (newsSentimentOut.positive || 0) +
+        (newsSentimentOut.negative || 0) +
+        (newsSentimentOut.neutral || 0);
+    }
+  } else {
+    newsSentimentOut = { ...cache.newsSentiment };
+  }
   return {
     tickers: { ...cache.tickers },
     fr: { ...cache.fr },
@@ -925,7 +946,7 @@ function buildApiAllSnapshot() {
     bitfinex: { ...cache.bitfinex },
     hyperliquid: ds.hyperliquid ? { ...ds.hyperliquid } : { ...cache.hyperliquid },
     news: Array.isArray(ds.news) && ds.news.length ? ds.news.slice() : cache.news.slice(),
-    newsSentiment: ds.newsSentiment ? { ...ds.newsSentiment } : { ...cache.newsSentiment },
+    newsSentiment: newsSentimentOut,
     coinalyze: ds.coinalyze ? { ...ds.coinalyze } : {},
     blockchain: ds.blockchain ? { ...ds.blockchain } : {},
     whales: cache.dsWhales.slice(),

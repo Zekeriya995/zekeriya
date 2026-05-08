@@ -20,6 +20,14 @@ const FETCH_HOST_ALLOWLIST = new Set([
   'api.coingecko.com',
   'api.coinbase.com',
   'api.alternative.me',
+  /* Multi-exchange enrichment sources used by app.js (Bitfinex margin
+     pos.size, Hyperliquid funding+OI, CryptoCompare news). All three
+     are public read-only endpoints — they don't accept credentials so
+     the user-info-smuggling guard further down is the only thing that
+     matters for them. */
+  'api-pub.bitfinex.com',
+  'api.hyperliquid.xyz',
+  'min-api.cryptocompare.com',
 ]);
 
 function isAllowedFetchUrl(url) {

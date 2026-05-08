@@ -54,6 +54,9 @@ const CONFIG = {
   TAKER_INTERVAL: 60000 /* 1 minute */,
   DEPTH_INTERVAL: 15000 /* 15 seconds — critical for whale engine */,
   LIQ_INTERVAL: 30000 /* 30 seconds */,
+  BITFINEX_INTERVAL: 120000 /* 2 minutes — pos.size only changes slowly + 2 calls per symbol */,
+  HYPERLIQUID_INTERVAL: 60000 /* 1 minute — single batch POST returns every perp */,
+  NEWS_INTERVAL: 300000 /* 5 minutes — CryptoCompare aggregates ~1/min upstream */,
 
   /* API URLs */
   BINANCE_SPOT: 'https://api.binance.com/api/v3',
@@ -180,6 +183,14 @@ const cache = {
     btcDom: 50,
     cbp: {} /* Coinbase prices */,
   },
+  /* Multi-exchange enrichment caches — populated from Bitfinex margin
+     position size, Hyperliquid asset contexts, and CryptoCompare news.
+     The PWA reads these from /api/all under m.bitfinex / m.hyperliquid
+     / m.news / m.newsSentiment (see app.js around line 1977). */
+  bitfinex: {} /* { BTC: { longPct, shortPct, ratio } } */,
+  hyperliquid: {} /* { BTC: { funding, openInterest } } */,
+  news: [] /* [ { title, url, body, publishedOn, source, sentiment } ] */,
+  newsSentiment: { positive: 0, negative: 0, neutral: 0 },
   lastUpdate: {},
 };
 
@@ -249,14 +260,24 @@ async function safeFetch(url, label, opts) {
     return null;
   }
   const maxAttempts = (opts && opts.retries != null ? opts.retries : 2) + 1;
+  const method = ((opts && opts.method) || 'GET').toUpperCase();
+  const body = opts && opts.data;
+  const axiosOpts = {
+    timeout: CONFIG.TIMEOUT,
+    maxRedirects: 0,
+    httpsAgent: safeAgent,
+  };
   let lastErr = null;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      const res = await axios.get(url, {
-        timeout: CONFIG.TIMEOUT,
-        maxRedirects: 0,
-        httpsAgent: safeAgent,
-      });
+      /* Branch on method so axios.get / axios.post stay distinct entry
+         points — the test suite stubs them individually, and keeping
+         the canonical signatures means a stub-aware `axios.get = …`
+         keeps working for the existing retry / metrics tests. */
+      const res =
+        method === 'POST'
+          ? await axios.post(url, body, axiosOpts)
+          : await axios.get(url, axiosOpts);
       upstreamMetrics.success++;
       _bumpLabel(label, 'success');
       if (attempt > 0) {
@@ -637,6 +658,143 @@ async function fetchMarket() {
   }
 }
 
+/* 9. BITFINEX MARGIN POS.SIZE — stats1 endpoint exposes the open
+   long/short position size per pair. We sample the 1-minute bucket
+   for a small fixed list of majors (the API has no batch endpoint,
+   so each symbol costs two HTTP calls — long + short). */
+const BITFINEX_PAIRS = [
+  ['BTC', 'tBTCUSD'],
+  ['ETH', 'tETHUSD'],
+  ['SOL', 'tSOLUSD'],
+  ['XRP', 'tXRPUSD'],
+  ['DOGE', 'tDOGE:USD'],
+  ['ADA', 'tADAUSD'],
+  ['LINK', 'tLINK:USD'],
+  ['AVAX', 'tAVAX:USD'],
+  ['DOT', 'tDOTUSD'],
+  ['MATIC', 'tMATIC:USD'],
+];
+
+async function fetchBitfinex() {
+  try {
+    const updates = await Promise.allSettled(
+      BITFINEX_PAIRS.map(async ([sym, pair]) => {
+        const longUrl = 'https://api-pub.bitfinex.com/v2/stats1/pos.size:1m:' + pair + ':long/last';
+        const shortUrl =
+          'https://api-pub.bitfinex.com/v2/stats1/pos.size:1m:' + pair + ':short/last';
+        const [longRes, shortRes] = await Promise.all([
+          safeFetch(longUrl, 'BFX-LONG-' + sym),
+          safeFetch(shortUrl, 'BFX-SHORT-' + sym),
+        ]);
+        if (
+          !Array.isArray(longRes) ||
+          !Array.isArray(shortRes) ||
+          longRes.length < 2 ||
+          shortRes.length < 2
+        ) {
+          return null;
+        }
+        const long = Math.abs(parseFloat(longRes[1]));
+        const short = Math.abs(parseFloat(shortRes[1]));
+        const total = long + short;
+        if (!isFinite(total) || total <= 0) return null;
+        cache.bitfinex[sym] = {
+          longPct: Math.round((long / total) * 1000) / 10,
+          shortPct: Math.round((short / total) * 1000) / 10,
+          ratio: Math.round((long / Math.max(short, 1)) * 100) / 100,
+        };
+        return sym;
+      })
+    );
+    cache.lastUpdate.bitfinex = Date.now();
+    const updated = updates.filter((r) => r.status === 'fulfilled' && r.value).length;
+    console.log(`[BITFINEX] Updated: ${updated} pairs`);
+  } catch (err) {
+    console.error('[BITFINEX] Error:', err.message);
+  }
+}
+
+/* 10. HYPERLIQUID — a single POST to /info?type=metaAndAssetCtxs
+   returns every perp's funding rate + open interest in one shot. */
+async function fetchHyperliquid() {
+  try {
+    const data = await safeFetch('https://api.hyperliquid.xyz/info', 'HL', {
+      method: 'POST',
+      data: { type: 'metaAndAssetCtxs' },
+    });
+    if (!Array.isArray(data) || data.length < 2) return;
+    const meta = data[0];
+    const ctxs = data[1];
+    if (!meta || !Array.isArray(meta.universe) || !Array.isArray(ctxs)) return;
+    let updated = 0;
+    meta.universe.forEach((asset, idx) => {
+      const ctx = ctxs[idx];
+      if (!asset || !ctx) return;
+      const sym = asset.name;
+      const funding = parseFloat(ctx.funding);
+      const oi = parseFloat(ctx.openInterest);
+      if (!sym || !isFinite(funding)) return;
+      cache.hyperliquid[sym] = {
+        funding:
+          funding * 100 /* HL returns absolute funding (0.0001 = 0.01%); app expects percent */,
+        openInterest: isFinite(oi) ? oi : 0,
+      };
+      updated++;
+    });
+    cache.lastUpdate.hyperliquid = Date.now();
+    console.log(`[HL] Updated: ${updated} perps`);
+  } catch (err) {
+    console.error('[HL] Error:', err.message);
+  }
+}
+
+/* 11. CRYPTOCOMPARE NEWS — public aggregator over Coindesk, CoinTelegraph,
+   Decrypt, etc. Lang=EN keeps the response under ~50 KB. We project the
+   payload down to fields the PWA actually renders, and run a tiny
+   keyword-based sentiment classifier so app.js's newsSentiment block
+   has something to read without a second upstream. */
+const NEWS_POS_RE =
+  /\b(surge|rally|soar|breakout|bullish|gain|gains|jump|jumps|rise|rises|rising|adopt|approval|approved|boost|boosts|growth|partnership|launch|launches|upgrade|upgrades|all[- ]time high|ath)\b/i;
+const NEWS_NEG_RE =
+  /\b(crash|plunge|plummet|tumble|bearish|fall|falls|falling|drop|drops|sink|hack|hacked|exploit|fraud|lawsuit|sec[- ]sue|delist|delisted|ban|bans|banned|liquidation|liquidations|sell[- ]off|fud)\b/i;
+
+function classifyNewsSentiment(text) {
+  if (!text) return 'neutral';
+  const t = String(text);
+  const pos = NEWS_POS_RE.test(t);
+  const neg = NEWS_NEG_RE.test(t);
+  if (pos && !neg) return 'positive';
+  if (neg && !pos) return 'negative';
+  return 'neutral';
+}
+
+async function fetchNews() {
+  try {
+    const data = await safeFetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN', 'NEWS');
+    if (!data || !Array.isArray(data.Data)) return;
+    const totals = { positive: 0, negative: 0, neutral: 0 };
+    cache.news = data.Data.slice(0, 30).map((n) => {
+      const sentiment = classifyNewsSentiment(n.title + ' ' + (n.body || '').slice(0, 240));
+      totals[sentiment]++;
+      return {
+        title: String(n.title || '').slice(0, 200),
+        url: typeof n.url === 'string' ? n.url : '',
+        body: String(n.body || '').slice(0, 400),
+        publishedOn: Number(n.published_on) * 1000 || Date.now(),
+        source: String((n.source_info && n.source_info.name) || n.source || '').slice(0, 60),
+        sentiment: sentiment,
+      };
+    });
+    cache.newsSentiment = totals;
+    cache.lastUpdate.news = Date.now();
+    console.log(
+      `[NEWS] Updated: ${cache.news.length} items (${totals.positive}+ / ${totals.negative}- / ${totals.neutral}=)`
+    );
+  } catch (err) {
+    console.error('[NEWS] Error:', err.message);
+  }
+}
+
 /* ═══ API ROUTES ═══ */
 
 /* Main endpoint — returns ALL data.
@@ -662,6 +820,10 @@ function buildApiAllSnapshot() {
     liq: cache.liq.slice(),
     depth: { ...cache.depth },
     market: { ...cache.market, cbp: { ...cache.market.cbp } },
+    bitfinex: { ...cache.bitfinex },
+    hyperliquid: { ...cache.hyperliquid },
+    news: cache.news.slice(),
+    newsSentiment: { ...cache.newsSentiment },
     meta: {
       coins: Object.keys(cache.tickers).length,
       lastUpdate: { ...cache.lastUpdate },
@@ -707,6 +869,13 @@ const HEALTH_THRESHOLDS = {
   depth: { stale: 60000, down: 180000 },
   liq: { stale: 120000, down: 600000 },
   market: { stale: 600000, down: 1800000 },
+  /* Enrichment caches — slower refresh + more tolerant thresholds. The
+     PWA degrades gracefully when these are missing (it just hides the
+     extra rows), so a "stale" rating here is informational, not a
+     reason to flip /api/health to 503. */
+  bitfinex: { stale: 300000, down: 900000 },
+  hyperliquid: { stale: 180000, down: 600000 },
+  news: { stale: 900000, down: 3600000 },
 };
 function _classifyAge(last, thresholds, now) {
   if (!last) return { ageMs: null, status: 'down' };
@@ -1018,6 +1187,9 @@ async function startDataLoops() {
   console.log('[INIT] Loading market data...');
   await fetchMarket();
 
+  console.log('[INIT] Loading multi-exchange enrichment...');
+  await Promise.allSettled([fetchBitfinex(), fetchHyperliquid(), fetchNews()]);
+
   console.log(`[INIT] ✅ Ready — ${Object.keys(cache.tickers).length} coins loaded`);
 
   /* Set up refresh intervals — kept in a list so we can tear them down
@@ -1035,7 +1207,10 @@ async function startDataLoops() {
     setInterval(fetchTaker, jitter(CONFIG.TAKER_INTERVAL)),
     setInterval(fetchDepth, jitter(CONFIG.DEPTH_INTERVAL)),
     setInterval(fetchLiquidations, jitter(CONFIG.LIQ_INTERVAL)),
-    setInterval(fetchMarket, jitter(CONFIG.MARKET_INTERVAL))
+    setInterval(fetchMarket, jitter(CONFIG.MARKET_INTERVAL)),
+    setInterval(fetchBitfinex, jitter(CONFIG.BITFINEX_INTERVAL)),
+    setInterval(fetchHyperliquid, jitter(CONFIG.HYPERLIQUID_INTERVAL)),
+    setInterval(fetchNews, jitter(CONFIG.NEWS_INTERVAL))
   );
 
   /* Telegram alerts on cache-down / sustained-failure transitions.

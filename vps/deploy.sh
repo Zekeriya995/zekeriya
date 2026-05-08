@@ -91,33 +91,22 @@ fi
 # ─── 6. nginx + Let's Encrypt ─────────────────────────────────
 log "6/8  Configuring nginx for ${DOMAIN}…"
 NGINX_CONF="/etc/nginx/sites-available/${DOMAIN}"
+
+# Write a single HTTP server block with all routing rules. certbot --nginx
+# --redirect (called below) clones this block, attaches the freshly-issued
+# certificate, and rewrites the HTTP block into a 301 redirect — so we never
+# have to hand-write a half-formed HTTPS block or surgically remove it on
+# first run.
 cat > "${NGINX_CONF}" <<NGINX
 # NEXUS PRO — ${DOMAIN}
-# Static assets are served directly from the repo working tree;
-# /api/* and /notify are proxied to the Express server on :${PORT:-3000}.
+# certbot --nginx will append an HTTPS server block and turn the HTTP one
+# into a redirect. Re-running deploy.sh rewrites this file from scratch;
+# certbot reapplies its edits idempotently as long as the cert exists.
 
 server {
     listen 80;
     listen [::]:80;
     server_name ${DOMAIN} www.${DOMAIN};
-
-    # ACME http-01 challenge — kept on plain HTTP for certbot renewal.
-    location /.well-known/acme-challenge/ { root /var/www/html; }
-
-    # Everything else redirects to HTTPS (set up by certbot below).
-    location / { return 301 https://\$host\$request_uri; }
-}
-
-server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name ${DOMAIN} www.${DOMAIN};
-
-    # certbot replaces these placeholders on first run.
-    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
-    include             /etc/letsencrypt/options-ssl-nginx.conf;
-    ssl_dhparam         /etc/letsencrypt/ssl-dhparams.pem;
 
     # Static PWA assets (index.html, app.js, sw.js, src/*, style.css, …).
     root ${APP_DIR};
@@ -161,26 +150,28 @@ NGINX
 ln -sf "${NGINX_CONF}" "/etc/nginx/sites-enabled/${DOMAIN}"
 rm -f /etc/nginx/sites-enabled/default
 
-# Skip the HTTPS server block on first run (cert doesn't exist yet).
-if [[ ! -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
-  warn "First run — temporarily disabling HTTPS block until certbot issues a certificate."
-  sed -i '/listen 443 ssl/,/^}$/d' "${NGINX_CONF}"
-fi
-
 nginx -t
 systemctl reload nginx
-ok "nginx configured"
+ok "nginx HTTP vhost configured"
 
 log "    Issuing Let's Encrypt certificate…"
-if [[ ! -d /opt/certbot ]]; then
+if ! command -v certbot >/dev/null; then
   apt-get install -y -qq certbot python3-certbot-nginx
 fi
 if [[ ! -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" ]]; then
   certbot --nginx --non-interactive --agree-tos --email "${EMAIL}" \
           -d "${DOMAIN}" -d "www.${DOMAIN}" --redirect
-  ok "TLS certificate issued"
+  ok "TLS certificate issued and HTTPS server block installed by certbot"
 else
-  ok "Certificate already present (renewal handled by systemd timer)"
+  # On re-runs the cert already exists but `cat > NGINX_CONF` above just
+  # wiped certbot's HTTPS additions — re-apply them without re-issuing.
+  certbot install --nginx --non-interactive \
+                  --cert-name "${DOMAIN}" \
+                  -d "${DOMAIN}" -d "www.${DOMAIN}"
+  certbot --nginx --non-interactive --reinstall \
+          --cert-name "${DOMAIN}" \
+          -d "${DOMAIN}" -d "www.${DOMAIN}" --redirect 2>/dev/null || true
+  ok "Certificate already present, HTTPS reapplied"
 fi
 
 # ─── 7. PM2 launch + auto-start ───────────────────────────────

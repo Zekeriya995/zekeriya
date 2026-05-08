@@ -24,6 +24,12 @@ test('isAllowedFetchUrl — accepts each upstream we actually use', () => {
   assert.equal(isAllowedFetchUrl('https://api.coingecko.com/api/v3/global'), true);
   assert.equal(isAllowedFetchUrl('https://api.coinbase.com/v2/prices'), true);
   assert.equal(isAllowedFetchUrl('https://api.alternative.me/fng'), true);
+  assert.equal(
+    isAllowedFetchUrl('https://api-pub.bitfinex.com/v2/stats1/pos.size:1m:tBTCUSD:long/last'),
+    true
+  );
+  assert.equal(isAllowedFetchUrl('https://api.hyperliquid.xyz/info'), true);
+  assert.equal(isAllowedFetchUrl('https://min-api.cryptocompare.com/data/v2/news/'), true);
 });
 
 test('isAllowedFetchUrl — rejects http:// (insecure)', () => {

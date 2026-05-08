@@ -267,6 +267,7 @@ async function safeFetch(url, label, opts) {
     maxRedirects: 0,
     httpsAgent: safeAgent,
   };
+  if (opts && opts.responseType) axiosOpts.responseType = opts.responseType;
   let lastErr = null;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
@@ -748,11 +749,13 @@ async function fetchHyperliquid() {
   }
 }
 
-/* 11. CRYPTOCOMPARE NEWS — public aggregator over Coindesk, CoinTelegraph,
-   Decrypt, etc. Lang=EN keeps the response under ~50 KB. We project the
-   payload down to fields the PWA actually renders, and run a tiny
-   keyword-based sentiment classifier so app.js's newsSentiment block
-   has something to read without a second upstream. */
+/* 11. COINTELEGRAPH NEWS — public RSS feed, no auth. CryptoCompare
+   was the original source but they moved /v2/news behind a key in
+   May 2026, so we switched to CoinTelegraph's RSS (~30 items per
+   pull, stable XML shape). The feed is plain XML — we slice on
+   <item>, pull title/link/description/pubDate with regex, and run
+   the same keyword classifier that fed CryptoCompare's sentiment
+   block. */
 const NEWS_POS_RE =
   /\b(surge|rally|soar|breakout|bullish|gain|gains|jump|jumps|rise|rises|rising|adopt|approval|approved|boost|boosts|growth|partnership|launch|launches|upgrade|upgrades|all[- ]time high|ath)\b/i;
 const NEWS_NEG_RE =
@@ -768,23 +771,69 @@ function classifyNewsSentiment(text) {
   return 'neutral';
 }
 
+/* RSS helpers — minimal CDATA / tag / entity strippers. We only need to
+   render plain text in the PWA, so a perfect XML decoder isn't worth
+   the dependency. */
+function _stripCdata(s) {
+  if (!s) return '';
+  const m = s.match(/^<!\[CDATA\[([\s\S]*?)\]\]>$/);
+  return m ? m[1] : s;
+}
+function _stripTags(s) {
+  return (s || '').replace(/<[^>]+>/g, '');
+}
+function _decodeEntities(s) {
+  return (s || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&apos;/g, "'");
+}
+function _grab(block, re) {
+  const m = block.match(re);
+  return m ? m[1] : '';
+}
+
 async function fetchNews() {
   try {
-    const data = await safeFetch('https://min-api.cryptocompare.com/data/v2/news/?lang=EN', 'NEWS');
-    if (!data || !Array.isArray(data.Data)) return;
-    const totals = { positive: 0, negative: 0, neutral: 0 };
-    cache.news = data.Data.slice(0, 30).map((n) => {
-      const sentiment = classifyNewsSentiment(n.title + ' ' + (n.body || '').slice(0, 240));
-      totals[sentiment]++;
-      return {
-        title: String(n.title || '').slice(0, 200),
-        url: typeof n.url === 'string' ? n.url : '',
-        body: String(n.body || '').slice(0, 400),
-        publishedOn: Number(n.published_on) * 1000 || Date.now(),
-        source: String((n.source_info && n.source_info.name) || n.source || '').slice(0, 60),
-        sentiment: sentiment,
-      };
+    const xml = await safeFetch('https://cointelegraph.com/rss', 'NEWS', {
+      responseType: 'text',
     });
+    if (typeof xml !== 'string' || !xml.includes('<item>')) {
+      cache.news = [];
+      cache.newsSentiment = { positive: 0, negative: 0, neutral: 0 };
+      return;
+    }
+    const itemBlocks = xml.split('<item>').slice(1, 31);
+    const totals = { positive: 0, negative: 0, neutral: 0 };
+    cache.news = itemBlocks
+      .map((block) => {
+        const title = _decodeEntities(_stripCdata(_grab(block, /<title>([\s\S]*?)<\/title>/)))
+          .trim()
+          .slice(0, 200);
+        const link = _stripCdata(_grab(block, /<link>([\s\S]*?)<\/link>/))
+          .trim()
+          .slice(0, 300);
+        const desc = _decodeEntities(
+          _stripTags(_stripCdata(_grab(block, /<description>([\s\S]*?)<\/description>/)))
+        )
+          .trim()
+          .slice(0, 400);
+        const pubDate = _grab(block, /<pubDate>([\s\S]*?)<\/pubDate>/).trim();
+        const sentiment = classifyNewsSentiment(title + ' ' + desc);
+        totals[sentiment]++;
+        return {
+          title,
+          url: link,
+          body: desc,
+          publishedOn: pubDate ? new Date(pubDate).getTime() || Date.now() : Date.now(),
+          source: 'CoinTelegraph',
+          sentiment,
+        };
+      })
+      .filter((n) => n.title);
     cache.newsSentiment = totals;
     cache.lastUpdate.news = Date.now();
     console.log(

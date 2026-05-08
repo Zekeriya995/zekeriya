@@ -29,7 +29,7 @@ test('isAllowedFetchUrl — accepts each upstream we actually use', () => {
     true
   );
   assert.equal(isAllowedFetchUrl('https://api.hyperliquid.xyz/info'), true);
-  assert.equal(isAllowedFetchUrl('https://min-api.cryptocompare.com/data/v2/news/'), true);
+  assert.equal(isAllowedFetchUrl('https://cointelegraph.com/rss'), true);
 });
 
 test('isAllowedFetchUrl — rejects http:// (insecure)', () => {

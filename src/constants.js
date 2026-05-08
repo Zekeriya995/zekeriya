@@ -30,7 +30,7 @@ const CB = 'https://api.coinbase.com/v2';
    GitHub Pages — without per-deploy config. When the tunnel URL
    churns the only thing that needs updating is ACTIVE_VPS_TUNNEL
    (one line) and any user-set localStorage override. */
-const ACTIVE_VPS_TUNNEL = 'https://screenshot-upgrading-boating-excellent.trycloudflare.com';
+const ACTIVE_VPS_TUNNEL = 'https://shamcyrpto.com';
 const STATIC_ONLY_HOST_RE = /(\.github\.io|\.pages\.dev|\.workers\.dev|jolly-bush-9254)$/i;
 const PROXY = (function () {
   try {

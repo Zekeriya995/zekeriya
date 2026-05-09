@@ -146,9 +146,132 @@
     return r.ok ? r.json() : { ok: false, status: r.status };
   }
 
+  /* ─── Per-category preferences ─────────────────────────────────
+     Four toggles the user controls from the Alerts page; defaults
+     are all-on so a fresh subscribe receives every category until
+     the user opts out. We store both client-side (localStorage —
+     the source of truth, used by shouldRelay below) and server-side
+     (so a user who subscribes from a second device inherits their
+     last toggle state). */
+  var PREFS_STORAGE = 'nxPushPrefs';
+  var DEFAULT_PREFS = { whales: true, scanTrades: true, top3: true, news: true };
+
+  function getPrefs() {
+    try {
+      var raw = localStorage.getItem(PREFS_STORAGE);
+      if (raw) {
+        var parsed = JSON.parse(raw);
+        return Object.assign({}, DEFAULT_PREFS, parsed || {});
+      }
+    } catch (e) {
+      /* fall through to defaults */
+    }
+    return Object.assign({}, DEFAULT_PREFS);
+  }
+
+  async function setPrefs(next) {
+    var merged = Object.assign({}, getPrefs(), next || {});
+    try {
+      localStorage.setItem(PREFS_STORAGE, JSON.stringify(merged));
+    } catch (e) {
+      /* private mode — local toggle still takes effect for this tab */
+    }
+    /* Sync to server so a per-subscription filter can drop categories
+       the user disabled, even when the trigger fires server-side. */
+    try {
+      if (!isSupported()) return merged;
+      var reg = await _getRegistration();
+      var sub = await reg.pushManager.getSubscription();
+      if (!sub) return merged;
+      await fetch(PROXY_BASE + '/api/push/prefs', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint: sub.endpoint, prefs: merged }),
+      });
+    } catch (e) {
+      /* server may be unreachable — local prefs already saved */
+    }
+    return merged;
+  }
+
+  /* ─── Bridge from in-page notify() → server relay ──────────────
+     notifications.js calls nxPush.shouldRelay({sym,type,score,extra})
+     for every signal it surfaces locally. We map the legacy "type"
+     vocabulary onto our four categories, drop anything the user
+     disabled, and forward the rest to /api/push/relay. The server
+     decides which subscriptions to fan out to (its own per-sub prefs
+     filter applies on top, so a user's most recent toggles always
+     win). */
+  var TYPE_TO_CATEGORY = {
+    whale: 'whales',
+    ultra: 'scanTrades' /* "ULTRA Signal!" is the scanner's strongest verdict */,
+    top3: 'top3',
+    news: 'news',
+  };
+
+  function _composePayload(p) {
+    var sym = String(p.sym || '').toUpperCase();
+    var type = p.type;
+    var score = p.score;
+    if (type === 'whale') {
+      return {
+        title: '🐋 ' + sym + ' — تجميع حيتان',
+        body: 'تم رصد موجة شراء قوية',
+        tag: 'whale-' + sym,
+        url: '/?coin=' + sym,
+      };
+    }
+    if (type === 'ultra') {
+      return {
+        title: '⭐ ' + sym + ' — صفقة جديدة',
+        body: 'سكور: ' + (score || '?') + ' — ادخل الآن',
+        tag: 'scan-' + sym,
+        url: '/?coin=' + sym,
+      };
+    }
+    if (type === 'top3') {
+      return {
+        title: '🎯 أفضل 3 صفقات تحدّثت',
+        body: sym ? sym + ' دخل القائمة' : 'القائمة الجديدة',
+        tag: 'top3',
+        url: '/',
+      };
+    }
+    if (type === 'news') {
+      return {
+        title: '📰 خبر مهم',
+        body: (p.extra && p.extra.title) || sym || 'تم نشر خبر جديد',
+        tag: 'news',
+        url: '/?news=1',
+      };
+    }
+    return null;
+  }
+
+  async function shouldRelay(p) {
+    if (!p || !p.type) return;
+    var category = TYPE_TO_CATEGORY[p.type];
+    if (!category) return;
+    var prefs = getPrefs();
+    if (prefs[category] === false) return;
+    var payload = _composePayload(p);
+    if (!payload) return;
+    payload.type = category;
+    try {
+      await fetch(PROXY_BASE + '/api/push/relay', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch (e) {
+      /* relay is best-effort */
+    }
+  }
+
   /* Expose under a single global so other modules and inline UI
      handlers can call nxPush.subscribe() / nxPush.unsubscribe() /
-     nxPush.getStatus() without dragging the rest of the file in. */
+     nxPush.getStatus() / nxPush.getPrefs() / nxPush.setPrefs() /
+     nxPush.shouldRelay() without dragging the rest of the file in. */
   if (typeof window !== 'undefined') {
     window.nxPush = {
       isSupported: isSupported,
@@ -156,6 +279,9 @@
       subscribe: subscribe,
       unsubscribe: unsubscribe,
       sendTest: sendTest,
+      getPrefs: getPrefs,
+      setPrefs: setPrefs,
+      shouldRelay: shouldRelay,
     };
   }
 })();

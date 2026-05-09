@@ -6767,15 +6767,52 @@ function renderPushCard() {
     }
 
     if (subscribed) {
-      bodyEl.innerHTML = isAr
-        ? '✅ <b style="color:var(--up)">مفعّلة</b> — ستصلك تنبيهات الحيتان والإشارات على شاشة هذا الجهاز.'
-        : '✅ <b style="color:var(--up)">Active</b> — whale alerts and signals will appear on this device.';
+      var prefs = nxPush.getPrefs();
+      /* Per-category toggles — flipping a switch updates localStorage
+         immediately, then syncs to the server-side prefs filter so the
+         next trigger respects it. The server treats the four keys as
+         independent so a user can opt out of news but keep whale
+         alerts. */
+      var rows = [
+        { k: 'whales', icon: '🐋', ar: 'تنبيهات الحيتان', en: 'Whale alerts' },
+        { k: 'scanTrades', icon: '💎', ar: 'صفقات Scanner', en: 'Scanner trades' },
+        { k: 'top3', icon: '🎯', ar: 'أفضل 3 صفقات', en: 'Top 3 trades' },
+        { k: 'news', icon: '📰', ar: 'أخبار مهمة', en: 'Breaking news' },
+      ];
+      var togglesHtml = rows
+        .map(function (r) {
+          var on = prefs[r.k] !== false;
+          return (
+            '<label style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(56,72,96,.1);cursor:pointer">' +
+            '<span style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t1)"><span style="font-size:16px">' +
+            r.icon +
+            '</span>' +
+            (isAr ? r.ar : r.en) +
+            '</span>' +
+            '<input type="checkbox" ' +
+            (on ? 'checked' : '') +
+            ' onchange="nxPushTogglePref(\'' +
+            r.k +
+            '\', this.checked)" style="width:18px;height:18px;cursor:pointer;accent-color:var(--neon)">' +
+            '</label>'
+          );
+        })
+        .join('');
+      bodyEl.innerHTML =
+        '<div style="margin-bottom:8px;font-size:11px">✅ <b style="color:var(--up)">مفعّلة</b> ' +
+        (isAr
+          ? '— اختاري الأنواع التي تريدين استقبالها:'
+          : '— pick which categories to receive:') +
+        '</div>' +
+        '<div style="margin:0 -2px">' +
+        togglesHtml +
+        '</div>';
       actionsEl.innerHTML =
         '<button class="back-btn" onclick="nxPushDoTest()" style="background:rgba(0,255,136,.1);color:var(--up);border-color:rgba(0,255,136,.3)">' +
-        (isAr ? '🔔 إرسال تنبيه تجريبي' : '🔔 Send test') +
+        (isAr ? '🔔 تجربة' : '🔔 Test') +
         '</button>' +
         '<button class="back-btn" onclick="nxPushDoUnsubscribe()" style="background:rgba(255,56,96,.08);color:var(--dn);border-color:rgba(255,56,96,.25)">' +
-        (isAr ? 'إيقاف الإشعارات' : 'Stop notifications') +
+        (isAr ? 'إيقاف الإشعارات' : 'Stop') +
         '</button>';
       return;
     }
@@ -6836,6 +6873,21 @@ async function nxPushDoTest() {
     }
   } catch (err) {
     if (typeof notify === 'function') notify('Test failed: ' + (err && err.message), 'error');
+  }
+}
+
+/* Toggle handler for the four per-category switches in the alerts
+   page. Updates localStorage + the server-side filter atomically;
+   on a transient sync failure the local toggle still takes effect
+   for this tab so the UI doesn't lie. */
+async function nxPushTogglePref(key, on) {
+  if (typeof nxPush === 'undefined' || !nxPush.setPrefs) return;
+  try {
+    var update = {};
+    update[key] = !!on;
+    await nxPush.setPrefs(update);
+  } catch (e) {
+    /* swallow — local prefs already saved by setPrefs */
   }
 }
 

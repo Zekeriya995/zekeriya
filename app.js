@@ -6893,7 +6893,24 @@ async function nxPushTogglePref(key, on) {
 
 /* Re-render the card whenever the user navigates to the alerts page,
    so toggling state in DevTools (or returning from a permission
-   prompt that paused the page) reflects without a manual refresh. */
+   prompt that paused the page) reflects without a manual refresh.
+   The MutationObserver below covers the navigation path the rest of
+   the app uses (sp() flips the .act class on the target page);
+   without it the card would stay stuck on the initial "جارٍ التحقق
+   من الدعم…" placeholder if the user opened the alerts page later
+   in the session, after the initial setTimeout had already fired. */
 document.addEventListener('DOMContentLoaded', function () {
-  setTimeout(renderPushCard, 1000);
+  var alertsPage = document.getElementById('pg-alerts');
+  if (alertsPage && typeof MutationObserver !== 'undefined') {
+    var obs = new MutationObserver(function () {
+      if (alertsPage.classList.contains('act')) renderPushCard();
+    });
+    obs.observe(alertsPage, { attributes: true, attributeFilter: ['class'] });
+  }
+  /* Initial fill — long enough for src/push-client.js to register
+     window.nxPush via its IIFE. defer guarantees ordering, but the
+     SW registration that getStatus() awaits can take a moment more
+     on a cold start. */
+  setTimeout(renderPushCard, 1500);
+  setTimeout(renderPushCard, 4000);
 });

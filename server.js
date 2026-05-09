@@ -909,31 +909,33 @@ function buildApiAllSnapshot() {
      responses. Cloning at snapshot time pays an O(coins) copy in the
      refresh path (≤ 3 s, capped by API_ALL_TTL_MS) instead of risking
      interleaved writes during JSON serialisation. */
-  /* Override chain: data_server.py is preferred for fields it populates
-     (hyperliquid + multi.* + whales + mcap), with our own fetchers as
-     a fallback if :8080 is dead. bitfinex stays ours-only because the
-     legacy engine never collected it. The PWA reads m.coinalyze /
-     m.hyperliquid / m.news / m.newsSentiment / m.blockchain at the
-     top level (app.js:1977-1987), so the snapshot flattens multi.*
-     instead of nesting it. */
+  /* The PWA reads multi-exchange enrichment under `all.multi` — see
+     app.js:1975-1989 (`if(all.multi){var m=all.multi; if(m.coinalyze)...
+     if(m.hyperliquid)... if(m.news)... if(m.newsSentiment)...
+     if(m.bitfinex)...`). Earlier revisions of buildApiAllSnapshot
+     flattened these to the top level, which the PWA silently ignored
+     (every multi-exchange row stuck at 0 ❌). We now keep the legacy
+     nested shape and expose:
+       - bitfinex from server.js's own fetcher
+       - hyperliquid / coinalyze / news / newsSentiment / blockchain /
+         cbPremium passed through from data_server.py when available,
+         falling back to our in-Node hyperliquid + news collectors
+         when :8080 is dead. */
   const ds = cache.dsMulti || {};
-  /* If data_server.py supplies its own newsSentiment we forward it,
-     but only after backfilling the .total field that app.js:3895
-     keys the data-spectrum row off — the legacy engine returns just
-     positive/negative/neutral, so without this the News row reports
-     0 ❌ even when news.length > 0. */
   let newsSentimentOut;
   if (ds.newsSentiment) {
     newsSentimentOut = { ...ds.newsSentiment };
-    if (newsSentimentOut.total == null) {
-      newsSentimentOut.total =
-        (newsSentimentOut.positive || 0) +
-        (newsSentimentOut.negative || 0) +
-        (newsSentimentOut.neutral || 0);
-    }
   } else {
     newsSentimentOut = { ...cache.newsSentiment };
   }
+  if (newsSentimentOut.total == null) {
+    newsSentimentOut.total =
+      (newsSentimentOut.positive || 0) +
+      (newsSentimentOut.negative || 0) +
+      (newsSentimentOut.neutral || 0);
+  }
+  const newsArr = Array.isArray(ds.news) && ds.news.length ? ds.news.slice() : cache.news.slice();
+  const hyperliquidObj = ds.hyperliquid ? { ...ds.hyperliquid } : { ...cache.hyperliquid };
   return {
     tickers: { ...cache.tickers },
     fr: { ...cache.fr },
@@ -943,12 +945,26 @@ function buildApiAllSnapshot() {
     liq: cache.liq.slice(),
     depth: { ...cache.depth },
     market: { ...cache.market, cbp: { ...cache.market.cbp } },
+    /* Top-level mirrors of multi.* — kept for any caller that already
+       reads them off the root (the new server.js code path) without
+       breaking the legacy PWA which reads from all.multi. Cheap O(n)
+       shallow clones so a refresh tick mid-serialisation won't tear. */
     bitfinex: { ...cache.bitfinex },
-    hyperliquid: ds.hyperliquid ? { ...ds.hyperliquid } : { ...cache.hyperliquid },
-    news: Array.isArray(ds.news) && ds.news.length ? ds.news.slice() : cache.news.slice(),
+    hyperliquid: hyperliquidObj,
+    news: newsArr,
     newsSentiment: newsSentimentOut,
     coinalyze: ds.coinalyze ? { ...ds.coinalyze } : {},
     blockchain: ds.blockchain ? { ...ds.blockchain } : {},
+    /* Legacy nested shape app.js:1975 actually consumes. */
+    multi: {
+      bitfinex: { ...cache.bitfinex },
+      hyperliquid: hyperliquidObj,
+      news: newsArr,
+      newsSentiment: newsSentimentOut,
+      coinalyze: ds.coinalyze ? { ...ds.coinalyze } : {},
+      blockchain: ds.blockchain ? { ...ds.blockchain } : {},
+      cbPremium: ds.cbPremium ? { ...ds.cbPremium } : {},
+    },
     whales: cache.dsWhales.slice(),
     mcap: { ...cache.dsMcap },
     meta: {

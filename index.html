@@ -92,11 +92,20 @@
 <button onclick="sp('dash')" class="back-btn">← <span data-t="back">رجوع</span></button>
 </div>
 
-<!-- Web Push opt-in card — populated by renderPushCard() in app.js once nxPush.getStatus() resolves. The user toggles delivery here; subscribed state and "send test" survive the reload because the SW persists the subscription. -->
+<!-- Web Push opt-in card. The default markup below renders the
+ unsubscribed state immediately so the user sees the activation
+ button on first paint — no waiting on renderPushCard / nxPush /
+ the SW registration handshake. renderPushCard then refines the
+ card to its real state (already subscribed → 4 toggles + test;
+ permission denied → instructions; unsupported browser → message)
+ once nxPush is available. The fallback inside the onclick handler
+ catches the rare case where the user taps before the JS module
+ has finished loading: it simply asks them to retry rather than
+ failing silently. -->
 <div id="pushCard" class="cd" style="margin:8px 12px;padding:12px;border:1px solid rgba(0,255,136,.18)">
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:18px">🔔</span><b id="pushCardTitle" style="font-family:var(--fd);font-size:13px;color:var(--t0)">إشعارات التطبيق</b></div>
-<div id="pushCardBody" style="font-size:11px;color:var(--t2);line-height:1.6">جارٍ التحقق من الدعم…</div>
-<div id="pushCardActions" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"></div>
+<div id="pushCardBody" style="font-size:11px;color:var(--t2);line-height:1.6">فعّلي الإشعارات لتصلك تنبيهات الحيتان والإشارات القوية فور حدوثها — حتى لو التطبيق مغلق.</div>
+<div id="pushCardActions" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="back-btn" onclick="if(typeof nxPushDoSubscribe==='function'){nxPushDoSubscribe()}else{alert('جارٍ تحميل وحدة الإشعارات — حاولي بعد ثانيتين.')}" style="background:linear-gradient(135deg,#00ff88,#00d4aa);color:#000;border:none;font-weight:800">🔔 تفعيل الإشعارات</button></div>
 </div>
 
 <div id="alertList"></div>

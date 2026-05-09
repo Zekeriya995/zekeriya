@@ -2,7 +2,7 @@
    the previous generation atomically. The old string ('nexus-v10-v14-modules')
    was static, which meant a hot-fix to app.js was never fetched from the
    network until users hard-refreshed. */
-var CACHE_VERSION = 'v10.11.0-data-server-bridge-2026-05-09';
+var CACHE_VERSION = 'v10.12.0-web-push-2026-05-09';
 var CACHE_NAME = 'nexus-' + CACHE_VERSION;
 /* Critical assets — install fails if any fail */
 var CRITICAL_ASSETS = [
@@ -25,6 +25,7 @@ var CRITICAL_ASSETS = [
   './src/visibility-pause.js',
   './src/source-health.js',
   './src/source-health-ui.js',
+  './src/push-client.js',
 ];
 /* Optional assets — best-effort cache, failure does not block install */
 var OPTIONAL_ASSETS = [
@@ -150,6 +151,59 @@ self.addEventListener('fetch', function (e) {
       /* SWR: cached wins the race when present; the network update
          lands silently in the background for the next navigation. */
       return cached || network;
+    })
+  );
+});
+
+/* ═══ WEB PUSH ═══
+
+   Push events arrive even when the PWA is closed; the browser keeps
+   the SW alive long enough to call showNotification. The payload is
+   a JSON blob the server crafted, with title / body / tag / url.
+   `tag` collapses repeated alerts about the same symbol into a
+   single notification entry instead of stacking five lines. The
+   click handler focuses an open tab if one exists, otherwise opens
+   the URL fresh — same UX as native apps. */
+
+self.addEventListener('push', function (e) {
+  var data = {};
+  try {
+    if (e.data) data = e.data.json();
+  } catch (err) {
+    data = { title: 'NEXUS PRO', body: e.data ? e.data.text() : '' };
+  }
+  var title = data.title || 'NEXUS PRO';
+  var options = {
+    body: data.body || '',
+    tag: data.tag || 'nexus',
+    icon: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Crect width='192' height='192' rx='40' fill='%23060b14'/%3E%3Ctext x='96' y='125' font-size='110' text-anchor='middle' fill='%2300ff88' font-family='Arial,sans-serif' font-weight='bold'%3EN%3C/text%3E%3C/svg%3E",
+    badge:
+      "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='20' fill='%23060b14'/%3E%3Ctext x='48' y='65' font-size='60' text-anchor='middle' fill='%2300ff88' font-family='Arial,sans-serif' font-weight='bold'%3EN%3C/text%3E%3C/svg%3E",
+    data: { url: data.url || '/' },
+    requireInteraction: false,
+    /* Vibrate is honoured on Android but ignored on iOS — leaving it
+       opt-in via data.vibrate keeps both platforms quiet by default. */
+    vibrate: data.vibrate || [80, 40, 80],
+  };
+  e.waitUntil(self.registration.showNotification(title, options));
+});
+
+self.addEventListener('notificationclick', function (e) {
+  e.notification.close();
+  var target = (e.notification.data && e.notification.data.url) || '/';
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function (list) {
+      for (var i = 0; i < list.length; i++) {
+        var c = list[i];
+        if ('focus' in c) {
+          /* If a tab is already open on the same origin, navigate it
+             to the target URL and bring it forward instead of opening
+             yet another window. */
+          if ('navigate' in c) c.navigate(target).catch(function () {});
+          return c.focus();
+        }
+      }
+      if (self.clients.openWindow) return self.clients.openWindow(target);
     })
   );
 });

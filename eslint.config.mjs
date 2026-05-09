@@ -43,6 +43,9 @@ export default [
         STATIC_ONLY_HOST_RE: 'readonly',
         WL: 'writable',
         COL: 'writable',
+        /* Declared in src/push-client.js (loaded via defer script tag,
+           so app.js sees it on window at runtime). */
+        nxPush: 'readonly',
         /* Declared in src/utils.js */
         fmt: 'readonly',
         fP: 'readonly',

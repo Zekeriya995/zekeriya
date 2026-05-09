@@ -6726,3 +6726,174 @@ if ('serviceWorker' in navigator) {
     }).catch(function () { /* noop */ });
   } catch (e) { /* noop */ }
 }
+
+/* ─── Web Push opt-in UI ──────────────────────────────────────────
+   Renders the #pushCard block on the Alerts page based on the
+   browser's current state. The card is the only place the user
+   toggles delivery — subscribe / unsubscribe / send-test buttons
+   wire directly to nxPush.* (src/push-client.js). We re-render
+   after every state change so the buttons reflect reality without
+   a page reload. */
+function renderPushCard() {
+  var card = document.getElementById('pushCard');
+  if (!card) return;
+  var titleEl = document.getElementById('pushCardTitle');
+  var bodyEl = document.getElementById('pushCardBody');
+  var actionsEl = document.getElementById('pushCardActions');
+  if (!titleEl || !bodyEl || !actionsEl) return;
+  var isAr = (typeof lang === 'string' ? lang : 'ar') === 'ar';
+
+  if (typeof nxPush === 'undefined' || !nxPush.isSupported()) {
+    titleEl.textContent = isAr ? 'إشعارات التطبيق' : 'App notifications';
+    bodyEl.textContent = isAr
+      ? 'متصفحك لا يدعم الإشعارات الفورية. على iPhone افتحي التطبيق من Safari ثم ثبّتيه على الشاشة الرئيسية أولاً.'
+      : 'Your browser does not support push notifications. On iPhone, install the app from Safari to the home screen first.';
+    actionsEl.innerHTML = '';
+    return;
+  }
+
+  nxPush.getStatus().then(function (st) {
+    if (!st.supported) return;
+    var subscribed = st.subscribed && st.permission === 'granted';
+    var blocked = st.permission === 'denied';
+    titleEl.textContent = isAr ? 'إشعارات التطبيق' : 'App notifications';
+
+    if (blocked) {
+      bodyEl.textContent = isAr
+        ? 'الإذن مرفوض من إعدادات المتصفح. افتحي إعدادات الموقع وفعّلي «الإشعارات».'
+        : 'Permission denied. Open your browser site settings and re-enable Notifications.';
+      actionsEl.innerHTML = '';
+      return;
+    }
+
+    if (subscribed) {
+      var prefs = nxPush.getPrefs();
+      /* Per-category toggles — flipping a switch updates localStorage
+         immediately, then syncs to the server-side prefs filter so the
+         next trigger respects it. The server treats the four keys as
+         independent so a user can opt out of news but keep whale
+         alerts. */
+      var rows = [
+        { k: 'whales', icon: '🐋', ar: 'تنبيهات الحيتان', en: 'Whale alerts' },
+        { k: 'scanTrades', icon: '💎', ar: 'صفقات Scanner', en: 'Scanner trades' },
+        { k: 'top3', icon: '🎯', ar: 'أفضل 3 صفقات', en: 'Top 3 trades' },
+        { k: 'news', icon: '📰', ar: 'أخبار مهمة', en: 'Breaking news' },
+      ];
+      var togglesHtml = rows
+        .map(function (r) {
+          var on = prefs[r.k] !== false;
+          return (
+            '<label style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid rgba(56,72,96,.1);cursor:pointer">' +
+            '<span style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t1)"><span style="font-size:16px">' +
+            r.icon +
+            '</span>' +
+            (isAr ? r.ar : r.en) +
+            '</span>' +
+            '<input type="checkbox" ' +
+            (on ? 'checked' : '') +
+            ' onchange="nxPushTogglePref(\'' +
+            r.k +
+            '\', this.checked)" style="width:18px;height:18px;cursor:pointer;accent-color:var(--neon)">' +
+            '</label>'
+          );
+        })
+        .join('');
+      bodyEl.innerHTML =
+        '<div style="margin-bottom:8px;font-size:11px">✅ <b style="color:var(--up)">مفعّلة</b> ' +
+        (isAr
+          ? '— اختاري الأنواع التي تريدين استقبالها:'
+          : '— pick which categories to receive:') +
+        '</div>' +
+        '<div style="margin:0 -2px">' +
+        togglesHtml +
+        '</div>';
+      actionsEl.innerHTML =
+        '<button class="back-btn" onclick="nxPushDoTest()" style="background:rgba(0,255,136,.1);color:var(--up);border-color:rgba(0,255,136,.3)">' +
+        (isAr ? '🔔 تجربة' : '🔔 Test') +
+        '</button>' +
+        '<button class="back-btn" onclick="nxPushDoUnsubscribe()" style="background:rgba(255,56,96,.08);color:var(--dn);border-color:rgba(255,56,96,.25)">' +
+        (isAr ? 'إيقاف الإشعارات' : 'Stop') +
+        '</button>';
+      return;
+    }
+
+    bodyEl.textContent = isAr
+      ? 'فعّلي الإشعارات لتصلك تنبيهات الحيتان والإشارات القوية فور حدوثها — حتى لو التطبيق مغلق.'
+      : 'Enable notifications to get whale alerts and strong signals the moment they happen — even when the app is closed.';
+    actionsEl.innerHTML =
+      '<button class="back-btn" onclick="nxPushDoSubscribe()" style="background:linear-gradient(135deg,#00ff88,#00d4aa);color:#000;border:none;font-weight:800">' +
+      (isAr ? '🔔 تفعيل الإشعارات' : '🔔 Enable notifications') +
+      '</button>';
+  }).catch(function () { /* getStatus shouldn't throw — silence */ });
+}
+
+async function nxPushDoSubscribe() {
+  var isAr = (typeof lang === 'string' ? lang : 'ar') === 'ar';
+  try {
+    await nxPush.subscribe();
+    if (typeof notify === 'function') {
+      notify(isAr ? '✅ تم تفعيل الإشعارات' : '✅ Notifications enabled', 'success');
+    }
+    renderPushCard();
+  } catch (err) {
+    var msg = isAr ? 'فشل التفعيل: ' : 'Subscribe failed: ';
+    if (err && err.code === 'permission_denied') {
+      msg += isAr ? 'الإذن مرفوض' : 'permission denied';
+    } else if (err && err.code === 'not_supported') {
+      msg += isAr ? 'غير مدعوم على هذا المتصفح' : 'not supported';
+    } else {
+      msg += (err && err.message) || 'unknown';
+    }
+    if (typeof notify === 'function') notify(msg, 'error');
+    else alert(msg);
+    renderPushCard();
+  }
+}
+
+async function nxPushDoUnsubscribe() {
+  var isAr = (typeof lang === 'string' ? lang : 'ar') === 'ar';
+  try {
+    await nxPush.unsubscribe();
+    if (typeof notify === 'function') {
+      notify(isAr ? 'تم إيقاف الإشعارات' : 'Notifications stopped', 'info');
+    }
+    renderPushCard();
+  } catch (err) {
+    if (typeof notify === 'function') notify('Unsubscribe failed: ' + (err && err.message), 'error');
+    renderPushCard();
+  }
+}
+
+async function nxPushDoTest() {
+  var isAr = (typeof lang === 'string' ? lang : 'ar') === 'ar';
+  try {
+    await nxPush.sendTest();
+    if (typeof notify === 'function') {
+      notify(isAr ? '🔔 أُرسل التنبيه التجريبي' : '🔔 Test sent', 'info');
+    }
+  } catch (err) {
+    if (typeof notify === 'function') notify('Test failed: ' + (err && err.message), 'error');
+  }
+}
+
+/* Toggle handler for the four per-category switches in the alerts
+   page. Updates localStorage + the server-side filter atomically;
+   on a transient sync failure the local toggle still takes effect
+   for this tab so the UI doesn't lie. */
+async function nxPushTogglePref(key, on) {
+  if (typeof nxPush === 'undefined' || !nxPush.setPrefs) return;
+  try {
+    var update = {};
+    update[key] = !!on;
+    await nxPush.setPrefs(update);
+  } catch (e) {
+    /* swallow — local prefs already saved by setPrefs */
+  }
+}
+
+/* Re-render the card whenever the user navigates to the alerts page,
+   so toggling state in DevTools (or returning from a permission
+   prompt that paused the page) reflects without a manual refresh. */
+document.addEventListener('DOMContentLoaded', function () {
+  setTimeout(renderPushCard, 1000);
+});

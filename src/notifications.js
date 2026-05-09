@@ -613,4 +613,18 @@ function notify(sym, type, score, extra) {
     tgNotify(sym, 'whale', {});
     if (T[sym]) openTrade(sym, T[sym].p, 'whale', score);
   }
+  /* Web Push relay — fan the same notification out to every device the
+     user opted in on. nxPush.shouldRelay reads localStorage prefs and
+     skips silently when the category is off, when the user never
+     subscribed, or when push isn't supported (iOS without install,
+     desktop browsers without permission, etc.). The local UI flow
+     above always runs first; relay is best-effort and never blocks. */
+  try {
+    if (typeof window !== 'undefined' && window.nxPush && window.nxPush.shouldRelay) {
+      window.nxPush.shouldRelay({ sym: sym, type: type, score: score, extra: extra });
+    }
+  } catch (relayErr) {
+    /* swallow — push is supplementary, never a reason to break the
+       in-page notify pipeline. */
+  }
 }

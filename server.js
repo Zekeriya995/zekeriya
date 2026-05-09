@@ -24,6 +24,9 @@ const helmet = require('helmet');
 const compression = require('compression');
 const axios = require('axios');
 const rateLimit = require('express-rate-limit');
+const fs = require('node:fs');
+const path = require('node:path');
+const webpush = require('web-push');
 require('dotenv').config();
 
 const {
@@ -206,8 +209,203 @@ const cache = {
   dsWhales: [] /* list of { sym, side, value, price, time } */,
   dsMcap: {} /* { BTC: { rank, mcap, ath, atl } } */,
   dsMulti: {} /* { coinalyze, hyperliquid, blockchain, news, newsSentiment, ... } */,
+  pushSubs: [] /* [ { endpoint, keys: { p256dh, auth }, addedAt } ] */,
   lastUpdate: {},
 };
+
+/* ═══ WEB PUSH NOTIFICATIONS ═══
+
+   Subscriptions are kept in memory and mirrored to a JSON file on
+   disk so a process restart doesn't drop active subscribers. The
+   trigger logic (whale alerts) reads cache.dsWhales directly and
+   debounces by symbol so a single big BTC sweep doesn't pile 30
+   notifications on the user's lock screen. */
+
+const PUSH_SUBS_PATH = path.join(__dirname, 'data', 'push-subs.json');
+const PUSH_ENABLED = !!(process.env.VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY);
+
+if (PUSH_ENABLED) {
+  webpush.setVapidDetails(
+    process.env.VAPID_EMAIL || 'mailto:admin@shamcyrpto.com',
+    process.env.VAPID_PUBLIC_KEY,
+    process.env.VAPID_PRIVATE_KEY
+  );
+  console.log('[PUSH] Web Push enabled');
+} else {
+  console.log('[PUSH] Disabled — set VAPID_PUBLIC_KEY + VAPID_PRIVATE_KEY in .env to enable');
+}
+
+/* Load persisted subscriptions on startup. The file may not exist
+   on first boot — that's fine, we treat it as an empty list. A
+   malformed file is logged and replaced; better than letting one
+   bad save crash the whole proxy. */
+function loadPushSubs() {
+  try {
+    if (!fs.existsSync(PUSH_SUBS_PATH)) {
+      cache.pushSubs = [];
+      return;
+    }
+    const raw = fs.readFileSync(PUSH_SUBS_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    cache.pushSubs = Array.isArray(parsed) ? parsed : [];
+    console.log(`[PUSH] Loaded ${cache.pushSubs.length} subscription(s) from disk`);
+  } catch (err) {
+    console.error('[PUSH] Failed to load subscriptions:', err.message);
+    cache.pushSubs = [];
+  }
+}
+
+/* Atomic save: write to .tmp then rename, so a crash mid-write
+   doesn't leave a half-baked JSON file we'd fail to parse next
+   boot. */
+function savePushSubs() {
+  try {
+    const dir = path.dirname(PUSH_SUBS_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const tmp = PUSH_SUBS_PATH + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(cache.pushSubs, null, 2));
+    fs.renameSync(tmp, PUSH_SUBS_PATH);
+  } catch (err) {
+    console.error('[PUSH] Failed to save subscriptions:', err.message);
+  }
+}
+
+loadPushSubs();
+
+/* sendPushToAll fans the same payload out to every subscriber and
+   prunes any whose endpoint returns 404 / 410 (Gone — the browser
+   uninstalled the SW, or the user opted out). Other failures are
+   logged but the subscription is kept for the next attempt — Push
+   services occasionally return 5xx and we don't want a hiccup to
+   wipe everyone's subscription.
+
+   `category` (optional) maps to the four user-toggleable preferences
+   (whales / scanTrades / top3 / news). If supplied, subs whose
+   prefs[category] === false are skipped. Subs without prefs (legacy
+   subscribers from before #81) are treated as "all on" so behavior
+   is conservative. */
+async function sendPushToAll(payload, category) {
+  if (!PUSH_ENABLED || !cache.pushSubs.length) return { sent: 0, pruned: 0, skipped: 0 };
+  const body = JSON.stringify(payload);
+  const dead = [];
+  let sent = 0;
+  let skipped = 0;
+  await Promise.all(
+    cache.pushSubs.map(async (sub) => {
+      if (category && sub.prefs && sub.prefs[category] === false) {
+        skipped++;
+        return;
+      }
+      try {
+        await webpush.sendNotification(sub, body, { TTL: 60 });
+        sent++;
+      } catch (err) {
+        const code = err && err.statusCode;
+        if (code === 404 || code === 410) {
+          dead.push(sub.endpoint);
+        } else {
+          console.warn('[PUSH] Send failed:', code || err.message);
+        }
+      }
+    })
+  );
+  if (dead.length) {
+    cache.pushSubs = cache.pushSubs.filter((s) => !dead.includes(s.endpoint));
+    savePushSubs();
+    console.log(`[PUSH] Pruned ${dead.length} dead subscription(s)`);
+  }
+  return { sent, pruned: dead.length, skipped };
+}
+
+/* Whale alert trigger — runs after each fetchFromDataServer tick.
+   We keep a per-symbol cooldown so back-to-back trades on the same
+   pair don't drown the user, plus a global debounce to cap the
+   notification rate even during a market-wide whale storm. */
+const WHALE_PUSH_THRESHOLD_USD = 100000;
+const WHALE_PUSH_PER_SYM_COOLDOWN_MS = 5 * 60 * 1000; /* 5 min */
+const WHALE_PUSH_GLOBAL_COOLDOWN_MS = 30 * 1000; /* 30 s */
+const _whalePushBySymbol = Object.create(null);
+let _whalePushLastGlobalAt = 0;
+
+function _formatWhaleValue(usd) {
+  if (usd >= 1e9) return (usd / 1e9).toFixed(2) + 'B';
+  if (usd >= 1e6) return (usd / 1e6).toFixed(2) + 'M';
+  if (usd >= 1e3) return (usd / 1e3).toFixed(0) + 'K';
+  return String(Math.round(usd));
+}
+
+async function maybePushWhaleAlerts() {
+  if (!PUSH_ENABLED || !cache.pushSubs.length) return;
+  if (!Array.isArray(cache.dsWhales) || !cache.dsWhales.length) return;
+  const now = Date.now();
+  if (now - _whalePushLastGlobalAt < WHALE_PUSH_GLOBAL_COOLDOWN_MS) return;
+
+  const fresh = cache.dsWhales.filter(
+    (w) => w && w.value >= WHALE_PUSH_THRESHOLD_USD && w.time && now - w.time < 60000
+  );
+  if (!fresh.length) return;
+
+  fresh.sort((a, b) => b.value - a.value);
+  const top = fresh[0];
+  const sym = String(top.sym || '').toUpperCase();
+  if (!sym) return;
+  if (now - (_whalePushBySymbol[sym] || 0) < WHALE_PUSH_PER_SYM_COOLDOWN_MS) return;
+
+  const dir = top.side === 'buy' ? '🟢 شراء' : '🔴 بيع';
+  const payload = {
+    title: '🐋 ' + sym + ' — حوت ' + (top.side === 'buy' ? 'مشتري' : 'بائع'),
+    body: dir + ' ' + _formatWhaleValue(top.value) + '$ عند ' + top.price,
+    tag: 'whale-' + sym,
+    url: '/?coin=' + sym,
+  };
+  const { sent } = await sendPushToAll(payload, 'whales');
+  if (sent > 0) {
+    _whalePushBySymbol[sym] = now;
+    _whalePushLastGlobalAt = now;
+    console.log(
+      `[PUSH] Whale alert sent: ${sym} ${top.side} ${_formatWhaleValue(top.value)}$ → ${sent} client(s)`
+    );
+  }
+}
+
+/* News alert trigger — fires when a fresh CoinTelegraph (or
+   data_server.py.multi.news) headline carries a non-neutral
+   sentiment that hasn't been pushed yet. Dedupes on
+   (title|sentiment) so the same headline can't notify twice if both
+   upstreams happen to publish it. 5-min cooldown keeps a busy feed
+   quiet during high-news days. */
+let _lastNewsHash = '';
+let _lastNewsPushAt = 0;
+const NEWS_PUSH_COOLDOWN_MS = 5 * 60 * 1000;
+
+async function maybePushNewsAlerts() {
+  if (!PUSH_ENABLED || !cache.pushSubs.length) return;
+  const now = Date.now();
+  if (now - _lastNewsPushAt < NEWS_PUSH_COOLDOWN_MS) return;
+  const ds = cache.dsMulti && Array.isArray(cache.dsMulti.news) ? cache.dsMulti.news : null;
+  const list = ds && ds.length ? ds : cache.news;
+  if (!Array.isArray(list) || !list.length) return;
+  const top = list[0];
+  if (!top || !top.title) return;
+  const sentiment = top.sentiment;
+  if (sentiment !== 'positive' && sentiment !== 'negative') return;
+  const hash = top.title + '|' + sentiment;
+  if (hash === _lastNewsHash) return;
+  _lastNewsHash = hash;
+
+  const emoji = sentiment === 'positive' ? '🟢' : '🔴';
+  const payload = {
+    title: emoji + ' خبر مهم — ' + (top.source || 'crypto'),
+    body: String(top.title).slice(0, 140),
+    tag: 'news',
+    url: '/?news=1',
+  };
+  const { sent } = await sendPushToAll(payload, 'news');
+  if (sent > 0) {
+    _lastNewsPushAt = now;
+    console.log(`[PUSH] News alert sent: ${sentiment} → ${sent} client(s)`);
+  }
+}
 
 /* ═══ SAFE FETCH — with timeout, allowlist, and DNS-rebinding guard ═══
 
@@ -885,6 +1083,13 @@ async function fetchFromDataServer() {
     if (d.mcap && typeof d.mcap === 'object') cache.dsMcap = d.mcap;
     if (d.multi && typeof d.multi === 'object') cache.dsMulti = d.multi;
     cache.lastUpdate.dataServer = Date.now();
+    /* Fire whale + news push notifications opportunistically — runs
+       in the same tick the cache is fresh, so subscribers see
+       alerts as soon as the upstream sees them. Both use their own
+       cooldowns so the per-tick cadence (5 s) doesn't translate
+       into spam. */
+    maybePushWhaleAlerts().catch((e) => console.error('[PUSH] Whale alert error:', e.message));
+    maybePushNewsAlerts().catch((e) => console.error('[PUSH] News alert error:', e.message));
     console.log(
       `[DATA-SERVER] whales=${cache.dsWhales.length}, mcap=${Object.keys(cache.dsMcap).length}, multi=[${Object.keys(cache.dsMulti).join(',')}]`
     );
@@ -1244,6 +1449,146 @@ function _resetAlertState() {
   for (const k of Object.keys(_alertState.firing)) delete _alertState.firing[k];
   for (const k of Object.keys(_alertState.lastSentAt)) delete _alertState.lastSentAt[k];
 }
+
+/* ═══ WEB PUSH ENDPOINTS ═══
+
+   /api/push/public-key  — returns the VAPID public key the PWA needs
+                           to subscribe (it's not actually a secret —
+                           browsers expose it in the request anyway).
+   /api/push/subscribe   — accepts a PushSubscription JSON, dedups on
+                           endpoint, persists to disk.
+   /api/push/unsubscribe — removes a subscription by endpoint.
+   /api/push/test        — fires a "ping" notification to all
+                           subscribers; useful for first-time setup. */
+
+app.get('/api/push/public-key', (req, res) => {
+  if (!PUSH_ENABLED) return res.status(503).json({ error: 'push_disabled' });
+  res.set('Cache-Control', 'no-store');
+  res.json({ key: process.env.VAPID_PUBLIC_KEY });
+});
+
+function _isValidSubscription(sub) {
+  return (
+    sub &&
+    typeof sub.endpoint === 'string' &&
+    /^https:\/\//.test(sub.endpoint) &&
+    sub.keys &&
+    typeof sub.keys.p256dh === 'string' &&
+    typeof sub.keys.auth === 'string'
+  );
+}
+
+/* Prefs payload from the client is { whales, scanTrades, top3, news }.
+   Anything missing is treated as "on" by sendPushToAll — see the
+   comment there. We strip unknown keys so a malicious client can't
+   inflate the JSON we persist. */
+const PUSH_PREF_KEYS = ['whales', 'scanTrades', 'top3', 'news'];
+function _normalizePrefs(p) {
+  if (!p || typeof p !== 'object') return undefined;
+  const out = {};
+  for (const k of PUSH_PREF_KEYS) {
+    if (typeof p[k] === 'boolean') out[k] = p[k];
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
+app.post('/api/push/subscribe', (req, res) => {
+  if (!PUSH_ENABLED) return res.status(503).json({ error: 'push_disabled' });
+  const sub = req.body && req.body.subscription;
+  if (!_isValidSubscription(sub)) {
+    return res.status(400).json({ error: 'invalid_subscription' });
+  }
+  const prefs = _normalizePrefs(req.body && req.body.prefs);
+  const existing = cache.pushSubs.find((s) => s.endpoint === sub.endpoint);
+  if (existing) {
+    /* Re-subscribe (e.g. PWA reinstall) refreshes prefs without
+       disturbing addedAt — keeps the audit trail intact. */
+    if (prefs) existing.prefs = prefs;
+    savePushSubs();
+  } else {
+    cache.pushSubs.push({
+      endpoint: sub.endpoint,
+      keys: { p256dh: sub.keys.p256dh, auth: sub.keys.auth },
+      addedAt: Date.now(),
+      prefs: prefs,
+    });
+    savePushSubs();
+    console.log(`[PUSH] New subscription (${cache.pushSubs.length} total)`);
+  }
+  res.json({ ok: true, total: cache.pushSubs.length });
+});
+
+/* Update only the prefs of an existing subscription. The user
+   toggles a category in the UI → we POST here so the server-side
+   filter in sendPushToAll picks up the change before the next
+   trigger fires. */
+app.post('/api/push/prefs', (req, res) => {
+  if (!PUSH_ENABLED) return res.status(503).json({ error: 'push_disabled' });
+  const endpoint = req.body && req.body.endpoint;
+  const prefs = _normalizePrefs(req.body && req.body.prefs);
+  if (typeof endpoint !== 'string' || !prefs) {
+    return res.status(400).json({ error: 'invalid_request' });
+  }
+  const sub = cache.pushSubs.find((s) => s.endpoint === endpoint);
+  if (!sub) return res.status(404).json({ error: 'not_found' });
+  sub.prefs = prefs;
+  savePushSubs();
+  res.json({ ok: true, prefs: sub.prefs });
+});
+
+/* Relay endpoint — the browser side surfaces a local notification via
+   notify() in src/notifications.js, which calls nxPush.shouldRelay.
+   That handler picks the right category, drops anything the user
+   disabled, and POSTs here. The server then fans the same payload
+   out to every other subscriber whose prefs allow that category.
+
+   Validation: payload size is capped, the type must be one of the
+   four known keys (otherwise sendPushToAll falls through to "no
+   filtering" which would leak across categories). Rate limit
+   re-uses the /api/ limiter declared above. */
+const RELAY_TYPE_WHITELIST = new Set(PUSH_PREF_KEYS);
+app.post('/api/push/relay', async (req, res) => {
+  if (!PUSH_ENABLED) return res.status(503).json({ error: 'push_disabled' });
+  const b = req.body || {};
+  if (typeof b.title !== 'string' || !b.title || b.title.length > 200) {
+    return res.status(400).json({ error: 'invalid_title' });
+  }
+  if (typeof b.body !== 'string' || b.body.length > 400) {
+    return res.status(400).json({ error: 'invalid_body' });
+  }
+  if (!RELAY_TYPE_WHITELIST.has(b.type)) {
+    return res.status(400).json({ error: 'invalid_type' });
+  }
+  const payload = {
+    title: b.title,
+    body: b.body,
+    tag: typeof b.tag === 'string' ? b.tag.slice(0, 80) : b.type,
+    url: typeof b.url === 'string' ? b.url.slice(0, 200) : '/',
+  };
+  const result = await sendPushToAll(payload, b.type);
+  res.json(result);
+});
+
+app.post('/api/push/unsubscribe', (req, res) => {
+  if (!PUSH_ENABLED) return res.status(503).json({ error: 'push_disabled' });
+  const endpoint = req.body && req.body.endpoint;
+  if (typeof endpoint !== 'string') return res.status(400).json({ error: 'no_endpoint' });
+  const before = cache.pushSubs.length;
+  cache.pushSubs = cache.pushSubs.filter((s) => s.endpoint !== endpoint);
+  if (cache.pushSubs.length !== before) savePushSubs();
+  res.json({ ok: true, removed: before - cache.pushSubs.length });
+});
+
+app.post('/api/push/test', async (req, res) => {
+  if (!PUSH_ENABLED) return res.status(503).json({ error: 'push_disabled' });
+  const result = await sendPushToAll({
+    title: '🔔 NEXUS PRO',
+    body: 'تم تفعيل الإشعارات بنجاح — ستصلك تنبيهات الحيتان والإشارات هنا.',
+    tag: 'nexus-test',
+    url: '/',
+  });
+  res.json(result);
+});
 
 app.post('/notify', async (req, res) => {
   responseMetrics.notify++;

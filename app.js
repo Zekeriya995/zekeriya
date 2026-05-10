@@ -6746,7 +6746,7 @@ function renderPushCard() {
   if (typeof nxPush === 'undefined' || !nxPush.isSupported()) {
     titleEl.textContent = isAr ? 'إشعارات التطبيق' : 'App notifications';
     bodyEl.textContent = isAr
-      ? 'متصفحك لا يدعم الإشعارات الفورية. على iPhone افتحي التطبيق من Safari ثم ثبّتيه على الشاشة الرئيسية أولاً.'
+      ? 'متصفحك لا يدعم الإشعارات الفورية. على iPhone افتح التطبيق من Safari ثم ثبّته على الشاشة الرئيسية أولاً.'
       : 'Your browser does not support push notifications. On iPhone, install the app from Safari to the home screen first.';
     actionsEl.innerHTML = '';
     return;
@@ -6760,7 +6760,7 @@ function renderPushCard() {
 
     if (blocked) {
       bodyEl.textContent = isAr
-        ? 'الإذن مرفوض من إعدادات المتصفح. افتحي إعدادات الموقع وفعّلي «الإشعارات».'
+        ? 'الإذن مرفوض من إعدادات المتصفح. افتح إعدادات الموقع وفعّل «الإشعارات».'
         : 'Permission denied. Open your browser site settings and re-enable Notifications.';
       actionsEl.innerHTML = '';
       return;
@@ -6801,7 +6801,7 @@ function renderPushCard() {
       bodyEl.innerHTML =
         '<div style="margin-bottom:8px;font-size:11px">✅ <b style="color:var(--up)">مفعّلة</b> ' +
         (isAr
-          ? '— اختاري الأنواع التي تريدين استقبالها:'
+          ? '— اختر الأنواع التي تريد استقبالها:'
           : '— pick which categories to receive:') +
         '</div>' +
         '<div style="margin:0 -2px">' +
@@ -6818,7 +6818,7 @@ function renderPushCard() {
     }
 
     bodyEl.textContent = isAr
-      ? 'فعّلي الإشعارات لتصلك تنبيهات الحيتان والإشارات القوية فور حدوثها — حتى لو التطبيق مغلق.'
+      ? 'فعّل الإشعارات لتصلك تنبيهات الحيتان والإشارات القوية فور حدوثها — حتى لو التطبيق مغلق.'
       : 'Enable notifications to get whale alerts and strong signals the moment they happen — even when the app is closed.';
     actionsEl.innerHTML =
       '<button class="back-btn" onclick="nxPushDoSubscribe()" style="background:linear-gradient(135deg,#00ff88,#00d4aa);color:#000;border:none;font-weight:800">' +
@@ -6958,7 +6958,7 @@ async function renderUserAlerts() {
   if (typeof nxPush === 'undefined' || typeof nxPush.listAlerts !== 'function') return;
   var status = await nxPush.getStatus();
   if (!status.subscribed) {
-    listEl.textContent = 'فعّلي الإشعارات أعلاه أولاً، ثم أضيفي شروطك المخصصة.';
+    listEl.textContent = 'فعّل الإشعارات أعلاه أولاً، ثم أضف شروطك المخصصة.';
     return;
   }
   var data = await nxPush.listAlerts().catch(function () {
@@ -6967,7 +6967,7 @@ async function renderUserAlerts() {
   var alerts = (data && data.alerts) || [];
   if (!alerts.length) {
     listEl.innerHTML =
-      '<div style="color:var(--t3)">لا توجد تنبيهات. اضغطي «＋ إضافة» لإنشاء واحد.</div>';
+      '<div style="color:var(--t3)">لا توجد تنبيهات. اضغط «＋ إضافة» لإنشاء واحد.</div>';
     return;
   }
   listEl.innerHTML = alerts
@@ -7016,11 +7016,11 @@ async function submitCustomAlert() {
   var op = opEl.value;
   var value = valEl.value;
   if (!sym) {
-    alert('أدخلي رمز العملة (مثل BTC)');
+    alert('أدخل رمز العملة (مثل BTC)');
     return;
   }
   if (value === '' || isNaN(parseFloat(value))) {
-    alert('أدخلي قيمة رقمية');
+    alert('أدخل قيمة رقمية');
     return;
   }
   var rule = field + op + value;
@@ -7037,7 +7037,7 @@ async function submitCustomAlert() {
     var msg = 'فشل الحفظ: ';
     if (err && err.code === 'limit_reached') msg += 'وصلت للحد الأقصى (20 تنبيه)';
     else if (err && err.code === 'rule_invalid') msg += 'القاعدة غير صالحة';
-    else if (err && err.code === 'not_subscribed') msg += 'فعّلي الإشعارات أولاً';
+    else if (err && err.code === 'not_subscribed') msg += 'فعّل الإشعارات أولاً';
     else msg += (err && (err.code || err.message)) || 'خطأ غير معروف';
     alert(msg);
   }

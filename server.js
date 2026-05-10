@@ -28,6 +28,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const webpush = require('web-push');
 const scannerEngine = require('./src/scanner-engine');
+const indicatorEngine = require('./src/indicator-engine');
 require('dotenv').config();
 
 const {
@@ -73,6 +74,13 @@ const CONFIG = {
      push triggers so the user receives alerts even when the app is
      closed. 30 s lines up with the PWA's own quickScan cadence. */
   SCANNER_INTERVAL: 30000,
+  /* Indicator pass — fetches Binance 15m klines for the top 10
+     majors and computes RSI / MACD / EMA / ATR + a market-direction
+     verdict per symbol. 60 s cadence matches how slowly indicators
+     evolve on a 15m timeframe (one new bar every 15 minutes makes
+     anything faster wasteful) and keeps the kline-fetch budget
+     well under Binance's 1200/min weight limit. */
+  INDICATOR_INTERVAL: 60000,
 
   /* API URLs */
   BINANCE_SPOT: 'https://api.binance.com/api/v3',
@@ -224,6 +232,14 @@ const cache = {
   signals: [] /* [ { s, score, tags, tier, direction, price, change, volume, ts } ] */,
   top3: [] /* same shape, top three by score */,
   scannerTs: 0,
+  /* Server-side indicators — populated by runIndicatorsOnServer
+     every 60 s. Map keyed by symbol → { rsi, macd, ema9, ema21,
+     ema50, atr, direction, ts }. The PWA's BTC / ETH / etc. cards
+     read direction.ar to render "شراء قوي / خفيف / محايد"; the
+     direction-changed push trigger watches direction.label
+     transitions. */
+  indicators: {},
+  indicatorsTs: 0,
   lastUpdate: {},
 };
 
@@ -502,6 +518,90 @@ async function runScannerOnServer() {
     if (sent > 0) {
       _lastTop3PushAt = now;
       console.log(`[PUSH] Top-3 changed: ${body} → ${sent} client(s)`);
+    }
+  }
+}
+
+/* ═══ SERVER-SIDE INDICATORS ═══
+
+   Pulls Binance 15m klines for the top 10 majors and runs RSI /
+   MACD / EMA / ATR + the direction classifier. Output is stashed
+   on cache.indicators so the PWA renders the BTC / ETH cards from
+   server-computed values, and so the direction-changed push
+   trigger fires while the user is offline. */
+
+const INDICATOR_SYMBOLS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT'];
+
+/* Per-symbol cooldown so a noisy 15m close doesn't push the same
+   "BTC شراء خفيف" twice in a row. The label-transition guard below
+   means an unchanged direction is silent regardless. */
+const DIRECTION_PUSH_COOLDOWN_MS = 30 * 60 * 1000;
+const _directionPushBySymbol = Object.create(null);
+const _lastDirectionLabel = Object.create(null);
+
+async function runIndicatorsOnServer() {
+  if (!cache.tickers || Object.keys(cache.tickers).length === 0) return;
+  const t0 = Date.now();
+  let updated = 0;
+  for (const sym of INDICATOR_SYMBOLS) {
+    const url = CONFIG.BINANCE_SPOT + '/klines?symbol=' + sym + 'USDT&interval=15m&limit=200';
+    let klines;
+    try {
+      klines = await safeFetch(url, 'KLINE-' + sym);
+    } catch (err) {
+      console.warn('[INDICATORS] kline fetch failed for', sym, err.message);
+      continue;
+    }
+    if (!Array.isArray(klines) || klines.length < 26) continue;
+    const ind = indicatorEngine.runIndicatorPass(klines);
+    if (!ind) continue;
+    cache.indicators[sym] = ind;
+    updated++;
+  }
+  cache.indicatorsTs = Date.now();
+  cache.lastUpdate.indicators = cache.indicatorsTs;
+  console.log(`[INDICATORS] ${updated}/${INDICATOR_SYMBOLS.length} symbols (${Date.now() - t0}ms)`);
+
+  /* Direction-changed push — fire only when the human-readable
+     label actually crosses (e.g. "محايد" → "شراء قوي"), not when
+     the underlying score wobbles within the same bucket. Per-symbol
+     cooldown prevents flapping during a noisy close. */
+  if (!PUSH_ENABLED || !cache.pushSubs.length) return;
+  const now = Date.now();
+  for (const sym of INDICATOR_SYMBOLS) {
+    const ind = cache.indicators[sym];
+    if (!ind || !ind.direction) continue;
+    const label = ind.direction.label;
+    const prev = _lastDirectionLabel[sym];
+    _lastDirectionLabel[sym] = label;
+    if (!prev || prev === label) continue; /* fresh boot or unchanged */
+    if (now - (_directionPushBySymbol[sym] || 0) < DIRECTION_PUSH_COOLDOWN_MS) continue;
+    /* Only push interesting transitions — going from / to BUY or
+       SELL territory. Drifting from NEUTRAL → WATCH or back is
+       pure noise. */
+    const interesting =
+      label === 'STRONG_BUY' || label === 'STRONG_SELL' || label === 'BUY' || label === 'SELL';
+    if (!interesting) continue;
+    const arrow =
+      label === 'STRONG_BUY' || label === 'BUY'
+        ? '🟢'
+        : label === 'STRONG_SELL' || label === 'SELL'
+          ? '🔴'
+          : '⚪';
+    const payload = {
+      title: arrow + ' ' + sym + ' — ' + ind.direction.ar,
+      body:
+        'RSI ' +
+        Math.round(ind.rsi) +
+        ' | MACD ' +
+        (ind.macd && ind.macd.cross !== 'none' ? ind.macd.cross : 'flat'),
+      tag: 'direction-' + sym,
+      url: '/?coin=' + sym,
+    };
+    const { sent } = await sendPushToAll(payload, 'scanTrades');
+    if (sent > 0) {
+      _directionPushBySymbol[sym] = now;
+      console.log(`[PUSH] Direction ${sym}: ${prev} → ${label} → ${sent} client(s)`);
     }
   }
 }
@@ -1279,6 +1379,13 @@ function buildApiAllSnapshot() {
     signals: Array.isArray(cache.signals) ? cache.signals.slice(0, 50) : [],
     top3: Array.isArray(cache.top3) ? cache.top3.slice() : [],
     scannerTs: cache.scannerTs || 0,
+    /* Server-computed indicators per symbol — RSI / MACD / EMAs /
+       ATR + the human-readable direction verdict. The PWA reads
+       indicators[sym].direction.ar to render "شراء قوي / خفيف / ..."
+       on the BTC / ETH cards even when its own kline fetch hasn't
+       fired yet. */
+    indicators: { ...cache.indicators },
+    indicatorsTs: cache.indicatorsTs || 0,
     meta: {
       coins: Object.keys(cache.tickers).length,
       lastUpdate: { ...cache.lastUpdate },
@@ -1815,15 +1922,28 @@ async function startDataLoops() {
     setInterval(
       () => runScannerOnServer().catch((e) => console.error('[SCANNER] tick failed:', e.message)),
       jitter(CONFIG.SCANNER_INTERVAL)
+    ),
+    setInterval(
+      () =>
+        runIndicatorsOnServer().catch((e) => console.error('[INDICATORS] tick failed:', e.message)),
+      jitter(CONFIG.INDICATOR_INTERVAL)
     )
   );
 
   /* First scanner pass — runs once the warm-up fetches above have
      filled tickers / fr / oi, so /api/all already exposes a ranked
-     signal list on the very first PWA load. */
+     signal list on the very first PWA load. The indicator pass
+     follows a few seconds later because it depends on Binance
+     klines (separate fetch) — staggering the two avoids a thundering
+     herd at startup. */
   setTimeout(
     () => runScannerOnServer().catch((e) => console.error('[SCANNER] init failed:', e.message)),
     2000
+  );
+  setTimeout(
+    () =>
+      runIndicatorsOnServer().catch((e) => console.error('[INDICATORS] init failed:', e.message)),
+    5000
   );
 
   /* Telegram alerts on cache-down / sustained-failure transitions.

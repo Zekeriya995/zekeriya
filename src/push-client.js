@@ -268,10 +268,76 @@
     }
   }
 
+  /* ─── Custom alerts ─────────────────────────────────────────────
+     Thin proxies over /api/alerts/* — the server stores rules per
+     subscription endpoint so a user who unsubscribes leaves no
+     dangling alerts behind. The PWA renders the list inline on the
+     alerts page; createAlert / deleteAlert refresh it. */
+
+  async function _currentEndpoint() {
+    if (!isSupported()) return null;
+    try {
+      const reg = await _getRegistration();
+      const sub = await reg.pushManager.getSubscription();
+      return sub ? sub.endpoint : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function listAlerts() {
+    const endpoint = await _currentEndpoint();
+    if (!endpoint) return { alerts: [], max: 0 };
+    const r = await fetch(PROXY_BASE + '/api/alerts?endpoint=' + encodeURIComponent(endpoint));
+    if (!r.ok) return { alerts: [], max: 0 };
+    return r.json();
+  }
+
+  async function createAlert(spec) {
+    const endpoint = await _currentEndpoint();
+    if (!endpoint) {
+      const e = new Error('not_subscribed');
+      e.code = 'not_subscribed';
+      throw e;
+    }
+    const r = await fetch(PROXY_BASE + '/api/alerts/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        endpoint: endpoint,
+        sym: spec.sym,
+        rule: spec.rule,
+        repeat: !!spec.repeat,
+      }),
+    });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      const e = new Error(body.error || 'create_failed');
+      e.code = body.error || 'create_failed';
+      throw e;
+    }
+    return r.json();
+  }
+
+  async function deleteAlert(id) {
+    const endpoint = await _currentEndpoint();
+    if (!endpoint) return { ok: false };
+    const r = await fetch(
+      PROXY_BASE +
+        '/api/alerts/' +
+        encodeURIComponent(id) +
+        '?endpoint=' +
+        encodeURIComponent(endpoint),
+      { method: 'DELETE' }
+    );
+    return r.ok ? r.json() : { ok: false, status: r.status };
+  }
+
   /* Expose under a single global so other modules and inline UI
      handlers can call nxPush.subscribe() / nxPush.unsubscribe() /
      nxPush.getStatus() / nxPush.getPrefs() / nxPush.setPrefs() /
-     nxPush.shouldRelay() without dragging the rest of the file in. */
+     nxPush.shouldRelay() / nxPush.listAlerts / .createAlert /
+     .deleteAlert without dragging the rest of the file in. */
   if (typeof window !== 'undefined') {
     window.nxPush = {
       isSupported: isSupported,
@@ -282,6 +348,9 @@
       getPrefs: getPrefs,
       setPrefs: setPrefs,
       shouldRelay: shouldRelay,
+      listAlerts: listAlerts,
+      createAlert: createAlert,
+      deleteAlert: deleteAlert,
     };
   }
 })();

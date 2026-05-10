@@ -30,6 +30,7 @@ const webpush = require('web-push');
 const scannerEngine = require('./src/scanner-engine');
 const indicatorEngine = require('./src/indicator-engine');
 const whaleEngine = require('./src/whale-engine');
+const alertsEngine = require('./src/alerts-engine');
 require('dotenv').config();
 
 const {
@@ -82,6 +83,11 @@ const CONFIG = {
      anything faster wasteful) and keeps the kline-fetch budget
      well under Binance's 1200/min weight limit. */
   INDICATOR_INTERVAL: 60000,
+  /* User custom-alerts pass — walks cache.userAlerts, checks each
+     rule against the warm cache, and fires push for the matches.
+     60 s lines up with the indicator pass so RSI / score rules see
+     fresh values when they evaluate. */
+  USER_ALERTS_INTERVAL: 60000,
 
   /* API URLs */
   BINANCE_SPOT: 'https://api.binance.com/api/v3',
@@ -226,6 +232,14 @@ const cache = {
   dsMcap: {} /* { BTC: { rank, mcap, ath, atl } } */,
   dsMulti: {} /* { coinalyze, hyperliquid, blockchain, news, newsSentiment, ... } */,
   pushSubs: [] /* [ { endpoint, keys: { p256dh, auth }, addedAt } ] */,
+  /* User-defined custom alerts — populated from data/user-alerts.json
+     and refreshed via /api/alerts/* endpoints. Each entry:
+       { id, endpoint, sym, rule, repeat, createdAt, lastFiredAt? }
+     The alerts engine walks this list every minute against the
+     warm cache; matched alerts are pushed (and removed if not
+     `repeat`) so the user gets pinged the moment their rule
+     triggers, even with the PWA closed. */
+  userAlerts: [],
   /* Scanner output — populated by runScannerOnServer every 30 s.
      `signals` is the full ranked list (top 50 surface in /api/all);
      `top3` is what the home page calls "أفضل 3 صفقات" and what the
@@ -309,6 +323,93 @@ function savePushSubs() {
 }
 
 loadPushSubs();
+
+/* ─── user alerts persistence ───────────────────────────────────
+   Same JSON-on-disk pattern as push-subs: load on boot, atomic
+   rename on every save so a crash mid-write can't leave us with
+   a half-written file. */
+
+const USER_ALERTS_PATH = path.join(__dirname, 'data', 'user-alerts.json');
+
+function loadUserAlerts() {
+  try {
+    if (!fs.existsSync(USER_ALERTS_PATH)) {
+      cache.userAlerts = [];
+      return;
+    }
+    const raw = fs.readFileSync(USER_ALERTS_PATH, 'utf8');
+    const parsed = JSON.parse(raw);
+    cache.userAlerts = Array.isArray(parsed) ? parsed : [];
+    console.log(`[ALERTS] Loaded ${cache.userAlerts.length} user alert(s)`);
+  } catch (err) {
+    console.error('[ALERTS] Failed to load:', err.message);
+    cache.userAlerts = [];
+  }
+}
+
+function saveUserAlerts() {
+  try {
+    const dir = path.dirname(USER_ALERTS_PATH);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const tmp = USER_ALERTS_PATH + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(cache.userAlerts, null, 2));
+    fs.renameSync(tmp, USER_ALERTS_PATH);
+  } catch (err) {
+    console.error('[ALERTS] Failed to save:', err.message);
+  }
+}
+
+loadUserAlerts();
+
+/* runUserAlertsCheck — walks cache.userAlerts every minute, pushes
+   the matched ones, then trims one-shots / advances cooldowns on
+   repeats. Single-alert push (not fanned to all subs) — only the
+   subscriber whose endpoint owns the alert gets pinged. */
+async function runUserAlertsCheck() {
+  if (!PUSH_ENABLED) return;
+  if (!Array.isArray(cache.userAlerts) || !cache.userAlerts.length) return;
+  const result = alertsEngine.runAlertsCheck(cache.userAlerts, cache, Date.now());
+  if (!result.fired.length) return;
+
+  /* For each fired alert, look up the matching subscription and
+     send a single targeted push. Failed sends mark the
+     subscription dead — same lifecycle as the broadcast path. */
+  const dead = [];
+  await Promise.all(
+    result.fired.map(async (a) => {
+      const sub = cache.pushSubs.find((s) => s.endpoint === a.endpoint);
+      if (!sub) return; /* Subscriber unsubscribed — alert is orphaned. */
+      const rule = alertsEngine.parseRule(a.rule);
+      if (!rule) return;
+      const fieldLabel = { price: 'السعر', change: 'التغير', rsi: 'RSI', score: 'سكور' }[
+        rule.field
+      ];
+      const payload = {
+        title: '⚡ تنبيه ' + a.sym,
+        body: `${fieldLabel} ${rule.op} ${rule.value}`,
+        tag: 'alert-' + a.id,
+        url: '/?coin=' + a.sym,
+      };
+      try {
+        await webpush.sendNotification(sub, JSON.stringify(payload), { TTL: 60 });
+        console.log(`[ALERTS] Fired: ${a.sym} ${a.rule} → 1 client`);
+      } catch (err) {
+        const code = err && err.statusCode;
+        if (code === 404 || code === 410) dead.push(sub.endpoint);
+      }
+    })
+  );
+
+  /* Trim one-shots, refresh repeats, prune dead subs (and their
+     orphaned alerts) — done atomically so a crash mid-pass doesn't
+     leave the file out of sync with memory. */
+  cache.userAlerts = result.kept.filter((a) => !dead.includes(a.endpoint));
+  if (dead.length) {
+    cache.pushSubs = cache.pushSubs.filter((s) => !dead.includes(s.endpoint));
+    savePushSubs();
+  }
+  saveUserAlerts();
+}
 
 /* sendPushToAll fans the same payload out to every subscriber and
    prunes any whose endpoint returns 404 / 410 (Gone — the browser
@@ -1836,6 +1937,66 @@ app.post('/api/push/relay', async (req, res) => {
   res.json(result);
 });
 
+/* ─── User custom alerts API ───────────────────────────────────
+   Each alert is bound to a push-subscription endpoint so we can
+   route the notification to the device that asked for it. The
+   payload accepts:
+     sym     — coin ticker (e.g. "BTC")
+     rule    — predicate string: "price>=100000" / "rsi>=80" / ...
+     repeat  — boolean (default false). One-shots disappear after
+                firing; repeats cool down for 30 min.
+     endpoint — the subscriber's PushSubscription.endpoint */
+
+function _generateAlertId() {
+  return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+app.get('/api/alerts', (req, res) => {
+  if (!PUSH_ENABLED) return res.status(503).json({ error: 'push_disabled' });
+  const endpoint = req.query.endpoint;
+  if (typeof endpoint !== 'string' || !endpoint) {
+    return res.status(400).json({ error: 'no_endpoint' });
+  }
+  const own = cache.userAlerts.filter((a) => a.endpoint === endpoint);
+  res.json({ alerts: own, max: alertsEngine.MAX_PER_USER });
+});
+
+app.post('/api/alerts/create', (req, res) => {
+  if (!PUSH_ENABLED) return res.status(503).json({ error: 'push_disabled' });
+  const b = req.body || {};
+  if (typeof b.endpoint !== 'string') return res.status(400).json({ error: 'no_endpoint' });
+  const sub = cache.pushSubs.find((s) => s.endpoint === b.endpoint);
+  if (!sub) return res.status(404).json({ error: 'subscription_not_found' });
+  const own = cache.userAlerts.filter((a) => a.endpoint === b.endpoint);
+  const valErr = alertsEngine.validateAlertInput(b, own.length);
+  if (valErr) return res.status(400).json({ error: valErr });
+  const sym = String(b.sym).toUpperCase().slice(0, 12);
+  const alert = {
+    id: _generateAlertId(),
+    endpoint: b.endpoint,
+    sym,
+    rule: b.rule,
+    repeat: !!b.repeat,
+    createdAt: Date.now(),
+  };
+  cache.userAlerts.push(alert);
+  saveUserAlerts();
+  console.log(`[ALERTS] Created: ${sym} ${b.rule} (repeat=${alert.repeat})`);
+  res.json({ ok: true, alert });
+});
+
+app.delete('/api/alerts/:id', (req, res) => {
+  if (!PUSH_ENABLED) return res.status(503).json({ error: 'push_disabled' });
+  const id = req.params.id;
+  const endpoint = req.query.endpoint;
+  if (typeof endpoint !== 'string') return res.status(400).json({ error: 'no_endpoint' });
+  const before = cache.userAlerts.length;
+  cache.userAlerts = cache.userAlerts.filter((a) => !(a.id === id && a.endpoint === endpoint));
+  if (cache.userAlerts.length === before) return res.status(404).json({ error: 'not_found' });
+  saveUserAlerts();
+  res.json({ ok: true });
+});
+
 app.post('/api/push/unsubscribe', (req, res) => {
   if (!PUSH_ENABLED) return res.status(503).json({ error: 'push_disabled' });
   const endpoint = req.body && req.body.endpoint;
@@ -1980,6 +2141,10 @@ async function startDataLoops() {
       () =>
         runIndicatorsOnServer().catch((e) => console.error('[INDICATORS] tick failed:', e.message)),
       jitter(CONFIG.INDICATOR_INTERVAL)
+    ),
+    setInterval(
+      () => runUserAlertsCheck().catch((e) => console.error('[ALERTS] tick failed:', e.message)),
+      jitter(CONFIG.USER_ALERTS_INTERVAL)
     )
   );
 

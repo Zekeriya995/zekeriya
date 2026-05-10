@@ -282,6 +282,7 @@ export default [
       'src/scanner-engine.js',
       'src/indicator-engine.js',
       'src/whale-engine.js',
+      'src/alerts-engine.js',
       'ecosystem.config.cjs',
     ],
     languageOptions: {

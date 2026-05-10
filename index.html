@@ -108,7 +108,47 @@
 <div id="pushCardActions" style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap"><button class="back-btn" onclick="if(typeof nxPushDoSubscribe==='function'){nxPushDoSubscribe()}else{alert('جارٍ تحميل وحدة الإشعارات — حاولي بعد ثانيتين.')}" style="background:linear-gradient(135deg,#00ff88,#00d4aa);color:#000;border:none;font-weight:800">🔔 تفعيل الإشعارات</button></div>
 </div>
 
+<!-- Custom alerts panel — list + "add" button. The list is hydrated by renderUserAlerts() once nxPush.listAlerts resolves, and stays empty otherwise so an unsubscribed user sees the explanatory placeholder. The form lives in a modal lower down so the alerts page stays compact. -->
+<div id="customAlertsCard" class="cd" style="margin:8px 12px;padding:12px;border:1px solid rgba(0,212,255,.18)">
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px"><b style="font-family:var(--fd);font-size:13px;color:var(--t0)">⚡ تنبيهاتي المخصصة</b><button class="back-btn" onclick="openCustomAlertForm()" style="background:rgba(0,212,255,.15);color:#00d4ff;border-color:rgba(0,212,255,.4);font-size:10px">＋ إضافة</button></div>
+<div id="customAlertsList" style="font-size:11px;color:var(--t2);line-height:1.7">فعّلي الإشعارات أعلاه أولاً، ثم أضيفي شروطك المخصصة.</div>
+</div>
+
 <div id="alertList"></div>
+</div>
+
+<!-- Custom alert form modal — opens from openCustomAlertForm(). Submits via nxPush.createAlert which binds to the user's PushSubscription and persists on the proxy. The four fields cover everything the server's alerts-engine accepts: price / change / rsi / score with >= or <=. -->
+<div id="customAlertModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center;padding:20px">
+<div style="background:var(--bg);border:1px solid rgba(0,212,255,.3);border-radius:12px;padding:18px;max-width:400px;width:100%;direction:rtl">
+<h3 style="margin:0 0 12px;font-family:var(--fd);font-size:15px;color:var(--t0)">⚡ تنبيه مخصص جديد</h3>
+
+<label style="display:block;font-size:11px;color:var(--t2);margin:8px 0 4px">العملة</label>
+<input type="text" id="caSym" value="BTC" maxlength="12" style="width:100%;padding:8px;background:rgba(56,72,96,.1);border:1px solid var(--bdr);border-radius:6px;color:var(--t0);font-family:var(--fm);text-transform:uppercase">
+
+<label style="display:block;font-size:11px;color:var(--t2);margin:8px 0 4px">الحقل</label>
+<select id="caField" style="width:100%;padding:8px;background:rgba(56,72,96,.1);border:1px solid var(--bdr);border-radius:6px;color:var(--t0)">
+<option value="price">السعر ($)</option>
+<option value="change">التغير اليومي (%)</option>
+<option value="rsi">RSI (15m)</option>
+<option value="score">سكور السكانر</option>
+</select>
+
+<label style="display:block;font-size:11px;color:var(--t2);margin:8px 0 4px">المقارنة</label>
+<select id="caOp" style="width:100%;padding:8px;background:rgba(56,72,96,.1);border:1px solid var(--bdr);border-radius:6px;color:var(--t0)">
+<option value=">=">≥ (يصل أو يتجاوز)</option>
+<option value="<=">≤ (ينزل أو يساوي)</option>
+</select>
+
+<label style="display:block;font-size:11px;color:var(--t2);margin:8px 0 4px">القيمة</label>
+<input type="number" id="caValue" step="any" placeholder="مثال: 100000" style="width:100%;padding:8px;background:rgba(56,72,96,.1);border:1px solid var(--bdr);border-radius:6px;color:var(--t0);font-family:var(--fm)">
+
+<label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:11px;color:var(--t1);cursor:pointer"><input type="checkbox" id="caRepeat" style="accent-color:var(--neon);width:16px;height:16px"> تكرار التنبيه (cooldown 30 دقيقة)</label>
+
+<div style="display:flex;gap:8px;margin-top:14px">
+<button class="back-btn" onclick="submitCustomAlert()" style="flex:1;background:linear-gradient(135deg,#00ff88,#00d4aa);color:#000;border:none;font-weight:800">حفظ</button>
+<button class="back-btn" onclick="closeCustomAlertForm()" style="background:rgba(255,56,96,.08);color:var(--dn);border-color:rgba(255,56,96,.25)">إلغاء</button>
+</div>
+</div>
 </div>
 
 <!-- 🤖 MONITOR PAGE — Platform Doctor -->

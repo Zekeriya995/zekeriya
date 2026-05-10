@@ -29,6 +29,7 @@ const path = require('node:path');
 const webpush = require('web-push');
 const scannerEngine = require('./src/scanner-engine');
 const indicatorEngine = require('./src/indicator-engine');
+const whaleEngine = require('./src/whale-engine');
 require('dotenv').config();
 
 const {
@@ -240,6 +241,13 @@ const cache = {
      transitions. */
   indicators: {},
   indicatorsTs: 0,
+  /* Server-side whale waves — populated by runWhaleEngineOnServer
+     after each fetchFromDataServer tick. Map keyed by symbol →
+     { totalBuy, totalSell, buyRatio, waves: [...], engine: {
+       rank, confidence } }. The PWA reads this to render the whale
+     cards even when its own client-side engine isn't running. */
+  whaleWaves: {},
+  whaleWavesTs: 0,
   lastUpdate: {},
 };
 
@@ -529,6 +537,41 @@ async function runScannerOnServer() {
    on cache.indicators so the PWA renders the BTC / ETH cards from
    server-computed values, and so the direction-changed push
    trigger fires while the user is offline. */
+
+/* Whale-wave push trigger — fires when a symbol's aggregated buys
+   cross the Tier-A threshold (>= $1M, >= 70% buy ratio) and the
+   per-symbol cooldown allows. Runs after every fetchFromDataServer
+   tick. The simple whale-alert push (server-side, single big trade)
+   stays in place; this trigger is for sustained accumulation. */
+const WAVE_PUSH_COOLDOWN_MS = 15 * 60 * 1000;
+const _wavePushBySymbol = Object.create(null);
+
+async function maybePushWhaleWave() {
+  if (!PUSH_ENABLED || !cache.pushSubs.length) return;
+  if (!cache.whaleWaves || typeof cache.whaleWaves !== 'object') return;
+  const now = Date.now();
+  const ranked = whaleEngine.pickRankedWaves(cache.whaleWaves, 5);
+  for (const wave of ranked) {
+    const eng = wave.engine || {};
+    if (eng.rank !== 'A') continue; /* only push the strongest tier */
+    const lastAt = _wavePushBySymbol[wave.sym] || 0;
+    if (now - lastAt < WAVE_PUSH_COOLDOWN_MS) continue;
+    const buyM = (eng.totalBuy / 1_000_000).toFixed(1);
+    const payload = {
+      title: '🐋 ' + wave.sym + ' — موجة تجميع قوية',
+      body: 'إجمالي الشراء ' + buyM + 'M$ | نسبة شراء ' + Math.round(eng.buyRatio) + '%',
+      tag: 'wave-' + wave.sym,
+      url: '/?coin=' + wave.sym,
+    };
+    const { sent } = await sendPushToAll(payload, 'whales');
+    if (sent > 0) {
+      _wavePushBySymbol[wave.sym] = now;
+      console.log(
+        `[PUSH] Whale wave: ${wave.sym} buy=${buyM}M ratio=${Math.round(eng.buyRatio)}% → ${sent} client(s)`
+      );
+    }
+  }
+}
 
 const INDICATOR_SYMBOLS = ['BTC', 'ETH', 'SOL', 'BNB', 'XRP', 'ADA', 'DOGE', 'AVAX', 'LINK', 'DOT'];
 
@@ -1282,12 +1325,17 @@ async function fetchFromDataServer() {
     if (d.mcap && typeof d.mcap === 'object') cache.dsMcap = d.mcap;
     if (d.multi && typeof d.multi === 'object') cache.dsMulti = d.multi;
     cache.lastUpdate.dataServer = Date.now();
-    /* Fire whale + news push notifications opportunistically — runs
-       in the same tick the cache is fresh, so subscribers see
-       alerts as soon as the upstream sees them. Both use their own
-       cooldowns so the per-tick cadence (5 s) doesn't translate
-       into spam. */
+    /* Aggregate the freshly-imported whale rows into per-symbol
+       waves + engine state. Done synchronously so /api/all and the
+       wave push trigger see consistent input from this tick. */
+    cache.whaleWaves = whaleEngine.aggregateWhales(cache.dsWhales);
+    cache.whaleWavesTs = Date.now();
+    cache.lastUpdate.whaleEngine = cache.whaleWavesTs;
+    /* Fire whale + news + wave push notifications opportunistically.
+       Each has its own cooldown so the 5-s tick cadence doesn't
+       translate into spam. */
     maybePushWhaleAlerts().catch((e) => console.error('[PUSH] Whale alert error:', e.message));
+    maybePushWhaleWave().catch((e) => console.error('[PUSH] Wave alert error:', e.message));
     maybePushNewsAlerts().catch((e) => console.error('[PUSH] News alert error:', e.message));
     console.log(
       `[DATA-SERVER] whales=${cache.dsWhales.length}, mcap=${Object.keys(cache.dsMcap).length}, multi=[${Object.keys(cache.dsMulti).join(',')}]`
@@ -1386,6 +1434,11 @@ function buildApiAllSnapshot() {
        fired yet. */
     indicators: { ...cache.indicators },
     indicatorsTs: cache.indicatorsTs || 0,
+    /* Server-aggregated whale waves — per-symbol totals + engine
+       rank/confidence. The PWA's whale cards render straight from
+       this so they fill in instantly on a cold open. */
+    whaleWaves: { ...cache.whaleWaves },
+    whaleWavesTs: cache.whaleWavesTs || 0,
     meta: {
       coins: Object.keys(cache.tickers).length,
       lastUpdate: { ...cache.lastUpdate },

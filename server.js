@@ -27,6 +27,7 @@ const rateLimit = require('express-rate-limit');
 const fs = require('node:fs');
 const path = require('node:path');
 const webpush = require('web-push');
+const scannerEngine = require('./src/scanner-engine');
 require('dotenv').config();
 
 const {
@@ -66,6 +67,12 @@ const CONFIG = {
      this just keeps our snapshot fresh without piling on. */
   DATA_SERVER_INTERVAL: 5000,
   DATA_SERVER_URL: 'http://127.0.0.1:8080/api/all',
+  /* Server-side scanner pass — runs the same scoring the PWA does,
+     against the warm cache, every 30 s. The output (signals + top3)
+     is exposed via /api/all and drives the ULTRA / Top-3-changed
+     push triggers so the user receives alerts even when the app is
+     closed. 30 s lines up with the PWA's own quickScan cadence. */
+  SCANNER_INTERVAL: 30000,
 
   /* API URLs */
   BINANCE_SPOT: 'https://api.binance.com/api/v3',
@@ -210,6 +217,13 @@ const cache = {
   dsMcap: {} /* { BTC: { rank, mcap, ath, atl } } */,
   dsMulti: {} /* { coinalyze, hyperliquid, blockchain, news, newsSentiment, ... } */,
   pushSubs: [] /* [ { endpoint, keys: { p256dh, auth }, addedAt } ] */,
+  /* Scanner output — populated by runScannerOnServer every 30 s.
+     `signals` is the full ranked list (top 50 surface in /api/all);
+     `top3` is what the home page calls "أفضل 3 صفقات" and what the
+     Top-3-changed push trigger watches. */
+  signals: [] /* [ { s, score, tags, tier, direction, price, change, volume, ts } ] */,
+  top3: [] /* same shape, top three by score */,
+  scannerTs: 0,
   lastUpdate: {},
 };
 
@@ -404,6 +418,91 @@ async function maybePushNewsAlerts() {
   if (sent > 0) {
     _lastNewsPushAt = now;
     console.log(`[PUSH] News alert sent: ${sentiment} → ${sent} client(s)`);
+  }
+}
+
+/* ═══ SERVER-SIDE SCANNER ═══
+
+   Runs scannerEngine.runScannerPass() against the warm cache every
+   SCANNER_INTERVAL (30 s) and stashes the result on cache.signals /
+   cache.top3 so /api/all can serve them. Two push triggers piggy-
+   back on the pass:
+
+   - ULTRA — the moment a symbol crosses the 100-score threshold
+     (and isn't repeating itself within the 5-min cooldown), fire a
+     push. Per-symbol cooldown so consecutive scans of a steady
+     ULTRA don't spam.
+   - Top-3-changed — the leaderboard composition (which three
+     symbols, in what order) drives the second push; debounced
+     globally to one notification every 10 minutes so a wobbly
+     ranking doesn't burn through the user's lock screen. */
+
+const SCANNER_ULTRA_COOLDOWN_MS = 5 * 60 * 1000;
+const SCANNER_TOP3_COOLDOWN_MS = 10 * 60 * 1000;
+const _ultraPushBySymbol = Object.create(null);
+let _lastTop3Hash = '';
+let _lastTop3PushAt = 0;
+
+function _top3Hash(top3) {
+  return top3.map((r) => r.s + ':' + Math.round(r.score)).join(',');
+}
+
+async function runScannerOnServer() {
+  if (!cache.tickers || Object.keys(cache.tickers).length === 0) return;
+  const t0 = Date.now();
+  let pass;
+  try {
+    pass = scannerEngine.runScannerPass(cache);
+  } catch (err) {
+    console.error('[SCANNER] Pass failed:', err.message);
+    return;
+  }
+  cache.signals = pass.signals;
+  cache.top3 = pass.top3;
+  cache.scannerTs = pass.ts;
+  cache.lastUpdate.scanner = pass.ts;
+  console.log(
+    `[SCANNER] ${pass.signals.length} signals (${pass.signals.filter((r) => r.tier === 'ULTRA').length} ULTRA), top3=${pass.top3.map((r) => r.s).join(',') || '∅'} in ${Date.now() - t0}ms`
+  );
+
+  if (!PUSH_ENABLED || !cache.pushSubs.length) return;
+  const now = Date.now();
+
+  /* ULTRA push — fire only on the freshest crossing per symbol. */
+  for (const r of pass.signals) {
+    if (r.tier !== 'ULTRA') break; /* signals are sorted desc */
+    const lastAt = _ultraPushBySymbol[r.s] || 0;
+    if (now - lastAt < SCANNER_ULTRA_COOLDOWN_MS) continue;
+    const top3Tags = (r.tags || []).slice(0, 3).join(' ');
+    const payload = {
+      title: '⭐ ' + r.s + ' — ULTRA Signal',
+      body: 'سكور: ' + Math.round(r.score) + (top3Tags ? ' | ' + top3Tags : ''),
+      tag: 'ultra-' + r.s,
+      url: '/?coin=' + r.s,
+    };
+    const { sent } = await sendPushToAll(payload, 'scanTrades');
+    if (sent > 0) {
+      _ultraPushBySymbol[r.s] = now;
+      console.log(`[PUSH] ULTRA sent: ${r.s} score=${Math.round(r.score)} → ${sent} client(s)`);
+    }
+  }
+
+  /* Top-3-changed push — one notification per refresh, debounced. */
+  const hash = _top3Hash(pass.top3);
+  if (hash && hash !== _lastTop3Hash && now - _lastTop3PushAt >= SCANNER_TOP3_COOLDOWN_MS) {
+    _lastTop3Hash = hash;
+    const body = pass.top3.map((r) => r.s + ' (' + Math.round(r.score) + ')').join('، ');
+    const payload = {
+      title: '🎯 أفضل 3 صفقات تحدّثت',
+      body: body || 'لا توجد صفقات حالياً',
+      tag: 'top3',
+      url: '/',
+    };
+    const { sent } = await sendPushToAll(payload, 'top3');
+    if (sent > 0) {
+      _lastTop3PushAt = now;
+      console.log(`[PUSH] Top-3 changed: ${body} → ${sent} client(s)`);
+    }
   }
 }
 
@@ -1172,6 +1271,14 @@ function buildApiAllSnapshot() {
     },
     whales: cache.dsWhales.slice(),
     mcap: { ...cache.dsMcap },
+    /* Server-side scanner output — top 50 ranked signals plus the
+       headline Top 3. Surfaces the proxy's always-on view of the
+       market so the PWA can render them even while the device's
+       own quickScan() hasn't fired yet (or never will, on a cold
+       PWA open after a long sleep). */
+    signals: Array.isArray(cache.signals) ? cache.signals.slice(0, 50) : [],
+    top3: Array.isArray(cache.top3) ? cache.top3.slice() : [],
+    scannerTs: cache.scannerTs || 0,
     meta: {
       coins: Object.keys(cache.tickers).length,
       lastUpdate: { ...cache.lastUpdate },
@@ -1704,7 +1811,19 @@ async function startDataLoops() {
     setInterval(fetchBitfinex, jitter(CONFIG.BITFINEX_INTERVAL)),
     setInterval(fetchHyperliquid, jitter(CONFIG.HYPERLIQUID_INTERVAL)),
     setInterval(fetchNews, jitter(CONFIG.NEWS_INTERVAL)),
-    setInterval(fetchFromDataServer, jitter(CONFIG.DATA_SERVER_INTERVAL))
+    setInterval(fetchFromDataServer, jitter(CONFIG.DATA_SERVER_INTERVAL)),
+    setInterval(
+      () => runScannerOnServer().catch((e) => console.error('[SCANNER] tick failed:', e.message)),
+      jitter(CONFIG.SCANNER_INTERVAL)
+    )
+  );
+
+  /* First scanner pass — runs once the warm-up fetches above have
+     filled tickers / fr / oi, so /api/all already exposes a ranked
+     signal list on the very first PWA load. */
+  setTimeout(
+    () => runScannerOnServer().catch((e) => console.error('[SCANNER] init failed:', e.message)),
+    2000
   );
 
   /* Telegram alerts on cache-down / sustained-failure transitions.

@@ -276,7 +276,7 @@ export default [
      the browser bundle). Anything under src/ that is `require`d by
      server.js belongs in this file list. */
   {
-    files: ['server.js', 'src/server-helpers.js', 'ecosystem.config.cjs'],
+    files: ['server.js', 'src/server-helpers.js', 'src/scanner-engine.js', 'ecosystem.config.cjs'],
     languageOptions: {
       ecmaVersion: 2022,
       sourceType: 'commonjs',

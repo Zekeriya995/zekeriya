@@ -6913,4 +6913,142 @@ document.addEventListener('DOMContentLoaded', function () {
      on a cold start. */
   setTimeout(renderPushCard, 1500);
   setTimeout(renderPushCard, 4000);
+  /* Same dual-trigger setup for the custom-alerts list — first
+     paint after a short delay, then again on alerts-page navigation
+     so a freshly-subscribed user sees their list appear without a
+     manual reload. */
+  var alertsPageForCA = document.getElementById('pg-alerts');
+  if (alertsPageForCA && typeof MutationObserver !== 'undefined') {
+    new MutationObserver(function () {
+      if (alertsPageForCA.classList.contains('act')) renderUserAlerts();
+    }).observe(alertsPageForCA, { attributes: true, attributeFilter: ['class'] });
+  }
+  setTimeout(renderUserAlerts, 1800);
+  setTimeout(renderUserAlerts, 4500);
 });
+
+/* ─── Custom alerts UI ─────────────────────────────────────────────
+   Renders the user's saved alert list inside the customAlertsCard
+   on the alerts page, plus the form modal handlers. All persistence
+   goes through nxPush.{listAlerts, createAlert, deleteAlert}, which
+   bind every alert to the device's current PushSubscription so the
+   server can route the targeted notification back to it. */
+
+var _CA_FIELD_LABEL = {
+  price: 'السعر',
+  change: 'التغير',
+  rsi: 'RSI',
+  score: 'سكور',
+};
+
+function _caFormatRule(rule) {
+  /* Pretty-print "price>=100000" as "السعر ≥ 100000" so the list
+     reads naturally even though the underlying grammar is fixed. */
+  if (typeof rule !== 'string') return rule;
+  var m = rule.match(/^(price|change|rsi|score)(>=|<=)(-?\d+(?:\.\d+)?)$/i);
+  if (!m) return rule;
+  var label = _CA_FIELD_LABEL[m[1]] || m[1];
+  var op = m[2] === '>=' ? '≥' : '≤';
+  return label + ' ' + op + ' ' + m[3];
+}
+
+async function renderUserAlerts() {
+  var listEl = document.getElementById('customAlertsList');
+  if (!listEl) return;
+  if (typeof nxPush === 'undefined' || typeof nxPush.listAlerts !== 'function') return;
+  var status = await nxPush.getStatus();
+  if (!status.subscribed) {
+    listEl.textContent = 'فعّلي الإشعارات أعلاه أولاً، ثم أضيفي شروطك المخصصة.';
+    return;
+  }
+  var data = await nxPush.listAlerts().catch(function () {
+    return { alerts: [] };
+  });
+  var alerts = (data && data.alerts) || [];
+  if (!alerts.length) {
+    listEl.innerHTML =
+      '<div style="color:var(--t3)">لا توجد تنبيهات. اضغطي «＋ إضافة» لإنشاء واحد.</div>';
+    return;
+  }
+  listEl.innerHTML = alerts
+    .map(function (a) {
+      var pretty = _caFormatRule(a.rule);
+      var badge = a.repeat
+        ? '<span style="font-size:8px;background:rgba(0,255,136,.1);color:var(--up);padding:2px 6px;border-radius:4px;margin-right:6px">تكرار</span>'
+        : '';
+      return (
+        '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 4px;border-bottom:1px solid var(--bdr)">' +
+        '<div><b style="color:var(--t0)">' +
+        a.sym +
+        '</b>' +
+        badge +
+        '<span style="color:var(--t2);font-family:var(--fm);font-size:11px;margin-right:6px">' +
+        pretty +
+        '</span></div>' +
+        '<button class="back-btn" onclick="deleteCustomAlert(\'' +
+        a.id +
+        '\')" style="background:rgba(255,56,96,.08);color:var(--dn);border-color:rgba(255,56,96,.2);padding:3px 8px;font-size:10px">حذف</button>' +
+        '</div>'
+      );
+    })
+    .join('');
+}
+
+function openCustomAlertForm() {
+  var modal = document.getElementById('customAlertModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function closeCustomAlertForm() {
+  var modal = document.getElementById('customAlertModal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function submitCustomAlert() {
+  var symEl = document.getElementById('caSym');
+  var fieldEl = document.getElementById('caField');
+  var opEl = document.getElementById('caOp');
+  var valEl = document.getElementById('caValue');
+  var repEl = document.getElementById('caRepeat');
+  if (!symEl || !fieldEl || !opEl || !valEl) return;
+  var sym = (symEl.value || '').trim().toUpperCase();
+  var field = fieldEl.value;
+  var op = opEl.value;
+  var value = valEl.value;
+  if (!sym) {
+    alert('أدخلي رمز العملة (مثل BTC)');
+    return;
+  }
+  if (value === '' || isNaN(parseFloat(value))) {
+    alert('أدخلي قيمة رقمية');
+    return;
+  }
+  var rule = field + op + value;
+  try {
+    await nxPush.createAlert({ sym: sym, rule: rule, repeat: !!(repEl && repEl.checked) });
+    closeCustomAlertForm();
+    if (typeof notify === 'function') notify('✅ تم إنشاء التنبيه', 'success');
+    renderUserAlerts();
+    /* Reset the form so the next "+ إضافة" doesn't pre-fill the
+       old values. */
+    valEl.value = '';
+    if (repEl) repEl.checked = false;
+  } catch (err) {
+    var msg = 'فشل الحفظ: ';
+    if (err && err.code === 'limit_reached') msg += 'وصلت للحد الأقصى (20 تنبيه)';
+    else if (err && err.code === 'rule_invalid') msg += 'القاعدة غير صالحة';
+    else if (err && err.code === 'not_subscribed') msg += 'فعّلي الإشعارات أولاً';
+    else msg += (err && (err.code || err.message)) || 'خطأ غير معروف';
+    alert(msg);
+  }
+}
+
+async function deleteCustomAlert(id) {
+  if (!confirm('حذف هذا التنبيه؟')) return;
+  try {
+    await nxPush.deleteAlert(id);
+    renderUserAlerts();
+  } catch (e) {
+    alert('فشل الحذف');
+  }
+}

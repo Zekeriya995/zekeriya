@@ -16,7 +16,12 @@
 
 'use strict';
 
-const WAVE_WINDOW_MS = 10 * 60 * 1000; /* 10-min buy cluster */
+/* 1-hour window. data_server.py.whales is a rolling list that fills
+   slowly during quiet markets — a 10-min window left whaleWaves
+   empty for hours at a time even when real waves were forming. An
+   hour catches everything the engine considers "current
+   accumulation" without crossing into stale territory. */
+const WAVE_WINDOW_MS = 60 * 60 * 1000;
 const SIGNIFICANT_VALUE = 25_000; /* trades < $25K are filtered as noise */
 const TIER_A_BUY = 1_000_000;
 const TIER_B_BUY = 500_000;

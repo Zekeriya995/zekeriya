@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+
+# Block the API endpoints — they return JSON and shouldn't be indexed.
+Disallow: /api/
+Disallow: /notify
+
+Sitemap: https://shamcyrpto.com/sitemap.xml

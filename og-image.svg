@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630">
+  <!-- Background gradient — dark navy to almost-black so the neon green logo pops. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#060b14"/>
+      <stop offset="100%" stop-color="#020408"/>
+    </linearGradient>
+    <linearGradient id="logoGrad" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#00ff88"/>
+      <stop offset="100%" stop-color="#b07cff"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#00ff88" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#00ff88" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="1200" height="630" fill="url(#bg)"/>
+
+  <!-- Soft glow behind the logo -->
+  <circle cx="600" cy="290" r="320" fill="url(#glow)"/>
+
+  <!-- Diagonal accent line (subtle) -->
+  <rect x="0" y="0" width="1200" height="2" fill="#00ff88" opacity="0.12"/>
+
+  <!-- Big NEXUS PRO wordmark -->
+  <text x="600" y="270" font-family="Arial Black, Arial, sans-serif" font-size="120" font-weight="900" text-anchor="middle" fill="#ffffff" letter-spacing="-2">NEXUS</text>
+  <text x="600" y="380" font-family="Arial Black, Arial, sans-serif" font-size="120" font-weight="900" text-anchor="middle" fill="url(#logoGrad)" letter-spacing="-2">PRO</text>
+
+  <!-- Subtitle in Arabic -->
+  <text x="600" y="450" font-family="Tahoma, Arial, sans-serif" font-size="32" font-weight="600" text-anchor="middle" fill="#a8b2c1" direction="rtl">منصة ذكاء تداول الكريبتو</text>
+
+  <!-- Feature row -->
+  <text x="600" y="520" font-family="Tahoma, Arial, sans-serif" font-size="22" font-weight="500" text-anchor="middle" fill="#00ff88" direction="rtl">سكانر 870 عملة • تتبع حيتان • مؤشرات فنية • إشعارات فورية</text>
+
+  <!-- Domain footer -->
+  <text x="600" y="585" font-family="Geist Mono, Courier New, monospace" font-size="20" font-weight="600" text-anchor="middle" fill="#5a6478" letter-spacing="2">shamcyrpto.com</text>
+</svg>

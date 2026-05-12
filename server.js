@@ -900,6 +900,9 @@ const FUTURES_SYMBOL_DENYLIST = new Set([
   'ZEN',
   'DASH',
   'ATH',
+  'RAD',
+  'AI',
+  'OSMO',
   /* Memecoins that exist as 1000<X>USDT on Futures — the spot symbol
      used as a key here doesn't resolve. A future PR can add a
      spot→futures alias map; for now we just skip them on Futures. */
@@ -912,7 +915,7 @@ const FUTURES_SYMBOL_DENYLIST = new Set([
 
 /* Symbols that show up in cache.tickers (typically from Bybit) but
    don't exist on Binance Spot — used by fetchDepth. */
-const SPOT_SYMBOL_DENYLIST = new Set(['ATH']);
+const SPOT_SYMBOL_DENYLIST = new Set(['ATH', 'BILL']);
 
 /* 1. TICKERS — Binance Spot + Bybit */
 async function fetchTickers() {

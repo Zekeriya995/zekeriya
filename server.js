@@ -31,6 +31,8 @@ const scannerEngine = require('./src/scanner-engine');
 const indicatorEngine = require('./src/indicator-engine');
 const whaleEngine = require('./src/whale-engine');
 const alertsEngine = require('./src/alerts-engine');
+const scannerHistory = require('./src/scanner-history');
+const scannerSectors = require('./src/scanner-sectors');
 require('dotenv').config();
 
 const {
@@ -270,6 +272,18 @@ const cache = {
      cards even when its own client-side engine isn't running. */
   whaleWaves: {},
   whaleWavesTs: 0,
+  /* Scanner history — populated on every scanner pass with new
+     ULTRA / STRONG signals, then evaluated against current prices
+     24 h after detection. Loaded from disk at boot so the win-rate
+     stats persist across restarts. */
+  scannerHistory: [],
+  scannerStats: { totalEvaluated: 0, winRate: 0, avgGain: 0, byTier: {} },
+  scannerStatsTs: 0,
+  /* Sector heatmap — per-sector roll-up of the latest scanner pass.
+     Recomputed each cycle so the home tab can render heat per
+     sector without the PWA having to walk every signal itself. */
+  sectorHeatmap: {},
+  sectorHeatmapTs: 0,
   lastUpdate: {},
 };
 
@@ -594,6 +608,20 @@ async function runScannerOnServer() {
   cache.top3 = pass.top3;
   cache.scannerTs = pass.ts;
   cache.lastUpdate.scanner = pass.ts;
+
+  /* Record any new ULTRA/STRONG signals into the rolling history
+     (deduped per symbol with a 1-hour cooldown so a sticky signal
+     doesn't flood the log). The eval timer below closes them out
+     after 24 h. */
+  for (const sig of pass.signals) {
+    scannerHistory.recordSignal(cache.scannerHistory, sig, Date.now());
+  }
+  /* Sector heatmap snapshot — pure aggregation of the just-computed
+     pass, surfaced through /api/all so the home tab heatmap renders
+     instantly. */
+  cache.sectorHeatmap = scannerSectors.aggregateBySector(pass.signals);
+  cache.sectorHeatmapTs = Date.now();
+
   console.log(
     `[SCANNER] ${pass.signals.length} signals (${pass.signals.filter((r) => r.tier === 'ULTRA').length} ULTRA), top3=${pass.top3.map((r) => r.s).join(',') || '∅'} in ${Date.now() - t0}ms`
   );
@@ -1580,6 +1608,15 @@ function buildApiAllSnapshot() {
        this so they fill in instantly on a cold open. */
     whaleWaves: { ...cache.whaleWaves },
     whaleWavesTs: cache.whaleWavesTs || 0,
+    /* Sector heatmap — per-sector roll-up of the latest scanner
+       pass. Lets the home tab render a heat strip without walking
+       the signal list itself. */
+    sectorHeatmap: { ...cache.sectorHeatmap },
+    sectorHeatmapTs: cache.sectorHeatmapTs || 0,
+    /* Win-rate stats — aggregated from the scanner history every
+       5 minutes. Keys: totalEvaluated, winRate, avgGain, byTier. */
+    scannerStats: { ...cache.scannerStats },
+    scannerStatsTs: cache.scannerStatsTs || 0,
     meta: {
       coins: Object.keys(cache.tickers).length,
       lastUpdate: { ...cache.lastUpdate },
@@ -2118,6 +2155,12 @@ async function startDataLoops() {
   console.log('═══ NEXUS PRO Proxy Server V10.1 ═══');
   console.log(`Starting on port ${PORT}...`);
 
+  /* Restore scanner history from disk so the win-rate stats survive
+     a restart. New entries during this session append to whatever
+     was loaded. */
+  cache.scannerHistory = scannerHistory.loadHistory();
+  console.log(`[INIT] Loaded ${cache.scannerHistory.length} historical scanner signals`);
+
   /* Initial load — sequential to avoid rate limits */
   console.log('[INIT] Loading tickers...');
   await fetchTickers();
@@ -2185,6 +2228,32 @@ async function startDataLoops() {
     setInterval(
       () => runUserAlertsCheck().catch((e) => console.error('[ALERTS] tick failed:', e.message)),
       jitter(CONFIG.USER_ALERTS_INTERVAL)
+    ),
+    /* Scanner history evaluator — every 5 minutes walks the
+       unevaluated entries and closes out anything past the 24-h
+       window. The interval is loose because the eval window itself
+       is daily; the only reason to run more often than once an hour
+       is to keep the win-rate stats fresh during the day. */
+    setInterval(
+      () => {
+        try {
+          const ticks = cache.tickers || {};
+          const { updated } = scannerHistory.evaluateOpenSignals(
+            cache.scannerHistory,
+            ticks,
+            Date.now()
+          );
+          if (updated > 0) {
+            scannerHistory.saveHistory(cache.scannerHistory);
+            console.log(`[HISTORY] Evaluated ${updated} signal(s)`);
+          }
+          cache.scannerStats = scannerHistory.computeStats(cache.scannerHistory, 7, Date.now());
+          cache.scannerStatsTs = Date.now();
+        } catch (e) {
+          console.error('[HISTORY] eval tick failed:', e.message);
+        }
+      },
+      5 * 60 * 1000
     )
   );
 

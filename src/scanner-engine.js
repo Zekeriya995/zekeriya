@@ -362,6 +362,68 @@ function scoreSymbol(sym, ctx) {
     }
   }
 
+  /* Technical indicator confirmation. The indicator engine already
+     computes RSI / MACD on 15m klines for the 10 majors every 60s,
+     but the scanner had been ignoring them until now. Reading the
+     same numbers feeds intraday momentum into the score so a BTC
+     setup with RSI 28 and a fresh MACD bull cross outranks a flat
+     one. Same nine-stack pattern as the existing tags: a bonus +
+     a tag the UI can render. */
+  if (ctx.indicator) {
+    const ind = ctx.indicator;
+    /* RSI oversold = bounce setup. Overbought = late entry trap. */
+    if (typeof ind.rsi === 'number') {
+      if (ind.rsi < 30) {
+        score += 10;
+        tags.push('📉RSI_OS');
+      } else if (ind.rsi > 70) {
+        score -= 8;
+        tags.push('📈RSI_OB');
+      }
+    }
+    /* MACD cross is the strongest single momentum signal we have on
+       any individual indicator. A fresh bull / bear cross moves the
+       histogram across the signal line — bigger weight than just
+       "histogram on the bull side", which we also reward but
+       lightly. */
+    if (ind.macd && ind.macd.cross === 'bull') {
+      score += 12;
+      tags.push('📊MACD_BULL');
+    } else if (ind.macd && ind.macd.cross === 'bear') {
+      score -= 8;
+      tags.push('📊MACD_BEAR');
+    } else if (ind.macd && typeof ind.macd.h === 'number' && typeof ind.macd.signal === 'number') {
+      if (ind.macd.h > ind.macd.signal) {
+        score += 3;
+      } else if (ind.macd.h < ind.macd.signal) {
+        score -= 3;
+      }
+    }
+  }
+
+  /* News sentiment. cache.newsSentiment is a market-wide count of
+     positive / negative / neutral headlines from CoinTelegraph's
+     RSS. It's not per-symbol so it acts as a tide that lifts (or
+     drops) every signal a little — bullish news flow biases the
+     scanner toward keeping marginal setups; bearish flow trims
+     them. The 20-headline floor keeps the bonus from firing on a
+     thin news cycle, and the 2x ratio rules out indecisive feeds. */
+  if (ctx.newsSentiment) {
+    const ns = ctx.newsSentiment;
+    const total = ns.total || 0;
+    const pos = ns.positive || 0;
+    const neg = ns.negative || 0;
+    if (total >= 20) {
+      if (pos >= neg * 2 && pos >= 5) {
+        score += 5;
+        tags.push('📰BULL_NEWS');
+      } else if (neg >= pos * 2 && neg >= 5) {
+        score -= 5;
+        tags.push('📰BEAR_NEWS');
+      }
+    }
+  }
+
   /* Risk/Reward levels. Computing them server-side means the PWA
      can render entry/SL/TP cards without re-deriving the maths on
      every device, and downstream consumers (Paper Trading, push
@@ -407,6 +469,10 @@ function runScannerPass(cache) {
   const bfx = dsMulti.bitfinex || cache.bitfinex || {};
   const whaleWaves = cache.whaleWaves || {};
   const indicatorsMtf = cache.indicatorsMtf || {};
+  const indicators = cache.indicators || {};
+  /* News sentiment is market-wide — same object for every symbol
+     this pass, so we resolve it once outside the loop. */
+  const newsSentiment = cache.newsSentiment || null;
   const results = [];
   for (const sym in tickers) {
     if (STABLE_SET.has(sym)) continue;
@@ -424,6 +490,8 @@ function runScannerPass(cache) {
       bitfinex: bfx[sym] || null,
       whaleWave: whaleWaves[sym] || null,
       mtfAgreement: mtfEntry ? mtfEntry.agreement : null,
+      indicator: indicators[sym] || null,
+      newsSentiment: newsSentiment,
     });
     if (!r || r.score < 30) continue;
     results.push(r);

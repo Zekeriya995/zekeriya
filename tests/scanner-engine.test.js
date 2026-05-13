@@ -199,6 +199,80 @@ test('scoreSymbol — multi-TF mixed verdict does nothing to the score', () => {
   assert.equal(mixed.score, baseline.score);
 });
 
+test('scoreSymbol — RSI oversold (<30) adds bullish bonus + RSI_OS tag', () => {
+  const baseline = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5 }) });
+  const oversold = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    indicator: { rsi: 25, macd: { h: 0, signal: 0, cross: 'none' } },
+  });
+  assert.ok(oversold.score - baseline.score >= 9);
+  assert.ok(oversold.tags.includes('📉RSI_OS'));
+});
+
+test('scoreSymbol — RSI overbought (>70) penalises score + RSI_OB tag', () => {
+  const r = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    indicator: { rsi: 75, macd: { h: 0, signal: 0, cross: 'none' } },
+  });
+  assert.ok(r.tags.includes('📈RSI_OB'));
+});
+
+test('scoreSymbol — MACD bull cross adds 12 + MACD_BULL tag', () => {
+  const baseline = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5 }) });
+  const bullCross = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    indicator: { rsi: 50, macd: { h: 10, signal: 5, cross: 'bull' } },
+  });
+  assert.ok(bullCross.score - baseline.score >= 11);
+  assert.ok(bullCross.tags.includes('📊MACD_BULL'));
+});
+
+test('scoreSymbol — MACD bear cross penalises + MACD_BEAR tag', () => {
+  const r = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    indicator: { rsi: 50, macd: { h: -10, signal: -5, cross: 'bear' } },
+  });
+  assert.ok(r.tags.includes('📊MACD_BEAR'));
+});
+
+test('scoreSymbol — MACD histogram only (no fresh cross) gets the lighter +3', () => {
+  const baseline = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5 }) });
+  const histPos = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    indicator: { rsi: 50, macd: { h: 5, signal: 2, cross: 'none' } },
+  });
+  /* +3 is the only delta — not +12 like a fresh cross. */
+  const delta = histPos.score - baseline.score;
+  assert.ok(delta >= 2 && delta <= 4, 'mild MACD bias should be ~3, got ' + delta);
+});
+
+test('scoreSymbol — bullish news sentiment adds 5 + BULL_NEWS tag', () => {
+  const baseline = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5 }) });
+  const bull = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    newsSentiment: { positive: 15, negative: 3, neutral: 5, total: 23 },
+  });
+  assert.ok(bull.score - baseline.score >= 4);
+  assert.ok(bull.tags.includes('📰BULL_NEWS'));
+});
+
+test('scoreSymbol — bearish news sentiment penalises + BEAR_NEWS tag', () => {
+  const r = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    newsSentiment: { positive: 3, negative: 15, neutral: 5, total: 23 },
+  });
+  assert.ok(r.tags.includes('📰BEAR_NEWS'));
+});
+
+test('scoreSymbol — thin news cycle (total < 20) does not fire either tag', () => {
+  const r = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    newsSentiment: { positive: 8, negative: 1, neutral: 2, total: 11 },
+  });
+  assert.ok(!r.tags.includes('📰BULL_NEWS'));
+  assert.ok(!r.tags.includes('📰BEAR_NEWS'));
+});
+
 test('scoreSymbol — output includes SL/TP1/TP2 and R:R fields', () => {
   const r = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5, price: 100 }) });
   assert.ok(r);

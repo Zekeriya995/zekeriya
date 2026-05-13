@@ -21,6 +21,14 @@ test('STABLE_SET excludes obvious stablecoins', () => {
   assert.equal(STABLE_SET.has('BTC'), false);
 });
 
+test('STABLE_SET covers the 2024-2026 generation (USD1, RLUSD, USDE...)', () => {
+  /* The live audit on 2026-05-13 caught USD1 and RLUSD leaking into
+     Top 10 because they were missing. This locks the regression. */
+  for (const s of ['USD1', 'RLUSD', 'USDE', 'USDM', 'FRAX', 'GHO', 'CRVUSD', 'USDD']) {
+    assert.equal(STABLE_SET.has(s), true, s + ' should be a stablecoin');
+  }
+});
+
 test('TIER1_SYMBOLS contains the majors', () => {
   for (const s of ['BTC', 'ETH', 'SOL', 'BNB', 'XRP']) {
     assert.equal(TIER1_SYMBOLS.has(s), true, s + ' should be tier 1');
@@ -42,6 +50,34 @@ test('scoreSymbol — null when volume below tier-1 floor', () => {
   /* BTC is tier 1 → minVol = 1M. 500K is below. */
   const r = scoreSymbol('BTC', { ticker: tk({ volume: 500_000 }) });
   assert.equal(r, null);
+});
+
+test('scoreSymbol — null on wash-trading (huge volume, no OI)', () => {
+  /* CHIP pattern: $1.18B spot volume with $0 perp OI. */
+  const r = scoreSymbol('CHIP', {
+    ticker: tk({ volume: 1.2e9, change: -3, price: 0.06 }),
+    oi: 0,
+  });
+  assert.equal(r, null, 'wash-trade fingerprint should reject');
+});
+
+test('scoreSymbol — keeps symbols with huge volume AND real OI', () => {
+  /* BTC at $1.1B volume must survive because real perp interest exists. */
+  const r = scoreSymbol('BTC', {
+    ticker: tk({ volume: 1.2e9, change: 0.5 }),
+    oi: 50_000_000,
+  });
+  assert.ok(r, 'real symbols with both volume and OI should pass');
+});
+
+test('scoreSymbol — keeps small-volume symbols even when oi is zero', () => {
+  /* A $50M-volume coin with no OI should NOT be wash-rejected — the
+     filter only fires above the WASH_VOLUME_FLOOR. */
+  const r = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    oi: 0,
+  });
+  assert.ok(r);
 });
 
 test('scoreSymbol — tier-1 majors get the TOP100 bonus tag', () => {
@@ -86,6 +122,35 @@ test('scoreSymbol — bitfinex margin long >= 65 confirms', () => {
     bitfinex: { longPct: 75 },
   });
   assert.ok(r.tags.includes('📊BFX_LONG'));
+});
+
+test('scoreSymbol — whale wave Tier A adds 20 + whale tag', () => {
+  const noWhale = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5 }) });
+  const tierA = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    whaleWave: { engine: { rank: 'A', confidence: 90 } },
+  });
+  assert.ok(tierA.score - noWhale.score >= 19, 'Tier A should add ~20 points');
+  assert.ok(tierA.tags.includes('🐋WHALE_A'));
+});
+
+test('scoreSymbol — whale wave Tier D (distribution) penalises score', () => {
+  const tierD = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    whaleWave: { engine: { rank: 'D', confidence: 60 } },
+  });
+  assert.ok(tierD.tags.includes('🐋DUMPED'));
+});
+
+test('scoreSymbol — output includes SL/TP1/TP2 and R:R fields', () => {
+  const r = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5, price: 100 }) });
+  assert.ok(r);
+  assert.equal(r.sl, 97, 'SL is entry - 3%');
+  assert.equal(r.tp1, 105, 'TP1 is entry + 5%');
+  /* Floating point: 110 may serialise as 110.00000001 depending on
+     the multiplication path; allow a tiny epsilon. */
+  assert.ok(Math.abs(r.tp2 - 110) < 0.01, 'TP2 is entry + 10%');
+  assert.equal(r.rr, 1.67, 'R:R should be ~1.67');
 });
 
 test('scoreSymbol — tier label crosses the ULTRA threshold', () => {

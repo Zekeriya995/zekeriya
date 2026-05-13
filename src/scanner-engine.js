@@ -130,6 +130,77 @@ function _tierFromScore(score) {
   return 'WEAK';
 }
 
+/* Manipulation risk — soft warning layer on top of the hard
+   wash-trade reject. The reject in scoreSymbol kills the obvious
+   $0-OI cases; this scores everything else along a 0-100 risk axis
+   built from four orthogonal red flags any one of which is
+   suspicious but not damning. The verdict / risk number gets
+   surfaced on the signal so the UI can show "⚠️ medium manipulation
+   risk" without us having to drop the symbol entirely. */
+function _computeManipulationRisk(sym, d, ctx, isTier1) {
+  let risk = 0;
+  const reasons = [];
+
+  /* Volume vs Open Interest mismatch — same fingerprint as the
+     hard reject but at a more lenient threshold. $100M spot with
+     under $1M perp OI is unusual; the wash reject catches the
+     extreme version ($500M / $100K). */
+  const oiUsd = typeof ctx.oi === 'number' ? ctx.oi : null;
+  if (!isTier1 && oiUsd !== null && d.volume > 100_000_000 && oiUsd < 1_000_000) {
+    risk += 30;
+    reasons.push('vol/oi gap');
+  }
+
+  /* Penny-priced non-major. A $0.01 wick is 1% of the price — easy
+     for a single market maker to engineer. Tier-1 majors are
+     exempt because their price level is set by spot demand, not by
+     a few orderbook trades. */
+  if (!isTier1 && d.price > 0 && d.price < 0.01) {
+    risk += 15;
+    reasons.push('penny price');
+  }
+
+  /* Funding rate beyond ±50% (likely an annualised snapshot of an
+     extreme cross-market spread, but either way: nobody trading a
+     healthy perp pays / receives that). The 8% threshold the
+     scanner already uses for FR⚠️ is intraday; this catches the
+     truly absurd cases the existing logic ignores. */
+  if (ctx.fr && typeof ctx.fr.rate === 'number' && Math.abs(ctx.fr.rate) > 0.5) {
+    risk += 20;
+    reasons.push('extreme funding');
+  }
+
+  /* Extreme order-book imbalance. A normal book sits within 2-3×;
+     20× either side is a wall, often a spoof. The existing
+     bid-wall +8 fires at 1.8× because that's a real signal up to
+     a point — past 20× we should distrust the book, not reward
+     it. */
+  if (ctx.depth && ctx.depth.bids && ctx.depth.asks) {
+    let bTotal = 0;
+    let aTotal = 0;
+    for (let i = 0; i < ctx.depth.bids.length; i++) {
+      bTotal += parseFloat(ctx.depth.bids[i][0]) * parseFloat(ctx.depth.bids[i][1]);
+    }
+    for (let i = 0; i < ctx.depth.asks.length; i++) {
+      aTotal += parseFloat(ctx.depth.asks[i][0]) * parseFloat(ctx.depth.asks[i][1]);
+    }
+    if (aTotal > 0 && bTotal > 0) {
+      const ratio = bTotal / aTotal;
+      if (ratio > 20 || ratio < 0.05) {
+        risk += 20;
+        reasons.push('book imbalance');
+      }
+    }
+  }
+
+  let verdict;
+  if (risk >= 50) verdict = 'HIGH';
+  else if (risk >= 25) verdict = 'MEDIUM';
+  else verdict = 'LOW';
+
+  return { risk: Math.min(100, risk), reasons, verdict };
+}
+
 function _directionLabel(score, change) {
   if (score >= 70) return 'STRONG_BUY';
   if (score >= 50) return 'BUY';
@@ -424,6 +495,20 @@ function scoreSymbol(sym, ctx) {
     }
   }
 
+  /* Manipulation risk. Soft layer on top of the wash-trade reject
+     — surfaces a score + verdict + reasons on every signal so the
+     UI can warn the user about gray-zone symbols without us having
+     to drop them entirely. HIGH risk earns a -15 score adjustment
+     and a 🚨 tag; MEDIUM gets -5 and a ⚠️ tag; LOW is silent. */
+  const manip = _computeManipulationRisk(sym, d, ctx, isTier1);
+  if (manip.verdict === 'HIGH') {
+    score -= 15;
+    tags.push('🚨MANIP_HIGH');
+  } else if (manip.verdict === 'MEDIUM') {
+    score -= 5;
+    tags.push('⚠️MANIP_MED');
+  }
+
   /* Risk/Reward levels. Computing them server-side means the PWA
      can render entry/SL/TP cards without re-deriving the maths on
      every device, and downstream consumers (Paper Trading, push
@@ -448,6 +533,7 @@ function scoreSymbol(sym, ctx) {
     price: d.price,
     change: d.change,
     volume: d.volume,
+    manipulationRisk: manip,
     sl: sl,
     tp1: tp1,
     tp2: tp2,

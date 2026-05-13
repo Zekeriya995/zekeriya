@@ -273,6 +273,71 @@ test('scoreSymbol — thin news cycle (total < 20) does not fire either tag', ()
   assert.ok(!r.tags.includes('📰BEAR_NEWS'));
 });
 
+test('scoreSymbol — output includes manipulationRisk on every signal', () => {
+  const r = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5 }) });
+  assert.ok(r.manipulationRisk);
+  assert.equal(typeof r.manipulationRisk.risk, 'number');
+  assert.equal(typeof r.manipulationRisk.verdict, 'string');
+  assert.ok(Array.isArray(r.manipulationRisk.reasons));
+  assert.equal(r.manipulationRisk.verdict, 'LOW', 'a clean BTC signal should be LOW risk');
+});
+
+test('scoreSymbol — penny non-tier1 raises manipulation risk', () => {
+  /* Non-tier-1 token at $0.005 with no other red flags. */
+  const r = scoreSymbol('PENNY', { ticker: tk({ volume: 5e7, change: 0.5, price: 0.005 }) });
+  assert.ok(r.manipulationRisk.reasons.includes('penny price'));
+  assert.ok(r.manipulationRisk.risk >= 15);
+});
+
+test('scoreSymbol — tier-1 majors are exempt from penny / vol-OI flags', () => {
+  /* BTC-style: tier-1 even at a fictional low price. */
+  const r = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5, price: 0.001 }) });
+  assert.equal(r.manipulationRisk.verdict, 'LOW');
+});
+
+test('scoreSymbol — extreme funding rate (>50%) flags manipulation', () => {
+  const r = scoreSymbol('FOO', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    fr: { rate: 0.6 },
+  });
+  assert.ok(r.manipulationRisk.reasons.includes('extreme funding'));
+});
+
+test('scoreSymbol — extreme bid/ask imbalance (>20x) flags manipulation', () => {
+  const r = scoreSymbol('FOO', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    /* 25× bid wall — looks like spoofing. */
+    depth: {
+      bids: [[100, 1000]],
+      asks: [[101, 40]],
+    },
+  });
+  assert.ok(r.manipulationRisk.reasons.includes('book imbalance'));
+});
+
+test('scoreSymbol — HIGH manipulation risk applies -15 + tag', () => {
+  /* Stack three flags: penny + vol/oi gap + extreme funding → 65 risk. */
+  const baseline = scoreSymbol('FOO', { ticker: tk({ volume: 1.5e8, change: 0.5, price: 0.005 }) });
+  const flagged = scoreSymbol('FOO', {
+    ticker: tk({ volume: 1.5e8, change: 0.5, price: 0.005 }),
+    oi: 500_000,
+    fr: { rate: 0.6 },
+  });
+  assert.equal(flagged.manipulationRisk.verdict, 'HIGH');
+  assert.ok(flagged.tags.includes('🚨MANIP_HIGH'));
+  assert.ok(baseline.score - flagged.score >= 14, 'HIGH should drop ~15 score');
+});
+
+test('scoreSymbol — MEDIUM manipulation risk applies -5 + tag', () => {
+  /* Penny + extreme funding alone: 35 risk → MEDIUM. */
+  const r = scoreSymbol('FOO', {
+    ticker: tk({ volume: 5e7, change: 0.5, price: 0.005 }),
+    fr: { rate: 0.6 },
+  });
+  assert.equal(r.manipulationRisk.verdict, 'MEDIUM');
+  assert.ok(r.tags.includes('⚠️MANIP_MED'));
+});
+
 test('scoreSymbol — output includes SL/TP1/TP2 and R:R fields', () => {
   const r = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5, price: 100 }) });
   assert.ok(r);

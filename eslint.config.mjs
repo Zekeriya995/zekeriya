@@ -280,6 +280,8 @@ export default [
       'server.js',
       'src/server-helpers.js',
       'src/scanner-engine.js',
+      'src/scanner-history.js',
+      'src/scanner-sectors.js',
       'src/indicator-engine.js',
       'src/whale-engine.js',
       'src/alerts-engine.js',

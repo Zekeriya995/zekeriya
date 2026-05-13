@@ -52,7 +52,7 @@ test('scoreSymbol — null when volume below tier-1 floor', () => {
   assert.equal(r, null);
 });
 
-test('scoreSymbol — null on wash-trading (huge volume, no OI)', () => {
+test('scoreSymbol — null on wash-trading (huge volume, oi = 0)', () => {
   /* CHIP pattern: $1.18B spot volume with $0 perp OI. */
   const r = scoreSymbol('CHIP', {
     ticker: tk({ volume: 1.2e9, change: -3, price: 0.06 }),
@@ -61,9 +61,31 @@ test('scoreSymbol — null on wash-trading (huge volume, no OI)', () => {
   assert.equal(r, null, 'wash-trade fingerprint should reject');
 });
 
-test('scoreSymbol — keeps symbols with huge volume AND real OI', () => {
-  /* BTC at $1.1B volume must survive because real perp interest exists. */
+test('scoreSymbol — null on wash-trading even when oi is missing entirely', () => {
+  /* Live VPS audit caught this case: CHIP was filtered when oi=0 was
+     supplied to the test but production has cache.oi[\'CHIP\'] =
+     undefined because Binance Futures refuses the symbol. The filter
+     must treat missing-OI same as zero-OI for any non-tier-1 symbol. */
+  const r = scoreSymbol('CHIP', {
+    ticker: tk({ volume: 1.2e9, change: -3, price: 0.06 }),
+    /* deliberately no `oi` key */
+  });
+  assert.equal(r, null, 'missing OI on huge-volume non-tier1 must reject');
+});
+
+test('scoreSymbol — tier-1 majors survive even with missing OI', () => {
+  /* BTC at $1.1B volume must survive a transient OI fetch failure
+     because TIER1 are hand-verified legitimate. */
   const r = scoreSymbol('BTC', {
+    ticker: tk({ volume: 1.2e9, change: 0.5 }),
+    /* deliberately no `oi` key */
+  });
+  assert.ok(r, 'tier1 must pass when oi data is temporarily missing');
+});
+
+test('scoreSymbol — keeps symbols with huge volume AND real OI', () => {
+  /* A non-tier1 symbol with both high volume and real OI should pass. */
+  const r = scoreSymbol('NEWCOIN', {
     ticker: tk({ volume: 1.2e9, change: 0.5 }),
     oi: 50_000_000,
   });
@@ -73,7 +95,7 @@ test('scoreSymbol — keeps symbols with huge volume AND real OI', () => {
 test('scoreSymbol — keeps small-volume symbols even when oi is zero', () => {
   /* A $50M-volume coin with no OI should NOT be wash-rejected — the
      filter only fires above the WASH_VOLUME_FLOOR. */
-  const r = scoreSymbol('BTC', {
+  const r = scoreSymbol('NEWCOIN', {
     ticker: tk({ volume: 5e7, change: 0.5 }),
     oi: 0,
   });

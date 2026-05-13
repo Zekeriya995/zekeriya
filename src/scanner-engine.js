@@ -152,14 +152,16 @@ function scoreSymbol(sym, ctx) {
   if (d.volume < minVol) return null;
 
   /* Wash-trading reject. Huge spot volume with no perpetual interest
-     is bot wash trading — the May 2026 audit caught CHIP this way. We
-     only check `oi` (Binance perp USD value) here because Coinalyze's
-     aggregated OI lags by minutes; if Binance has nothing the symbol
-     is almost certainly fake regardless of what aggregators report.
-     The check fires only when oi is explicitly supplied as a number;
-     missing data falls through so we don't false-reject legitimate
-     symbols before the OI fetcher has run. */
-  if (typeof ctx.oi === 'number' && d.volume > WASH_VOLUME_FLOOR && ctx.oi < WASH_OI_FLOOR) {
+     is bot wash trading — the May 2026 audit caught CHIP this way
+     ($1.18B spot, $0 perp OI). The OI fetcher already covers the
+     top 50 symbols by volume every cycle, so for any non-tier-1
+     symbol pulling more than $500M in spot the absence of an OI
+     entry means Binance refused to list it on futures, which is
+     itself a credibility signal we want to act on. We exempt the
+     hardcoded TIER1 majors so a transient OI-fetch failure for BTC
+     can't ever cost us its signal. */
+  const oiUsd = typeof ctx.oi === 'number' ? ctx.oi : 0;
+  if (!isTier1 && d.volume > WASH_VOLUME_FLOOR && oiUsd < WASH_OI_FLOOR) {
     return null;
   }
 

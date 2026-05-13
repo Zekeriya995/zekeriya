@@ -1352,6 +1352,25 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
     sigs.push({s:x.s,p:d.p,c:d.c,v:d.v,type:type,setup:setup,conf:conf,entry:entry,target:target,stop:stop,rr:rr,dur:dur,reasons:reasons,score:x.score,checks:x.checks,passed:x.passed,total:x.total,ultra:x.ultra,confirmed:x.confirmed,tags:x.tags,sec:sec,proven:x.proven,coinWinRate:x.coinWinRate,detectedAt:x.detectedAt,priceAtDetection:x.priceAtDetection,ageMinutes:x.ageMinutes,changeFromDetection:x.changeFromDetection,freshness:x.freshness})}
   sigs.sort(function(a,b){return b.conf-a.conf});renderTrading(sigs)}
 function filterTrade(f,btn){curTradeFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadTrading()}
+/* Scanner minimum-score filter. Stored in localStorage so the
+   slider position survives reloads. Default 50 (hides WEAK
+   signals 30-49) because the full unfiltered list is too noisy
+   for most users — a fresh visitor sees the meaningful signals
+   first, can drag the slider down to 30 if they want everything. */
+var SCAN_MIN_SCORE_KEY='nx.scannerMinScore';
+function getScanMinScore(){var v=parseInt(localStorage.getItem(SCAN_MIN_SCORE_KEY),10);return isFinite(v)&&v>=30&&v<=100?v:50}
+function _scanTierLabel(s){if(s>=100)return'ULTRA';if(s>=70)return'STRONG';if(s>=50)return'MEDIUM';return'WEAK'}
+function setScanMinScore(v){var n=parseInt(v,10);if(!isFinite(n))n=50;if(n<30)n=30;if(n>100)n=100;localStorage.setItem(SCAN_MIN_SCORE_KEY,n);var lbl=document.getElementById('scanMinScoreLabel');if(lbl)lbl.innerHTML=n+'<span style="font-size:10px;color:var(--t2)"> · '+_scanTierLabel(n)+'</span>';loadTrading();var sc=cache&&cache.scan;if(sc)renderScanResults(sc)}
+/* Apply the slider's threshold to a list of scanned signals.
+   Pure function — used by both loadTrading and renderScanResults
+   so the user's preference flows through every code path that
+   feeds the scanner panel. */
+function applyScanMinScore(items){var min=getScanMinScore();return(items||[]).filter(function(r){return r&&typeof r.score==='number'&&r.score>=min})}
+/* Sync the slider DOM to the stored value on first paint so the
+   thumb sits at the user's last position instead of the HTML
+   default. Called from boot path after the scanner page is
+   inserted. */
+function initScanMinScore(){var el=document.getElementById('scanMinScore');if(!el)return;var v=getScanMinScore();el.value=v;var lbl=document.getElementById('scanMinScoreLabel');if(lbl)lbl.innerHTML=v+'<span style="font-size:10px;color:var(--t2)"> · '+_scanTierLabel(v)+'</span>'}
 /* Idea 3 — Recent win rate per signal tier.
    Buckets checked predictions by the same score thresholds the acc
    panel uses, then exposes a rate (0-100) + sample count. Returns null
@@ -1504,6 +1523,11 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
   /* Part B: Quality filter — min 40% confidence, max 7 — adaptive */
   var minConf=monitorState&&monitorState.minConf?Math.max(35,monitorState.minConf-10):40;
   f=f.filter(function(s){return s.conf>=minConf});
+  /* User-configurable minimum score from the slider in the scanner
+     panel. Stored in localStorage so it survives reloads; default
+     50 hides WEAK (30-49) signals. The slider lives next to the
+     time-frame filters above the trade list. */
+  f=applyScanMinScore(f);
   /* Improvement 6: Correlation Deduplication — at most 2 signals per
      classified sector. If DeFi tanks, three DeFi longs all lose
      together; capping sector exposure is real diversification. Coins
@@ -4122,7 +4146,7 @@ async function runScan(){
   var r=await getScanResults();
   renderScanResults(r);
 }
-function renderScanResults(results){var f=results;var t1c=f.filter(function(r){return getCoinTier(r.s)===1}).length;var t2c=f.filter(function(r){return getCoinTier(r.s)===2}).length;var scanIEl=document.getElementById('scanI');if(scanIEl)scanIEl.textContent='📊 '+Object.keys(T).length+' '+(lang==='ar'?'عملة':'coins')+' → ✅ '+f.length+' (🏆'+t1c+' 🥈'+t2c+')';var trEl=document.getElementById('tradeList');if(trEl)trEl.innerHTML=f.length?f.slice(0,30).map(scanItem).join(''):'<div class="sc-empty"><div class="sc-empty-ic">📡</div><div class="sc-empty-title">'+t('no_data')+'</div></div>'}
+function renderScanResults(results){var f=applyScanMinScore(results);var t1c=f.filter(function(r){return getCoinTier(r.s)===1}).length;var t2c=f.filter(function(r){return getCoinTier(r.s)===2}).length;var scanIEl=document.getElementById('scanI');if(scanIEl)scanIEl.textContent='📊 '+Object.keys(T).length+' '+(lang==='ar'?'عملة':'coins')+' → ✅ '+f.length+' (🏆'+t1c+' 🥈'+t2c+')';var trEl=document.getElementById('tradeList');if(trEl)trEl.innerHTML=f.length?f.slice(0,30).map(scanItem).join(''):'<div class="sc-empty"><div class="sc-empty-ic">📡</div><div class="sc-empty-title">'+t('no_data')+'</div></div>'}
 /* WHALE PAGE */
 async function loadWhales(){var r=await getScanResults();await detectWhaleWaves(r);renderWhaleResults(r)}
 function renderWhaleResults(results){var w=results.filter(function(x){return x.tags.some(function(t){return t.includes('ACC')||t.includes('STEALTH')||t.includes('EARLY')||t.includes('BOTTOM')})||(x.v>5e7&&Math.abs(x.c)<3)||(x.checks&&x.checks.ob&&x.v>1e7)||whaleWaves[x.s]}).slice(0,20);
@@ -6907,6 +6931,11 @@ document.addEventListener('DOMContentLoaded', function () {
     });
     obs.observe(alertsPage, { attributes: true, attributeFilter: ['class'] });
   }
+  /* Sync the scanner min-score slider DOM with the value the user
+     left it at last session. Runs after the scanner page HTML is
+     in the DOM (which it is by DOMContentLoaded — the page-tab
+     div is part of the static markup). */
+  if (typeof initScanMinScore === 'function') initScanMinScore();
   /* Initial fill — long enough for src/push-client.js to register
      window.nxPush via its IIFE. defer guarantees ordering, but the
      SW registration that getStatus() awaits can take a moment more

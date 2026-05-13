@@ -164,6 +164,41 @@ test('scoreSymbol — whale wave Tier D (distribution) penalises score', () => {
   assert.ok(tierD.tags.includes('🐋DUMPED'));
 });
 
+test('scoreSymbol — multi-TF full bullish agreement adds 15 + MTF_BULL tag', () => {
+  const noMtf = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5 }) });
+  const withMtf = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    mtfAgreement: { agreement: 'bullish', strength: 'full', count: 3, tfs: ['15m', '1h', '4h'] },
+  });
+  assert.ok(withMtf.score - noMtf.score >= 14, 'full bullish MTF should add ~15');
+  assert.ok(withMtf.tags.includes('🎯MTF_BULL'));
+});
+
+test('scoreSymbol — multi-TF partial bullish adds the lighter +8 bonus', () => {
+  const r = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    mtfAgreement: { agreement: 'bullish', strength: 'partial', count: 2, tfs: ['15m', '1h'] },
+  });
+  assert.ok(r.tags.includes('🎯MTF_BULL_2'));
+});
+
+test('scoreSymbol — multi-TF full bearish penalises and tags', () => {
+  const r = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    mtfAgreement: { agreement: 'bearish', strength: 'full', count: 3, tfs: ['15m', '1h', '4h'] },
+  });
+  assert.ok(r.tags.includes('🎯MTF_BEAR'));
+});
+
+test('scoreSymbol — multi-TF mixed verdict does nothing to the score', () => {
+  const baseline = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5 }) });
+  const mixed = scoreSymbol('BTC', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    mtfAgreement: { agreement: 'mixed', strength: 'none', count: 0, tfs: ['15m', '1h', '4h'] },
+  });
+  assert.equal(mixed.score, baseline.score);
+});
+
 test('scoreSymbol — output includes SL/TP1/TP2 and R:R fields', () => {
   const r = scoreSymbol('BTC', { ticker: tk({ volume: 5e7, change: 0.5, price: 100 }) });
   assert.ok(r);

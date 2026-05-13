@@ -255,6 +255,14 @@ const cache = {
      transitions. */
   indicators: {},
   indicatorsTs: 0,
+  /* Multi-timeframe indicator snapshots — keyed by symbol →
+     { tfs: { '15m': ind, '1h': ind, '4h': ind }, agreement: {...},
+     ts }. Only the 10 INDICATOR_SYMBOLS get this because each entry
+     costs 2 extra Binance kline fetches (the 15m one is shared with
+     the legacy `indicators` map). The scanner reads `agreement` to
+     boost / penalise symbols where 15m / 1h / 4h all confirm. */
+  indicatorsMtf: {},
+  indicatorsMtfTs: 0,
   /* Server-side whale waves — populated by runWhaleEngineOnServer
      after each fetchFromDataServer tick. Map keyed by symbol →
      { totalBuy, totalSell, buyRatio, waves: [...], engine: {
@@ -683,28 +691,52 @@ const DIRECTION_PUSH_COOLDOWN_MS = 30 * 60 * 1000;
 const _directionPushBySymbol = Object.create(null);
 const _lastDirectionLabel = Object.create(null);
 
+/* The timeframes we fetch for each INDICATOR_SYMBOLS entry. 15m is
+   the legacy timeframe the PWA cards already render off; 1h / 4h
+   feed multiTfAgreement so the scanner can boost symbols where all
+   three confirm. Budget: 10 symbols × 3 intervals = 30 kline fetches
+   per minute, well under Binance's 1200 req/min ceiling. */
+const MTF_INTERVALS = ['15m', '1h', '4h'];
+
 async function runIndicatorsOnServer() {
   if (!cache.tickers || Object.keys(cache.tickers).length === 0) return;
   const t0 = Date.now();
   let updated = 0;
+  let mtfUpdated = 0;
   for (const sym of INDICATOR_SYMBOLS) {
-    const url = CONFIG.BINANCE_SPOT + '/klines?symbol=' + sym + 'USDT&interval=15m&limit=200';
-    let klines;
-    try {
-      klines = await safeFetch(url, 'KLINE-' + sym);
-    } catch (err) {
-      console.warn('[INDICATORS] kline fetch failed for', sym, err.message);
-      continue;
+    const tfs = {};
+    for (const interval of MTF_INTERVALS) {
+      const url =
+        CONFIG.BINANCE_SPOT + '/klines?symbol=' + sym + 'USDT&interval=' + interval + '&limit=200';
+      let klines;
+      try {
+        klines = await safeFetch(url, 'KLINE-' + sym + '-' + interval);
+      } catch (err) {
+        console.warn('[INDICATORS] kline fetch failed for', sym, interval, err.message);
+        continue;
+      }
+      if (!Array.isArray(klines) || klines.length < 26) continue;
+      const ind = indicatorEngine.runIndicatorPass(klines);
+      if (ind) tfs[interval] = ind;
     }
-    if (!Array.isArray(klines) || klines.length < 26) continue;
-    const ind = indicatorEngine.runIndicatorPass(klines);
-    if (!ind) continue;
-    cache.indicators[sym] = ind;
-    updated++;
+    /* 15m is what the legacy cache.indicators consumers expect. */
+    if (tfs['15m']) {
+      cache.indicators[sym] = tfs['15m'];
+      updated++;
+    }
+    /* MTF entry: needs at least two timeframes to be useful. */
+    if (Object.keys(tfs).length >= 2) {
+      const agreement = indicatorEngine.multiTfAgreement(tfs);
+      cache.indicatorsMtf[sym] = { tfs, agreement, ts: Date.now() };
+      mtfUpdated++;
+    }
   }
   cache.indicatorsTs = Date.now();
+  cache.indicatorsMtfTs = Date.now();
   cache.lastUpdate.indicators = cache.indicatorsTs;
-  console.log(`[INDICATORS] ${updated}/${INDICATOR_SYMBOLS.length} symbols (${Date.now() - t0}ms)`);
+  console.log(
+    `[INDICATORS] ${updated}/${INDICATOR_SYMBOLS.length} 15m, ${mtfUpdated} MTF (${Date.now() - t0}ms)`
+  );
 
   /* Direction-changed push — fire only when the human-readable
      label actually crosses (e.g. "محايد" → "شراء قوي"), not when
@@ -1538,6 +1570,11 @@ function buildApiAllSnapshot() {
        fired yet. */
     indicators: { ...cache.indicators },
     indicatorsTs: cache.indicatorsTs || 0,
+    /* Multi-timeframe agreement per symbol — only INDICATOR_SYMBOLS
+       populate this. The scanner reads .agreement.strength /
+       .agreement.agreement to apply the +15/-10 MTF bonus. */
+    indicatorsMtf: { ...cache.indicatorsMtf },
+    indicatorsMtfTs: cache.indicatorsMtfTs || 0,
     /* Server-aggregated whale waves — per-symbol totals + engine
        rank/confidence. The PWA's whale cards render straight from
        this so they fill in instantly on a cold open. */

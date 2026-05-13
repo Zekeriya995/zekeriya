@@ -19,6 +19,7 @@
 'use strict';
 
 const STABLE_SET = new Set([
+  /* Established stablecoins */
   'USDT',
   'USDC',
   'TUSD',
@@ -29,7 +30,32 @@ const STABLE_SET = new Set([
   'PYUSD',
   'USD',
   'UST',
+  /* 2024-2026 generation — Ripple USD, World Liberty USD1, Ethena USDe,
+     Mountain USDM, Frax, Aave GHO, Curve crvUSD, Tron USDD, MIM, Terra
+     Classic USTC, Sky (formerly DAI) USDS. The live audit on 2026-05-13
+     found USD1 and RLUSD leaking into Top 10 because they weren't in
+     this list — their funding hovers at 0 and volume bleeds into the
+     "biggest market" rankings. */
+  'USD1',
+  'RLUSD',
+  'USDE',
+  'USDM',
+  'FRAX',
+  'GHO',
+  'CRVUSD',
+  'USDD',
+  'MIM',
+  'USTC',
+  'USDS',
 ]);
+
+/* Wash-trading guard. CHIP appeared on the 2026-05-13 audit with
+   $1.18B spot volume but $0 open interest — a textbook fingerprint
+   of bots wash-trading the spot book while no professional trades
+   the perp. We reject any symbol whose spot volume crosses this
+   floor without a matching futures market. */
+const WASH_VOLUME_FLOOR = 500_000_000;
+const WASH_OI_FLOOR = 100_000;
 
 /* Tier 1 — the same WL constant the PWA seeds at boot. Keeping it
    in sync with src/constants.js's WL is important: tiering changes
@@ -124,6 +150,18 @@ function scoreSymbol(sym, ctx) {
   const isTier1 = TIER1_SYMBOLS.has(sym);
   const minVol = isTier1 ? 1_000_000 : 5_000_000;
   if (d.volume < minVol) return null;
+
+  /* Wash-trading reject. Huge spot volume with no perpetual interest
+     is bot wash trading — the May 2026 audit caught CHIP this way. We
+     only check `oi` (Binance perp USD value) here because Coinalyze's
+     aggregated OI lags by minutes; if Binance has nothing the symbol
+     is almost certainly fake regardless of what aggregators report.
+     The check fires only when oi is explicitly supplied as a number;
+     missing data falls through so we don't false-reject legitimate
+     symbols before the OI fetcher has run. */
+  if (typeof ctx.oi === 'number' && d.volume > WASH_VOLUME_FLOOR && ctx.oi < WASH_OI_FLOOR) {
+    return null;
+  }
 
   let score = 0;
   const tags = [];
@@ -272,6 +310,45 @@ function scoreSymbol(sym, ctx) {
     tags.push('🔄REVERSAL');
   }
 
+  /* Whale wave confirmation — when the whale engine has already
+     flagged this symbol as Tier A/B/C accumulation (or D
+     distribution), feed that signal into the scanner score so the
+     two engines reinforce each other. Tier A = $1M+ buys with 70%+
+     buy ratio in the last hour, which is institutional behavior we
+     want surfaced loudly. Tier D = heavy distribution, a bearish
+     signal worth penalising. */
+  if (ctx.whaleWave && ctx.whaleWave.engine) {
+    const wRank = ctx.whaleWave.engine.rank;
+    if (wRank === 'A') {
+      score += 20;
+      tags.push('🐋WHALE_A');
+    } else if (wRank === 'B') {
+      score += 10;
+      tags.push('🐋WHALE_B');
+    } else if (wRank === 'C') {
+      score += 5;
+      tags.push('🐋WHALE_C');
+    } else if (wRank === 'D') {
+      score -= 10;
+      tags.push('🐋DUMPED');
+    }
+  }
+
+  /* Risk/Reward levels. Computing them server-side means the PWA
+     can render entry/SL/TP cards without re-deriving the maths on
+     every device, and downstream consumers (Paper Trading, push
+     payload) get a consistent reference. The percentages are kept
+     intentionally conservative so the R:R holds across volatility
+     regimes — tighter targets earn more often than wide ones. */
+  const sl = +(d.price * 0.97).toFixed(8);
+  const tp1 = +(d.price * 1.05).toFixed(8);
+  const tp2 = +(d.price * 1.1).toFixed(8);
+  /* Reward (TP1 minus entry) / Risk (entry minus SL) ≈ 1.67 — the
+     same number for every signal because the percentages are fixed.
+     Exposed anyway so the UI can show "R:R 1.67" without
+     recomputing. */
+  const rr = 5 / 3;
+
   return {
     s: sym,
     score: Math.round(score * 10) / 10,
@@ -281,6 +358,10 @@ function scoreSymbol(sym, ctx) {
     price: d.price,
     change: d.change,
     volume: d.volume,
+    sl: sl,
+    tp1: tp1,
+    tp2: tp2,
+    rr: Math.round(rr * 100) / 100,
     ts: Date.now(),
   };
 }
@@ -296,6 +377,7 @@ function runScannerPass(cache) {
   const czFR = cz.fr || {};
   const hl = dsMulti.hyperliquid || cache.hyperliquid || {};
   const bfx = dsMulti.bitfinex || cache.bitfinex || {};
+  const whaleWaves = cache.whaleWaves || {};
   const results = [];
   for (const sym in tickers) {
     if (STABLE_SET.has(sym)) continue;
@@ -305,10 +387,12 @@ function runScannerPass(cache) {
       ls: cache.ls ? cache.ls[sym] : null,
       taker: cache.taker ? cache.taker[sym] : null,
       depth: cache.depth ? cache.depth[sym] : null,
+      oi: cache.oi ? cache.oi[sym] : null,
       coinalyzeOI: czOI[sym] || null,
       coinalyzeFR: czFR[sym] || null,
       hyperliquid: hl[sym] || null,
       bitfinex: bfx[sym] || null,
+      whaleWave: whaleWaves[sym] || null,
     });
     if (!r || r.score < 30) continue;
     results.push(r);
@@ -324,6 +408,8 @@ function runScannerPass(cache) {
 module.exports = {
   STABLE_SET,
   TIER1_SYMBOLS,
+  WASH_VOLUME_FLOOR,
+  WASH_OI_FLOOR,
   scoreSymbol,
   runScannerPass,
 };

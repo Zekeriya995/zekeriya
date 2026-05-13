@@ -203,6 +203,47 @@ function runIndicatorPass(klines) {
   return ind;
 }
 
+/* Multi-timeframe agreement — collapse the direction labels from
+   several timeframes into one verdict so the scanner can reward
+   symbols where 15m / 1h / 4h all point the same way. Three-way
+   agreement is the strongest setup (intraday momentum lines up with
+   the swing trend); two-way agreement is weaker but still tradeable;
+   anything else is "mixed" and contributes nothing.
+
+   Input: { '15m': indResult, '1h': indResult, '4h': indResult } —
+   any subset is fine. We need at least two timeframes to call
+   agreement; one alone is just the existing 15m signal.
+
+   Output: { agreement, strength, count, tfs } — agreement is
+   'bullish' / 'bearish' / 'mixed'; strength is 'full' / 'partial' /
+   'none'; count is how many timeframes voted the winning way; tfs
+   is the list of intervals that supplied a label. */
+function multiTfAgreement(tfs) {
+  if (!tfs || typeof tfs !== 'object') return null;
+  const intervals = ['15m', '1h', '4h'];
+  const contributions = [];
+  for (const iv of intervals) {
+    const r = tfs[iv];
+    const lbl = r && r.direction && r.direction.label;
+    if (!lbl) continue;
+    let dir;
+    if (lbl === 'STRONG_BUY' || lbl === 'BUY') dir = 'bullish';
+    else if (lbl === 'STRONG_SELL' || lbl === 'SELL') dir = 'bearish';
+    else dir = 'neutral';
+    contributions.push({ iv, dir });
+  }
+  if (contributions.length < 2) return null;
+  const bull = contributions.filter((c) => c.dir === 'bullish').length;
+  const bear = contributions.filter((c) => c.dir === 'bearish').length;
+  const total = contributions.length;
+  const tfList = contributions.map((c) => c.iv);
+  if (bull === total) return { agreement: 'bullish', strength: 'full', count: bull, tfs: tfList };
+  if (bear === total) return { agreement: 'bearish', strength: 'full', count: bear, tfs: tfList };
+  if (bull >= 2) return { agreement: 'bullish', strength: 'partial', count: bull, tfs: tfList };
+  if (bear >= 2) return { agreement: 'bearish', strength: 'partial', count: bear, tfs: tfList };
+  return { agreement: 'mixed', strength: 'none', count: 0, tfs: tfList };
+}
+
 module.exports = {
   emaSeries,
   calcEMA,
@@ -211,4 +252,5 @@ module.exports = {
   calcATR,
   classifyDirection,
   runIndicatorPass,
+  multiTfAgreement,
 };

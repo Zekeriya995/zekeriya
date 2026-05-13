@@ -336,6 +336,32 @@ function scoreSymbol(sym, ctx) {
     }
   }
 
+  /* Multi-timeframe agreement. When 15m / 1h / 4h indicators all
+     point the same way, the trade has both intraday momentum and
+     swing-trend backing — the highest-conviction setup. Only the 10
+     INDICATOR_SYMBOLS get this in practice (others have no MTF
+     fetch budget), which is exactly where we want strongest
+     confirmation. Bullish full agreement (+15) is louder than a
+     bearish one (-10) because the scanner is biased toward long
+     setups — the ULTRA push fires on score ≥ 100, never on a
+     short signal. */
+  if (ctx.mtfAgreement) {
+    const a = ctx.mtfAgreement;
+    if (a.strength === 'full' && a.agreement === 'bullish') {
+      score += 15;
+      tags.push('🎯MTF_BULL');
+    } else if (a.strength === 'partial' && a.agreement === 'bullish') {
+      score += 8;
+      tags.push('🎯MTF_BULL_2');
+    } else if (a.strength === 'full' && a.agreement === 'bearish') {
+      score -= 10;
+      tags.push('🎯MTF_BEAR');
+    } else if (a.strength === 'partial' && a.agreement === 'bearish') {
+      score -= 5;
+      tags.push('🎯MTF_BEAR_2');
+    }
+  }
+
   /* Risk/Reward levels. Computing them server-side means the PWA
      can render entry/SL/TP cards without re-deriving the maths on
      every device, and downstream consumers (Paper Trading, push
@@ -380,9 +406,11 @@ function runScannerPass(cache) {
   const hl = dsMulti.hyperliquid || cache.hyperliquid || {};
   const bfx = dsMulti.bitfinex || cache.bitfinex || {};
   const whaleWaves = cache.whaleWaves || {};
+  const indicatorsMtf = cache.indicatorsMtf || {};
   const results = [];
   for (const sym in tickers) {
     if (STABLE_SET.has(sym)) continue;
+    const mtfEntry = indicatorsMtf[sym];
     const r = scoreSymbol(sym, {
       ticker: tickers[sym],
       fr: cache.fr ? cache.fr[sym] : null,
@@ -395,6 +423,7 @@ function runScannerPass(cache) {
       hyperliquid: hl[sym] || null,
       bitfinex: bfx[sym] || null,
       whaleWave: whaleWaves[sym] || null,
+      mtfAgreement: mtfEntry ? mtfEntry.agreement : null,
     });
     if (!r || r.score < 30) continue;
     results.push(r);

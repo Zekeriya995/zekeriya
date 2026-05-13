@@ -18,6 +18,7 @@ const {
   calcATR,
   classifyDirection,
   runIndicatorPass,
+  multiTfAgreement,
 } = require('../src/indicator-engine');
 
 /* ─── EMA ─────────────────────────────────────────────────────────── */
@@ -188,4 +189,89 @@ test('runIndicatorPass — strong downtrend yields a sell verdict', () => {
   const out = runIndicatorPass(klines);
   assert.ok(out);
   assert.ok(['SELL', 'STRONG_SELL', 'NEUTRAL'].includes(out.direction.label));
+});
+
+/* ─── multiTfAgreement ───────────────────────────────────────────────
+   Synthetic helpers that fabricate the minimal indicator shape the
+   function reads (just .direction.label). Real values flow from
+   runIndicatorPass in production; we don't need them here. */
+
+function dir(label) {
+  return { direction: { label } };
+}
+
+test('multiTfAgreement — null on empty / single timeframe input', () => {
+  assert.equal(multiTfAgreement(null), null);
+  assert.equal(multiTfAgreement({}), null);
+  assert.equal(multiTfAgreement({ '15m': dir('BUY') }), null);
+});
+
+test('multiTfAgreement — full bullish when all three timeframes BUY/STRONG_BUY', () => {
+  const r = multiTfAgreement({
+    '15m': dir('BUY'),
+    '1h': dir('STRONG_BUY'),
+    '4h': dir('BUY'),
+  });
+  assert.equal(r.agreement, 'bullish');
+  assert.equal(r.strength, 'full');
+  assert.equal(r.count, 3);
+});
+
+test('multiTfAgreement — full bearish when all three timeframes SELL/STRONG_SELL', () => {
+  const r = multiTfAgreement({
+    '15m': dir('SELL'),
+    '1h': dir('STRONG_SELL'),
+    '4h': dir('STRONG_SELL'),
+  });
+  assert.equal(r.agreement, 'bearish');
+  assert.equal(r.strength, 'full');
+});
+
+test('multiTfAgreement — partial bullish when 2 of 3 agree', () => {
+  const r = multiTfAgreement({
+    '15m': dir('BUY'),
+    '1h': dir('NEUTRAL'),
+    '4h': dir('STRONG_BUY'),
+  });
+  assert.equal(r.agreement, 'bullish');
+  assert.equal(r.strength, 'partial');
+  assert.equal(r.count, 2);
+});
+
+test('multiTfAgreement — mixed when buy and sell both present without majority', () => {
+  /* 15m BUY, 1h SELL, 4h NEUTRAL → no two TFs agree on direction.
+     Result should be "mixed" with strength none. */
+  const r = multiTfAgreement({
+    '15m': dir('BUY'),
+    '1h': dir('SELL'),
+    '4h': dir('NEUTRAL'),
+  });
+  assert.equal(r.agreement, 'mixed');
+  assert.equal(r.strength, 'none');
+});
+
+test('multiTfAgreement — two-timeframe agreement still counts as full when both bullish', () => {
+  /* Only 15m and 1h available, both bullish → full agreement (the
+     function trusts whatever count it has once both directions
+     match). */
+  const r = multiTfAgreement({
+    '15m': dir('BUY'),
+    '1h': dir('STRONG_BUY'),
+  });
+  assert.equal(r.agreement, 'bullish');
+  assert.equal(r.strength, 'full');
+  assert.equal(r.count, 2);
+  assert.deepEqual(r.tfs, ['15m', '1h']);
+});
+
+test('multiTfAgreement — WATCH labels collapse to neutral (do not vote)', () => {
+  const r = multiTfAgreement({
+    '15m': dir('WATCH'),
+    '1h': dir('WATCH'),
+    '4h': dir('BUY'),
+  });
+  /* Only 4h votes bullish → not enough for partial (needs 2+
+     same-direction votes). */
+  assert.equal(r.agreement, 'mixed');
+  assert.equal(r.strength, 'none');
 });

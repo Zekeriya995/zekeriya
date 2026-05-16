@@ -1,5 +1,51 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 1.0 — P&D Threshold Validation] — 2026-05-16
+
+**Analysis + schema extension. No runtime behaviour change.**
+Implements the P1.0 step recorded in `SCANNER_AUDIT_2026_05_15.md` §8.1
+decision C (validate before porting).
+
+### Added
+
+- `docs/SCANNER_PD_THRESHOLDS.md` — per-flag economic / microstructure
+  rationale for the 5 P&D flags in `app.js:2459-2476`. Verdicts:
+  port 4 of 5 as-is or with a small widening (LS_RETAIL_LONG: > 3 →
+  > 2.5); defer THIN_PUMP until quantitative data is available.
+- `src/scanner-history.js` — `tags: string[]` field on persisted entries,
+  capped at `MAX_TAGS = 30` per entry. Defensive slice() so caller
+  mutations don't leak in. Enables the future
+  `vps/validate-pd-thresholds.js` quantitative pass.
+- `tests/scanner-history.test.js` — 5 new tests covering tag persistence,
+  empty default, non-array coercion, MAX_TAGS cap, mutation isolation.
+
+### Changed
+
+- `recordSignal()` now also persists `sig.tags` (or `[]` if absent).
+  Pure-additive schema — old entries with no `tags` field still work
+  (readers must use `entry.tags || []`).
+
+### Rollback
+
+- N/A — schema is pure-additive with no consumer; reverting only requires
+  removing the new field. Decision D's flag requirement is waived per its
+  exemption clause for "documentation-only and pure-refactor PRs"; the
+  schema field has no behaviour impact.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §8.1 (decision C), §6 (P1.0)
+- `docs/SCANNER_PD_THRESHOLDS.md` §2 (verdicts), §6 (schema proposal)
+
+### Open question for Ziko
+
+`docs/SCANNER_PD_THRESHOLDS.md` §8 asks whether to:
+(a) accept the §5 verdicts (port 4 of 5, widen LS, defer THIN_PUMP), or
+(b) port all 5 as-is matching the external plan exactly.
+Phase 1.1 begins on (a); flip to (b) by replying in the PR.
+
+---
+
 ## [Scanner Phase 0 — Safety Net] — 2026-05-15
 
 **Scanner remediation infrastructure only — no behaviour change.**

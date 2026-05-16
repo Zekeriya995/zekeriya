@@ -29,6 +29,10 @@ const EVAL_AFTER_MS = 24 * 60 * 60 * 1000;
    history once per hour even if it stays ULTRA. Without this a
    sticky signal would push other entries out of MAX_HISTORY. */
 const RECORD_COOLDOWN_MS = 60 * 60 * 1000;
+/* Per-entry tag cap. Bounds file growth if a future scoring change
+   produces a runaway tag bag. At 30 tags × ~20 bytes × 1000 entries
+   the worst-case overhead is ~600 KB. */
+const MAX_TAGS = 30;
 
 function loadHistory() {
   try {
@@ -60,7 +64,14 @@ function saveHistory(history) {
    recorded; anything weaker would balloon the file with noise.
    Per-symbol cooldown stops a sticky ULTRA from spamming the log.
 
-   `now` is injectable so tests don't have to patch Date.now(). */
+   `now` is injectable so tests don't have to patch Date.now().
+
+   The persisted entry includes `tags`: a copy of the signal's tag
+   bag (capped at MAX_TAGS to bound file growth). Tags enable later
+   per-flag analysis — see docs/SCANNER_PD_THRESHOLDS.md §6 and the
+   eventual vps/validate-pd-thresholds.js report. The array is
+   defensively copied + capped so a runaway producer cannot bloat
+   the history file. */
 function recordSignal(history, sig, now) {
   if (!Array.isArray(history)) return [];
   if (!sig || !sig.s || !sig.tier) return history;
@@ -85,6 +96,7 @@ function recordSignal(history, sig, now) {
     sl: sig.sl || null,
     tp1: sig.tp1 || null,
     tp2: sig.tp2 || null,
+    tags: Array.isArray(sig.tags) ? sig.tags.slice(0, MAX_TAGS) : [],
     recordedAt: ts,
     evaluated: false,
   });
@@ -209,6 +221,7 @@ function computeStats(history, daysBack, now) {
 module.exports = {
   HISTORY_FILE,
   MAX_HISTORY,
+  MAX_TAGS,
   EVAL_AFTER_MS,
   RECORD_COOLDOWN_MS,
   loadHistory,

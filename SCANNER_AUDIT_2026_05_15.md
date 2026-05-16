@@ -406,6 +406,21 @@ Before any code lands on `main`:
 4. **Confirm rollback discipline**: every PR carries an env-var or localStorage
    flag.
 
+### 8.1 Decisions Recorded — 2026-05-15
+
+Ziko answered the four questions sequentially in chat. Recorded here as the
+canonical reference for downstream PRs.
+
+| # | Question | Decision |
+|---|----------|----------|
+| A | Architecture (§3) | **Option A — Unify.** Server becomes single source of truth; PWA consumes `all.signals` from `/api/all`; client keeps a degraded local `quickScan` that fires only when `all.scannerTs` is > 60s stale. Drives Phase 2 path A (P2.A.1 through P2.A.5). |
+| B | Phase 0 length (§6) | **Compressed — single PR, ~4 hours.** All Phase 0 sub-tasks land in one commit chain on `claude/audit-scanner-module-a7dWq`. |
+| C | P&D validation (§6 P1.0) | **Yes — P1.0 ships before P1.1.** Validate the 5 client-side flag thresholds against `data/scanner-history.json` outcomes; trim or re-weight any flag with weak suppression evidence before porting to the server. |
+| D | Rollback discipline (§8.4) | **Yes — every behaviour-changing PR carries a flag.** Server fixes behind `SCANNER_*_ENABLED` env vars (read at boot); client fixes behind `nxScannerFix_*` localStorage keys (read at module init). Documentation-only and pure-refactor PRs are exempt. |
+
+The decisions above are now the contract. Any future deviation requires a
+written amendment in this section, dated, with rationale.
+
 ---
 
 ## 9. What Was Verified vs Asserted

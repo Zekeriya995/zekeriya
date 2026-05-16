@@ -1,5 +1,66 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 3.1 — Per-tag win-rate endpoint] — 2026-05-16
+
+**New observability endpoint.** Implements P3.1 from
+`SCANNER_AUDIT_2026_05_15.md` §6. Behind `SCANNER_TAG_STATS_ENABLED`
+env var (default ON; reserved in Phase 0).
+
+### What it does
+
+`GET /api/scanner/tag-stats?days=7&min=3` aggregates the rolling
+`scanner-history.json` by individual tag and returns a per-tag
+breakdown: count, wins, losses, winRate, avgGain, best/worst signal.
+Engineering can now answer questions like "what's the win rate of
+signals that fired 🐋WHALE_A?" or "do MANIP_CAP coins actually
+under-perform now that Phase 1.2 caps them?".
+
+### Query parameters
+
+| Param | Range | Default |
+|-------|-------|---------|
+| `days` | 1-90 | 7 |
+| `min`  | 1-100 | 3 (drops tags with fewer samples to cut noise) |
+
+### Data dependency
+
+This endpoint relies on the `tags` field added to recorded entries
+by Phase 1.0b. Entries persisted before P1.0b deploys have
+`tags: undefined`; they are counted in `totalWithoutTags` but do
+not contribute to any per-tag bucket. So for ~7 days post-deploy
+the `perTag` map will fill in gradually as fresh signals close out
+their 24h evaluation window.
+
+### Added
+
+- `src/scanner-tag-stats.js` — pure `computeTagStats(history, opts)`
+  function; ~140 lines including the JSDoc and the empty-result helper.
+- `tests/scanner-tag-stats.test.js` — 15 tests covering window
+  filtering, pre-extension entries handling, minSamples cutoff,
+  per-tag aggregation correctness, multi-tag entries, defensive
+  inputs, output shape, sort order, ISO timestamp format.
+- `GET /api/scanner/tag-stats` endpoint in `server.js`, gated by
+  `SCANNER_TAG_STATS_ENABLED`. Returns `503 tag_stats_disabled` when
+  the flag is off.
+
+### Rollback
+
+`SCANNER_TAG_STATS_ENABLED=false` + `pm2 restart`. Endpoint returns
+503 until re-enabled. No data migration needed.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 299 / 299 pass (was 284 + 15).
+- `npx prettier --check .` → clean.
+- `node --check server.js` → syntax clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P3.1, §8.1 decision D
+- Depends on Phase 1.0b (`tags` field on `recordSignal`)
+
+---
+
 ## [Scanner Phase 1.3 — Smart ULTRA cooldown bypass on score delta] — 2026-05-16
 
 **Behaviour change (gated, default ON).** Implements P1.3 from

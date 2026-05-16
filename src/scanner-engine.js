@@ -27,6 +27,16 @@ const pdDetector = require('./scanner-pd-detector');
    decision D and docs/SCANNER_PD_THRESHOLDS.md. */
 const PD_DETECTOR_ENABLED = process.env.SCANNER_SERVER_PD_ENABLED !== 'false';
 
+/* Manipulation HIGH → tier hard-cap kill-switch (Phase 1.2).
+   When ON, any signal whose manipulation verdict is HIGH cannot
+   tier above STRONG, even if its raw score would otherwise reach
+   ULTRA (>= 100). Without this cap, the existing -15 score
+   penalty on HIGH was sometimes recoverable for a strong setup
+   and the symbol would still publish as ULTRA — which is exactly
+   the failure mode the audit (§2.4) flagged. Default ON; set
+   SCANNER_MANIP_HARD_CAP=false to roll back. */
+const MANIP_HARD_CAP_ENABLED = process.env.SCANNER_MANIP_HARD_CAP !== 'false';
+
 const STABLE_SET = new Set([
   /* Established stablecoins */
   'USDT',
@@ -558,11 +568,23 @@ function scoreSymbol(sym, ctx) {
      recomputing. */
   const rr = 5 / 3;
 
+  /* Tier resolution. The score → tier mapping is straightforward
+     except for the Phase 1.2 hard-cap: a HIGH manipulation verdict
+     downgrades any would-be ULTRA to STRONG so the push trigger
+     (which only fires on ULTRA) never alerts users to a sketchy
+     coin, no matter how strong the rest of the signal looks.
+     Tag the override so the UI can explain the downgrade. */
+  let tier = _tierFromScore(score);
+  if (MANIP_HARD_CAP_ENABLED && manip.verdict === 'HIGH' && tier === 'ULTRA') {
+    tier = 'STRONG';
+    tags.push('🚫MANIP_CAP');
+  }
+
   return {
     s: sym,
     score: Math.round(score * 10) / 10,
     tags: tags,
-    tier: _tierFromScore(score),
+    tier: tier,
     direction: _directionLabel(score, d.change),
     price: d.price,
     change: d.change,

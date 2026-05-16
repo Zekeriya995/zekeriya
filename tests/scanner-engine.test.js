@@ -436,3 +436,75 @@ test('runScannerPass — multi-exchange context flows through to scoring', () =>
     'enrichment should raise the score'
   );
 });
+
+/* ─── Phase 1.2 — Manipulation HIGH tier hard-cap ─────────────── */
+
+/* Build a scenario where a non-tier1 coin scores high enough to
+   reach ULTRA AND triggers a HIGH manipulation verdict. The
+   stacked bonuses (whale A, MTF bullish, indicators, bitfinex)
+   push the score over 100; the penny price + extreme funding +
+   spoofed book imbalance push manipulation risk over 50. */
+function ultraButManipHigh() {
+  return scoreSymbol('SHADYCOIN', {
+    ticker: { price: 0.005, change: 0.5, volume: 2e8, high: 0.005, low: 0.005 },
+    fr: { rate: 0.6 } /* extreme funding → +20 manip risk + FR⚠️ -8 */,
+    whaleWave: { engine: { rank: 'A' } } /* +20 */,
+    mtfAgreement: { strength: 'full', agreement: 'bullish' } /* +15 */,
+    indicator: { rsi: 25, macd: { cross: 'bull' } } /* +10 + +12 */,
+    bitfinex: { longPct: 70 } /* +6 */,
+    depth: {
+      bids: [['1000', '1']] /* total 1000 */,
+      asks: [['10', '0.01']] /* total 0.1 → ratio 10000:1 */,
+    },
+  });
+}
+
+test('Phase 1.2 — manipulation HIGH caps an ULTRA-scoring signal at STRONG', () => {
+  const r = ultraButManipHigh();
+  assert.ok(r, 'fixture should produce a signal');
+  assert.equal(r.manipulationRisk.verdict, 'HIGH', 'fixture should trigger HIGH manipulation');
+  assert.ok(r.score >= 100, 'pre-cap score should reach the ULTRA cutoff (got ' + r.score + ')');
+  assert.equal(r.tier, 'STRONG', 'tier must be capped at STRONG, not ULTRA');
+  assert.ok(r.tags.includes('🚫MANIP_CAP'), 'cap tag must be present so the UI can explain it');
+});
+
+test('Phase 1.2 — non-ULTRA score with HIGH manipulation does NOT add the cap tag', () => {
+  /* Same penny / funding / book setup but without the score
+     boosters. Manipulation is still HIGH, but the tier was already
+     below ULTRA so the cap is irrelevant — and the tag must not
+     fire (otherwise users would see it on every shady gray-zone
+     symbol regardless of tier). */
+  const r = scoreSymbol('SHADYCOIN', {
+    ticker: { price: 0.005, change: 0.5, volume: 2e8, high: 0.005, low: 0.005 },
+    fr: { rate: 0.6 },
+    depth: {
+      bids: [['1000', '1']],
+      asks: [['10', '0.01']],
+    },
+  });
+  assert.ok(r);
+  assert.equal(r.manipulationRisk.verdict, 'HIGH');
+  assert.notEqual(r.tier, 'ULTRA');
+  assert.ok(
+    !r.tags.includes('🚫MANIP_CAP'),
+    'cap tag should not appear when tier was not ULTRA in the first place'
+  );
+});
+
+test('Phase 1.2 — ULTRA-scoring signal with LOW manipulation stays ULTRA', () => {
+  /* Tier-1 BTC with the same boosters but no manipulation flags →
+     verifies the cap does not over-trigger on clean signals. */
+  const r = scoreSymbol('BTC', {
+    ticker: tk({ volume: 2e9, change: 0.5 }),
+    whaleWave: { engine: { rank: 'A' } },
+    mtfAgreement: { strength: 'full', agreement: 'bullish' },
+    indicator: { rsi: 25, macd: { cross: 'bull' } },
+    coinalyzeFR: { rate: -0.02 },
+    bitfinex: { longPct: 70 },
+  });
+  assert.ok(r);
+  assert.notEqual(r.manipulationRisk.verdict, 'HIGH');
+  assert.ok(r.score >= 100, 'BTC fixture should reach ULTRA (got ' + r.score + ')');
+  assert.equal(r.tier, 'ULTRA');
+  assert.ok(!r.tags.includes('🚫MANIP_CAP'));
+});

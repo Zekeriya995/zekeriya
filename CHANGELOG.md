@@ -1,5 +1,58 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 1.2 — Manipulation HIGH tier hard-cap] — 2026-05-16
+
+**Behaviour change (gated, default ON).** Implements P1.2 from
+`SCANNER_AUDIT_2026_05_15.md` §6 / §2.4. Behind
+`SCANNER_MANIP_HARD_CAP` env var.
+
+### Problem
+
+`_computeManipulationRisk` already classified shady setups as HIGH (vol/OI
+gap + penny price + extreme funding + book imbalance) and applied a -15
+score penalty. But for a strong-enough setup the -15 was recoverable, and
+the symbol could still publish as ULTRA — the scanner's loudest tier and
+the only one the push trigger fires on. Real-world failure mode:
+manipulated penny coins with extreme funding still hitting the
+notification path.
+
+### Fix
+
+`scoreSymbol` now resolves tier in a two-step path:
+1. Map score → tier as before.
+2. If `manipulationRisk.verdict === 'HIGH'` AND `tier === 'ULTRA'` →
+   downgrade to `STRONG`, push tag `🚫MANIP_CAP` so the UI can
+   explain the override.
+
+The cap deliberately fires only when the result *would have been*
+ULTRA — STRONG / MEDIUM / WEAK signals already carry the manipulation
+warning tag and don't need a tier change.
+
+### Test coverage
+
+Three new tests in `tests/scanner-engine.test.js`:
+- HIGH manipulation + score ≥ 100 → tier downgraded to STRONG, tag set.
+- HIGH manipulation + score < 100 → no tag, tier unchanged.
+- LOW manipulation + score ≥ 100 → tier stays ULTRA (cap doesn't over-trigger).
+
+### Rollback
+
+`SCANNER_MANIP_HARD_CAP=false` + `pm2 restart`. Cap disabled, manipulation
+HIGH coins can publish as ULTRA again (the -15 score penalty still
+applies).
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 265 / 265 pass (was 262 + 3 new).
+- `npx prettier --check .` → clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §2.4, §6, §8.1 decision D
+- `src/scanner-engine.js` (manipulation block + tier resolution)
+
+---
+
 ## [Scanner Phase 1.1 — Server-side P&D Detector] — 2026-05-16
 
 **Behaviour change (gated, default ON).** Implements P1.1 from

@@ -33,6 +33,7 @@ const whaleEngine = require('./src/whale-engine');
 const alertsEngine = require('./src/alerts-engine');
 const scannerHistory = require('./src/scanner-history');
 const scannerSectors = require('./src/scanner-sectors');
+const pushCooldown = require('./src/scanner-push-cooldown');
 require('dotenv').config();
 
 const {
@@ -584,9 +585,17 @@ async function maybePushNewsAlerts() {
      globally to one notification every 10 minutes so a wobbly
      ranking doesn't burn through the user's lock screen. */
 
-const SCANNER_ULTRA_COOLDOWN_MS = 5 * 60 * 1000;
+/* SCANNER_ULTRA_COOLDOWN_MS / DELTA_THRESHOLD live in
+   src/scanner-push-cooldown.js so the Phase 1.3 delta-bypass logic
+   is unit-testable. The state map is owned here because each
+   server process has its own push subscriber set. */
 const SCANNER_TOP3_COOLDOWN_MS = 10 * 60 * 1000;
 const _ultraPushBySymbol = Object.create(null);
+/* Phase 1.3 — kill switch for the score-delta cooldown bypass.
+   Default ON; set SCANNER_ULTRA_DELTA_PUSH=false in the proxy env
+   to revert to plain age-based cooldown without removing the
+   wiring. Read once at module scope — pm2 restart required. */
+const ULTRA_DELTA_PUSH_ENABLED = process.env.SCANNER_ULTRA_DELTA_PUSH !== 'false';
 let _lastTop3Hash = '';
 let _lastTop3PushAt = 0;
 
@@ -629,11 +638,20 @@ async function runScannerOnServer() {
   if (!PUSH_ENABLED || !cache.pushSubs.length) return;
   const now = Date.now();
 
-  /* ULTRA push — fire only on the freshest crossing per symbol. */
+  /* ULTRA push — fire on the freshest crossing per symbol, with a
+     Phase 1.3 delta bypass: if the score has climbed by
+     pushCooldown.DELTA_THRESHOLD or more since the last push,
+     suppress the cooldown so the user gets the second alert. The
+     gate is delegated to src/scanner-push-cooldown.js for testability. */
   for (const r of pass.signals) {
     if (r.tier !== 'ULTRA') break; /* signals are sorted desc */
-    const lastAt = _ultraPushBySymbol[r.s] || 0;
-    if (now - lastAt < SCANNER_ULTRA_COOLDOWN_MS) continue;
+    if (
+      !pushCooldown.shouldPushUltra(_ultraPushBySymbol, r.s, now, r.score, {
+        deltaPushEnabled: ULTRA_DELTA_PUSH_ENABLED,
+      })
+    ) {
+      continue;
+    }
     const top3Tags = (r.tags || []).slice(0, 3).join(' ');
     const payload = {
       title: '⭐ ' + r.s + ' — ULTRA Signal',
@@ -643,7 +661,7 @@ async function runScannerOnServer() {
     };
     const { sent } = await sendPushToAll(payload, 'scanTrades');
     if (sent > 0) {
-      _ultraPushBySymbol[r.s] = now;
+      pushCooldown.recordUltraPush(_ultraPushBySymbol, r.s, now, r.score);
       console.log(`[PUSH] ULTRA sent: ${r.s} score=${Math.round(r.score)} → ${sent} client(s)`);
     }
   }

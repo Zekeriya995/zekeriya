@@ -1,5 +1,69 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 1.3 — Smart ULTRA cooldown bypass on score delta] — 2026-05-16
+
+**Behaviour change (gated, default ON).** Implements P1.3 from
+`SCANNER_AUDIT_2026_05_15.md` §6. Behind `SCANNER_ULTRA_DELTA_PUSH`
+env var.
+
+### Problem
+
+The ULTRA push had a flat 5-minute per-symbol cooldown to stop a
+sticky signal from spamming the user. But the same cooldown muted
+the case the user actually wants to know about: a coin that pushed
+ULTRA at score 102 and 90 seconds later jumps to 135 — that's
+qualitatively a stronger setup, not a duplicate. The audit called
+this the "ULTRA reborn" failure mode.
+
+### Fix
+
+`runScannerOnServer`'s ULTRA push gate now checks two conditions and
+allows the push if EITHER fires:
+
+- **Age path (unchanged):** previous push for the symbol older than
+  COOLDOWN_MS (5 minutes).
+- **Delta path (NEW, Phase 1.3):** new score exceeds last-pushed
+  score by DELTA_THRESHOLD (30) or more, even within the cooldown
+  window.
+
+Logic moved out of `server.js` into the new pure module
+`src/scanner-push-cooldown.js` so it can be unit-tested without
+spinning up the proxy. Per-symbol state shape changed from
+`{[sym]: ts}` to `{[sym]: {ts, score}}` to track the previous score
+for the delta comparison.
+
+### Rollback
+
+`SCANNER_ULTRA_DELTA_PUSH=false` + `pm2 restart`. Falls back to the
+original age-only cooldown — the delta path is never consulted.
+
+### Test coverage
+
+19 new tests in `tests/scanner-push-cooldown.test.js` cover:
+- First push always allowed; per-symbol independence.
+- Age path: blocked within cooldown, allowed at exactly the boundary,
+  always allowed past it.
+- Delta path: bypass at exactly DELTA_THRESHOLD, blocked one below,
+  blocked on negative delta (score going down).
+- `deltaPushEnabled: false` reverts to age-only behaviour.
+- Defensive guards: null state, non-string symbol, non-finite score.
+- `recordUltraPush` mutation + idempotent overwrite.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 284 / 284 pass (was 265 + 19).
+- `npx prettier --check .` → clean.
+- `node --check server.js` → syntax clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P1.3, §8.1 decision D
+- New: `src/scanner-push-cooldown.js`,
+  `tests/scanner-push-cooldown.test.js`
+- Touched: `server.js` (push gate refactored)
+
+---
+
 ## [Scanner Phase 1.2 — Manipulation HIGH tier hard-cap] — 2026-05-16
 
 **Behaviour change (gated, default ON).** Implements P1.2 from

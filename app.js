@@ -1,7 +1,22 @@
 /* NEXUS PRO V10 — Early Detection + Sound Alerts + Smart Cache + 6 Checks
    Shared constants (BN/BF/CG/CB/PROXY/WL/COL) live in src/constants.js and
    pure helpers (esc/fmt/fP/safeC/calcRSI/calcMACD/calcEMA) in src/utils.js —
-   both are loaded before this file by index.html. */
+   both are loaded before this file by index.html.
+
+   ═══════════════════════════════════════════════════════════════════
+   SCANNER REMEDIATION FLAGS (localStorage keys, reserved Phase 0)
+   Each flag, when set to the string 'off', reverts the corresponding
+   client-side fix without a redeploy. See SCANNER_AUDIT_2026_05_15.md.
+
+     nxScannerFix_pd_v2          — Phase 1.1 P&D detection (shared)
+     nxScannerFix_manip_cap      — Phase 1.2 Manipulation hard cap
+     nxScannerFix_unified_rules  — Phase 2.A.1 Unified scoring registry
+     nxScannerFix_server_signals — Phase 2.A.2 PWA reads all.signals
+     nxScannerFix_atr_zones      — Phase 2.A.4 ATR-aware SL/TP
+
+   Flags are READ at module init in their respective phases; this Phase 0
+   header reserves the namespace only. Toggling requires a page reload.
+   ═══════════════════════════════════════════════════════════════════ */
 var tg=window.Telegram&&window.Telegram.WebApp?window.Telegram.WebApp:null;if(tg){tg.ready();tg.expand();tg.setHeaderColor('#060b14');tg.setBackgroundColor('#020408')}
 /* Per-symbol market cap from CoinGecko — populated as a side effect
    of the hourly updateTop100() call below (no extra API request).

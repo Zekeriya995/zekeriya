@@ -1,5 +1,38 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 0 — Safety Net] — 2026-05-15
+
+**Scanner remediation infrastructure only — no behaviour change.**
+Implements SCANNER_AUDIT_2026_05_15.md §6 Phase 0 (compressed variant
+approved in §8.1).
+
+### Added
+
+- `SCANNER_AUDIT_2026_05_15.md` — consolidated audit (external 10-engineer
+  review + internal Wasted-Pipeline finding) and 5-phase remediation plan
+- `vps/snapshot-scanner-metrics.sh` — idempotent baseline-capture script
+- `data/scanner-baseline-2026-05-15.json` — placeholder baseline (replace
+  with real production snapshot before Phase 1.1 deploys)
+- `tests/scanner-contract.test.js` — empty skeleton, populated in Phase 2.A.5
+- Eight rollback flag names reserved in `.env.example` (`SCANNER_*_ENABLED`)
+- Five rollback flag names reserved in `app.js` header (`nxScannerFix_*`)
+- npm scripts: `npm run snapshot`, `npm run test:contract`
+
+### Changed
+
+- None. This phase introduces no behaviour changes — pure infrastructure.
+
+### Rollback
+
+- N/A — pure infrastructure. Revert the merge commit if needed.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 (Phase 0), §8.1 (Decisions Recorded)
+- PR #100
+
+---
+
 ## ملفات للرفع (4 ملفات)
 
 | الملف | الحجم | الحالة |

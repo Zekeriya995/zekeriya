@@ -1,0 +1,7 @@
+{
+  "snapshotAt": "2026-05-15T00:00:00Z",
+  "label": "2026-05-15-placeholder",
+  "note": "Placeholder baseline committed during Phase 0. Replace with a real snapshot from production VPS (curl /api/metrics + /api/health via vps/snapshot-scanner-metrics.sh) BEFORE Phase 1.1 deploys. Recorded here so downstream PRs have a non-empty 'before' reference; comparison KPIs (bad-ULTRA-push count, tag parity, SL/TP drift) become measurable only after this file is replaced with live data.",
+  "metrics": {},
+  "health": {}
+}

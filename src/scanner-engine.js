@@ -18,6 +18,15 @@
 
 'use strict';
 
+const pdDetector = require('./scanner-pd-detector');
+
+/* Server-side P&D detector kill-switch. Default ON; set
+   SCANNER_SERVER_PD_ENABLED=false in the env for instant rollback
+   without removing the wiring. Read once at module load — pm2
+   restart required to flip. See SCANNER_AUDIT_2026_05_15.md §8.1
+   decision D and docs/SCANNER_PD_THRESHOLDS.md. */
+const PD_DETECTOR_ENABLED = process.env.SCANNER_SERVER_PD_ENABLED !== 'false';
+
 const STABLE_SET = new Set([
   /* Established stablecoins */
   'USDT',
@@ -509,6 +518,31 @@ function scoreSymbol(sym, ctx) {
     tags.push('⚠️MANIP_MED');
   }
 
+  /* Pump & Dump risk detector (Phase 1.1). Mirrors the client-side
+     detector at app.js:2459-2476 so the server never publishes an
+     ULTRA push on a coin that the client would have suppressed.
+     Today only FR_EXTREME and LS_RETAIL_LONG are reachable on the
+     server — see src/scanner-pd-detector.js header for why
+     VERTICAL / SMART_VS_RETAIL / THIN_PUMP are dormant in this PR.
+     Behind PD_DETECTOR_ENABLED so we can roll back instantly via
+     SCANNER_SERVER_PD_ENABLED=false. */
+  if (PD_DETECTOR_ENABLED) {
+    const pd = pdDetector.detectPumpAndDump({
+      change: d.change,
+      volume: d.volume,
+      fr: ctx.fr,
+      ls: ctx.ls,
+      topTraders: ctx.topTraders,
+    });
+    if (pd.flags.length >= 3) {
+      score = pdDetector.applyToScore(score, pd);
+      tags.push('🚨P&D_RISK:' + pd.count + '/5');
+    } else if (pd.flags.length === 2) {
+      score = pdDetector.applyToScore(score, pd);
+      tags.push('⚠️P&D_WARN:' + pd.count + '/5');
+    }
+  }
+
   /* Risk/Reward levels. Computing them server-side means the PWA
      can render entry/SL/TP cards without re-deriving the maths on
      every device, and downstream consumers (Paper Trading, push
@@ -570,6 +604,11 @@ function runScannerPass(cache) {
       taker: cache.taker ? cache.taker[sym] : null,
       depth: cache.depth ? cache.depth[sym] : null,
       oi: cache.oi ? cache.oi[sym] : null,
+      /* topTraders feeds the P&D detector's SMART_VS_RETAIL flag.
+         Server doesn't currently populate cache.topTraders, so the
+         flag stays dormant. Wired here so future PRs that add the
+         data source get the suppression for free. */
+      topTraders: cache.topTraders ? cache.topTraders[sym] : null,
       coinalyzeOI: czOI[sym] || null,
       coinalyzeFR: czFR[sym] || null,
       hyperliquid: hl[sym] || null,

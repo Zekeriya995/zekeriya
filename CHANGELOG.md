@@ -1,5 +1,71 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 1.1 — Server-side P&D Detector] — 2026-05-16
+
+**Behaviour change (gated, default ON).** Implements P1.1 from
+`SCANNER_AUDIT_2026_05_15.md` §6 and the porting strategy in
+`docs/SCANNER_PD_THRESHOLDS.md` §5.
+
+### Added
+
+- `src/scanner-pd-detector.js` — pure-function port of the client's
+  detectPumpAndDump (app.js:2459-2476). 5 flags (VERTICAL,
+  FR_EXTREME, LS_RETAIL_LONG, SMART_VS_RETAIL, THIN_PUMP),
+  ladder: 2 flags = -25, 3+ flags = score floored at -100.
+  Defensive against missing fields — never throws.
+- `tests/scanner-pd-detector.test.js` — 35 tests covering every flag
+  fires/doesn't fire boundary, defensive input handling, score-
+  adjustment ladder, FLAG_THRESHOLDS parity assertion.
+- `topTraders` field on the ctx passed to `scoreSymbol` — wired now
+  even though `cache.topTraders` isn't populated yet, so the day
+  the data source lands the SMART_VS_RETAIL flag starts firing
+  with no further engine changes.
+
+### Changed
+
+- `src/scanner-engine.js`:
+  - Imports `scanner-pd-detector` and reads
+    `SCANNER_SERVER_PD_ENABLED` env var at module load (default
+    true, set to `false` for instant rollback).
+  - `scoreSymbol` runs the P&D detector after the manipulation
+    block. 2 flags → tag `⚠️P&D_WARN:N/5`, score -25. 3+ flags →
+    tag `🚨P&D_RISK:N/5`, score floored at -100 (downstream
+    qualityFilter rejects).
+
+### Runtime reachability (this PR)
+
+| Flag | Reachable today? | Why / how to enable |
+|------|------------------|---------------------|
+| VERTICAL | ❌ dormant | Upstream `d.change >= 8` reject at scanner-engine.js:219 fires first |
+| FR_EXTREME | ✅ live | `ctx.fr` populated from cache.fr |
+| LS_RETAIL_LONG | ✅ live | `ctx.ls` populated from cache.ls |
+| SMART_VS_RETAIL | ❌ dormant | `cache.topTraders` not fetched yet — wiring future PR |
+| THIN_PUMP | ❌ dormant | Same upstream filter as VERTICAL |
+
+Net production effect: server now applies the same
+FR_EXTREME / LS_RETAIL_LONG suppression the client always had.
+2-flag soft penalty is reachable when both fire on one coin.
+
+### Rollback
+
+Set `SCANNER_SERVER_PD_ENABLED=false` in the proxy's `.env` and
+`pm2 restart`. Detector no longer runs; tags no longer pushed; no
+score adjustment. No data migration needed.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 262 / 262 pass (was 227 + 35
+  new detector tests).
+- `npx prettier --check .` → clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P1.1, §8.1 decision A & D
+- `docs/SCANNER_PD_THRESHOLDS.md` §5 (verdicts), §3 (per-flag rationale)
+- `app.js:2459-2476` (client detector being mirrored)
+
+---
+
 ## [Scanner Phase 1.0 — P&D Threshold Validation] — 2026-05-16
 
 **Analysis + schema extension. No runtime behaviour change.**

@@ -307,3 +307,119 @@ test('loadHistory — returns [] when the file does not exist', () => {
   const out = loadHistory();
   assert.ok(Array.isArray(out));
 });
+
+/* ─── Phase 3.3 — Alpha-based win rate ────────────────────────── */
+
+function evalEntry(over) {
+  return Object.assign(
+    {
+      s: 'BTC',
+      tier: 'ULTRA',
+      evaluated: true,
+      recordedAt: NOW - 1000,
+      outcome: 'partial_win',
+      pctChange: 0,
+    },
+    over
+  );
+}
+
+test('computeStats.alpha — suppressed when fewer than 3 evaluated entries', () => {
+  const h = [
+    evalEntry({ pctChange: 5, outcome: 'win' }),
+    evalEntry({ s: 'ETH', pctChange: 8, outcome: 'win' }),
+  ];
+  const out = computeStats(h, 7, NOW);
+  assert.equal(out.alpha, null, 'alpha block must be null with < 3 samples');
+});
+
+test('computeStats.alpha — exposed with 3+ evaluated entries', () => {
+  const h = [
+    evalEntry({ s: 'A', pctChange: 5, outcome: 'win' }),
+    evalEntry({ s: 'B', pctChange: 2, outcome: 'partial_win' }),
+    evalEntry({ s: 'C', pctChange: -3, outcome: 'loss' }),
+  ];
+  const out = computeStats(h, 7, NOW);
+  assert.ok(out.alpha);
+  assert.equal(typeof out.alpha.basketMedian, 'number');
+  assert.equal(typeof out.alpha.avgAlpha, 'number');
+  assert.equal(typeof out.alpha.alphaWinRate, 'number');
+});
+
+test('computeStats.alpha — basketMedian is the median of all pctChange values', () => {
+  const h = [
+    evalEntry({ s: 'A', pctChange: 10, outcome: 'win' }),
+    evalEntry({ s: 'B', pctChange: 4, outcome: 'win' }) /* median */,
+    evalEntry({ s: 'C', pctChange: -2, outcome: 'loss' }),
+  ];
+  const out = computeStats(h, 7, NOW);
+  assert.equal(out.alpha.basketMedian, 4);
+});
+
+test('computeStats.alpha — even-length basket averages the two middle values', () => {
+  const h = [
+    evalEntry({ s: 'A', pctChange: 10, outcome: 'win' }),
+    evalEntry({ s: 'B', pctChange: 6, outcome: 'win' }),
+    evalEntry({ s: 'C', pctChange: 2, outcome: 'partial_win' }),
+    evalEntry({ s: 'D', pctChange: -2, outcome: 'loss' }),
+  ];
+  const out = computeStats(h, 7, NOW);
+  /* Sorted: [-2, 2, 6, 10] → mid pair (2, 6) → median = 4 */
+  assert.equal(out.alpha.basketMedian, 4);
+});
+
+test('computeStats.alpha — avgAlpha is mean(pctChange - basketMedian)', () => {
+  const h = [
+    evalEntry({ s: 'A', pctChange: 10, outcome: 'win' }),
+    evalEntry({ s: 'B', pctChange: 4, outcome: 'win' }),
+    evalEntry({ s: 'C', pctChange: -2, outcome: 'loss' }),
+  ];
+  const out = computeStats(h, 7, NOW);
+  /* median = 4. alphas = [6, 0, -6]. mean = 0. */
+  assert.equal(out.alpha.avgAlpha, 0);
+});
+
+test('computeStats.alpha — alphaWinRate counts signals with alpha > 0', () => {
+  const h = [
+    evalEntry({ s: 'A', pctChange: 10, outcome: 'win' }) /* alpha = +6 > 0 */,
+    evalEntry({ s: 'B', pctChange: 4, outcome: 'win' }) /* alpha = 0, NOT > 0 */,
+    evalEntry({ s: 'C', pctChange: -2, outcome: 'loss' }) /* alpha = -6 < 0 */,
+  ];
+  const out = computeStats(h, 7, NOW);
+  /* 1 of 3 has alpha > 0 → 33% */
+  assert.equal(out.alpha.alphaWinRate, 33);
+});
+
+test('computeStats.alpha — bestAlpha and worstAlpha identify the extremes', () => {
+  const h = [
+    evalEntry({ s: 'BIG', pctChange: 20, outcome: 'win' }),
+    evalEntry({ s: 'MID', pctChange: 5, outcome: 'win' }),
+    evalEntry({ s: 'SMALL', pctChange: -10, outcome: 'loss' }),
+  ];
+  const out = computeStats(h, 7, NOW);
+  assert.equal(out.alpha.bestAlpha.s, 'BIG');
+  assert.equal(out.alpha.worstAlpha.s, 'SMALL');
+  /* median = 5. alphas: BIG=+15, MID=0, SMALL=-15 */
+  assert.equal(out.alpha.bestAlpha.alpha, 15);
+  assert.equal(out.alpha.worstAlpha.alpha, -15);
+});
+
+test('computeStats.alpha — works on a heavily-skewed distribution', () => {
+  /* 10 mediocre signals + 1 huge winner → median dragged toward low end,
+     alpha for the outlier is large. */
+  const h = [];
+  for (let i = 0; i < 10; i++) {
+    h.push(evalEntry({ s: 'BORING' + i, pctChange: 1, outcome: 'partial_win' }));
+  }
+  h.push(evalEntry({ s: 'MOON', pctChange: 50, outcome: 'win' }));
+  const out = computeStats(h, 7, NOW);
+  assert.equal(out.alpha.basketMedian, 1, 'median dominated by the 10 boring entries');
+  /* MOON's alpha = 50 - 1 = 49 */
+  assert.equal(out.alpha.bestAlpha.s, 'MOON');
+  assert.equal(out.alpha.bestAlpha.alpha, 49);
+});
+
+test('computeStats.alpha — empty history still returns alpha:null', () => {
+  const out = computeStats([], 7, NOW);
+  assert.equal(out.alpha, null);
+});

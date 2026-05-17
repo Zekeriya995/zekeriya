@@ -1,5 +1,68 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 3.3 — Alpha-based win rate] — 2026-05-17
+
+**Pure-additive analytics enhancement.** Implements P3.3 from
+`SCANNER_AUDIT_2026_05_15.md` §6. No flag — the new `alpha` field
+is appended to the existing `cache.scannerStats` payload; consumers
+that ignore it see no change.
+
+### What it does
+
+The existing `winRate` is a threshold-based metric: signal counts as
+a "win" if pctChange >= +5. That captures absolute movement but says
+nothing about whether the scanner's selection was actually picking
+**above-average** movers in the same window.
+
+`alpha` answers exactly that: each signal's pctChange minus the
+median pctChange across the entire evaluated basket. Surfaced as:
+
+```json
+"alpha": {
+  "basketMedian": 4.0,
+  "avgAlpha": 0.0,
+  "alphaWinRate": 33,
+  "bestAlpha":  { "s": "BIG",   "pctChange": 10, "alpha": 6  },
+  "worstAlpha": { "s": "SMALL", "pctChange": -2, "alpha": -6 }
+}
+```
+
+A high `alphaWinRate` (>= 60%) means the scanner picks above-median
+movers; ~50% means selection is no better than random; below 50%
+means the scoring rules actively pick UNDER-performers.
+
+### Added
+
+- `src/scanner-history.js`:
+  - `_median(values)` helper — robust central tendency.
+  - `computeStats` now returns `alpha: { basketMedian, avgAlpha,
+    alphaWinRate, bestAlpha, worstAlpha }` when the evaluated basket
+    has ≥ 3 samples. Returns `alpha: null` otherwise (single-sample
+    "median" is meaningless).
+- `tests/scanner-history.test.js` — 9 new tests covering:
+  - Suppression below 3 samples.
+  - Median computation (odd / even basket sizes).
+  - avgAlpha arithmetic correctness.
+  - alphaWinRate counts only alpha > 0 (not >= 0).
+  - bestAlpha / worstAlpha identification on skewed distributions.
+  - Empty-history fallback.
+
+### Rollback
+
+N/A — pure-additive field. Consumers that don't read `alpha` see no
+change. To remove: drop the alpha block from computeStats.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 323 / 323 pass (was 314 + 9).
+- `npx prettier --check .` → clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P3.3
+
+---
+
 ## [Scanner Phase 3.2 — Gate-rejection telemetry] — 2026-05-17
 
 **New observability endpoint.** Implements P3.2 from

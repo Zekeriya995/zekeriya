@@ -542,6 +542,7 @@ function scoreSymbol(sym, ctx) {
       volume: d.volume,
       fr: ctx.fr,
       ls: ctx.ls,
+      globalLs: ctx.globalLs,
       topTraders: ctx.topTraders,
     });
     if (pd.flags.length >= 3) {
@@ -630,13 +631,19 @@ function runScannerPass(cache) {
       ticker: tickers[sym],
       fr: cache.fr ? cache.fr[sym] : null,
       ls: cache.ls ? cache.ls[sym] : null,
+      /* globalLs (Phase 1.x.b) — TRUE retail signal from
+         globalLongShortAccountRatio. The P&D detector's
+         SMART_VS_RETAIL flag uses this to compare smart-money
+         (top traders) against retail-heavy (global accounts). */
+      globalLs: cache.globalLs ? cache.globalLs[sym] : null,
       taker: cache.taker ? cache.taker[sym] : null,
       depth: cache.depth ? cache.depth[sym] : null,
       oi: cache.oi ? cache.oi[sym] : null,
-      /* topTraders feeds the P&D detector's SMART_VS_RETAIL flag.
-         Server doesn't currently populate cache.topTraders, so the
-         flag stays dormant. Wired here so future PRs that add the
-         data source get the suppression for free. */
+      /* topTraders — top-trader POSITION fractions (0..1). Same
+         underlying Binance data as cache.ls but in raw unit form
+         the P&D detector expects (positions[].long compared against
+         the < 0.4 threshold). Populated alongside cache.ls in
+         fetchLongShort(). */
       topTraders: cache.topTraders ? cache.topTraders[sym] : null,
       coinalyzeOI: czOI[sym] || null,
       coinalyzeFR: czFR[sym] || null,

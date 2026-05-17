@@ -565,20 +565,18 @@ test('Phase 1.1 — P&D detector with only one flag emits no P&D tag', () => {
 
 test('Phase 1.1 — P&D 3+ flags emit P&D_RISK tag and floor score', () => {
   /* Reach 3 flags via FR_EXTREME + LS_RETAIL_LONG + SMART_VS_RETAIL.
-     SMART_VS_RETAIL needs ls.ratio > 2 (already satisfied) plus
-     topTraders.positions[-1].long < 0.4. The wiring at
-     scanner-engine.js passes ctx.topTraders straight through to
-     the detector, so populating it here triggers the third flag.
+     SMART_VS_RETAIL requires both globalLs.ratio > 2 (retail) AND
+     topTraders.positions[-1].long < 0.4 (smart short). The wiring at
+     scanner-engine.js passes both ctx.globalLs and ctx.topTraders to
+     the detector, so populating both here triggers the third flag.
      Result: 3 flags → KILL → score floored at -100 → quality
-     gate at runScannerPass drops the symbol. Test asserts the
-     wiring not the downstream filter, so we call scoreSymbol
-     directly and observe the raw return. */
+     gate at runScannerPass drops the symbol. */
   const r = scoreSymbol('NEWCOIN', {
     ticker: tk({ volume: 5e7, change: 0.5 }),
     oi: 50_000_000,
     fr: { rate: 0.15 } /* FR_EXTREME */,
-    ls: { ratio: 3.5 } /* LS_RETAIL_LONG + > 2 for SMART_VS_RETAIL */,
-    topTraders: { positions: [{ long: 0.3 }] } /* < 0.4 → SMART_VS_RETAIL */,
+    globalLs: { ratio: 3.5 } /* LS_RETAIL_LONG + > 2 for SMART_VS_RETAIL retail */,
+    topTraders: { positions: [{ long: 0.3 }] } /* < 0.4 → SMART_VS_RETAIL smart */,
   });
   assert.ok(r);
   assert.ok(r.tags.some((t) => t.startsWith('🚨P&D_RISK')));

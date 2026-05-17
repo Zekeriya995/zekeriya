@@ -198,6 +198,24 @@ if (LS[s] && LS[s].ratio > 3) {
 
 ### 3.4 `SMART_VS_RETAIL` — Compound: top traders short AND retail long
 
+> **Post-Phase-1.1 discovery (2026-05-17).** The original implementation
+> on both client (`app.js:2469-2472`) and server's initial port
+> referenced **`LS[s].ratio > 2`** (top-trader POSITION ratio) for the
+> retail half AND `topTradersLS[s].positions[last].long < 0.4` (also
+> top-trader POSITION fraction) for the smart-money half. Both halves
+> read the same Binance endpoint (`topLongShortPositionRatio`), making
+> the AND condition **logically impossible to satisfy** on any single
+> snapshot — if `positions.long < 0.4` then `positions.ratio < 0.67`,
+> never `> 2`. The flag was effectively dead code on both sides.
+>
+> **Fix (Phase 1.1.b):** the server now also fetches Binance's
+> `globalLongShortAccountRatio` (TRUE retail signal — all accounts,
+> not just top traders) into `cache.globalLs`. The detector reads
+> this for the retail half of `SMART_VS_RETAIL`, restoring the
+> divergence the flag's name implies. The client still has the
+> contradiction; the planned Phase 2.A.2 (PWA consumes server signals)
+> will inherit the fix automatically.
+
 ```js
 // app.js:2469-2472
 if (topTradersLS[s] && topTradersLS[s].positions && topTradersLS[s].positions.length > 0) {

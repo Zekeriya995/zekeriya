@@ -1,5 +1,77 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 1.1.b — Retail LS + SMART_VS_RETAIL activation] — 2026-05-17
+
+**Behaviour change (gated, default ON).** Closes a logical bug
+discovered while wiring `topTraders` for Phase 1.1's
+`SMART_VS_RETAIL` flag.
+
+### The bug
+
+Original implementation (both client `app.js:2469-2472` and the
+initial server port) referenced `LS[s]` for the "retail long"
+half AND `topTradersLS[s].positions[last]` for the "smart short"
+half of `SMART_VS_RETAIL`. **Both sources read the same Binance
+endpoint** (`topLongShortPositionRatio`), so the AND condition
+was logically impossible to satisfy: `positions.long < 0.4`
+implies `positions.ratio < 0.67`, never `> 2`. The flag was dead
+code on both sides — never fired in production.
+
+### Fix
+
+Added Binance `globalLongShortAccountRatio` as a separate data
+source (TRUE retail-account signal, not top traders):
+
+- New fetcher `fetchGlobalLs()` in `server.js`; same 30-symbol
+  scope and refresh interval as `fetchLongShort()`.
+- New cache slot `cache.globalLs[sym] = { long, short, ratio }`.
+- New cache slot `cache.topTraders[sym] = { positions: [...] }`,
+  populated alongside `cache.ls` in the same `fetchLongShort()` call
+  (no extra network round-trip — same Binance payload, different
+  unit shape that matches the detector's `positions[].long < 0.4`
+  check).
+- `src/scanner-pd-detector.js` detector now accepts `globalLs` as
+  a separate input. `LS_RETAIL_LONG` prefers it when present,
+  falls back to `ls` for parity. `SMART_VS_RETAIL` requires both
+  `globalLs` (retail) AND `topTraders` (smart) — no fallback —
+  so the divergence is real.
+- `src/scanner-engine.js` `runScannerPass` wires both new fields
+  into the ctx passed to `scoreSymbol`.
+
+### Rollback
+
+`SCANNER_RETAIL_LS_ENABLED=false` + `pm2 restart`. `fetchGlobalLs()`
+exits early, `cache.globalLs` stays empty, detector falls back to
+ls for LS_RETAIL_LONG, SMART_VS_RETAIL goes back to silent. No
+data migration needed.
+
+### Test coverage
+
+`tests/scanner-pd-detector.test.js` updated:
+- LS_RETAIL_LONG: fires from globalLs when present, falls back to ls.
+- LS_RETAIL_LONG: globalLs takes precedence over ls when both set.
+- SMART_VS_RETAIL: fires with globalLs (no longer dead).
+- SMART_VS_RETAIL: explicitly does NOT use ls as fallback (would
+  re-create the original contradiction).
+- SMART_VS_RETAIL: missing globalLs → silent.
+
+`tests/scanner-engine.test.js` Phase 1.1 3-flag integration test
+updated to provide `globalLs` instead of `ls` for the retail half.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 307 / 307 pass (was 303 + 4 net).
+- `npx prettier --check .` → clean.
+- `node --check server.js` → clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §2.1 (P&D detection)
+- `docs/SCANNER_PD_THRESHOLDS.md` §3.4 (now annotated with the discovery)
+- Binance API: `globalLongShortAccountRatio` vs. `topLongShortPositionRatio`
+
+---
+
 ## [Scanner Review Fixes — pre-merge polish] — 2026-05-16
 
 **No behaviour change.** Closes the NITs surfaced by the self-review

@@ -87,58 +87,90 @@ test('FR_EXTREME — does NOT fire when fr is null / wrong shape', () => {
 
 /* ─── LS_RETAIL_LONG flag ──────────────────────────────────────── */
 
-test('LS_RETAIL_LONG — fires when ratio > 3', () => {
+test('LS_RETAIL_LONG — fires from globalLs (true retail) when present', () => {
+  const out = detectPumpAndDump({ globalLs: { ratio: 3.5 } });
+  assert.equal(out.flags[0], 'LS_RETAIL_LONG:3.5');
+});
+
+test('LS_RETAIL_LONG — falls back to ls when globalLs is absent (parity)', () => {
   const out = detectPumpAndDump({ ls: { ratio: 3.5 } });
   assert.equal(out.flags[0], 'LS_RETAIL_LONG:3.5');
 });
 
-test('LS_RETAIL_LONG — does NOT fire at exactly 3 (strict >)', () => {
-  const out = detectPumpAndDump({ ls: { ratio: 3 } });
-  assert.deepEqual(out.flags, []);
+test('LS_RETAIL_LONG — globalLs takes precedence over ls when both present', () => {
+  /* If retail (globalLs) is below threshold but top traders (ls) are above,
+     the flag must NOT fire — retail euphoria is what the flag screens for. */
+  const out = detectPumpAndDump({
+    globalLs: { ratio: 2.0 } /* retail moderate */,
+    ls: { ratio: 5.0 } /* top traders heavy long */,
+  });
+  assert.deepEqual(out.flags, [], 'globalLs (retail) should override ls');
 });
 
-test('LS_RETAIL_LONG — does NOT fire when ls is missing or malformed', () => {
-  assert.deepEqual(detectPumpAndDump({ ls: null }).flags, []);
-  assert.deepEqual(detectPumpAndDump({ ls: {} }).flags, []);
+test('LS_RETAIL_LONG — does NOT fire at exactly 3 (strict >)', () => {
+  const outGlobal = detectPumpAndDump({ globalLs: { ratio: 3 } });
+  assert.deepEqual(outGlobal.flags, []);
+  const outLs = detectPumpAndDump({ ls: { ratio: 3 } });
+  assert.deepEqual(outLs.flags, []);
+});
+
+test('LS_RETAIL_LONG — does NOT fire when both sources are missing or malformed', () => {
+  assert.deepEqual(detectPumpAndDump({}).flags, []);
+  assert.deepEqual(detectPumpAndDump({ ls: null, globalLs: null }).flags, []);
+  assert.deepEqual(detectPumpAndDump({ ls: {}, globalLs: {} }).flags, []);
 });
 
 /* ─── SMART_VS_RETAIL flag ─────────────────────────────────────── */
 
-test('SMART_VS_RETAIL — fires only when BOTH halves are true', () => {
+test('SMART_VS_RETAIL — fires when smart short (long < 0.4) AND retail long (globalLs.ratio > 2)', () => {
   const out = detectPumpAndDump({
-    ls: { ratio: 2.5 },
-    topTraders: { positions: [{ long: 0.3 }] },
+    globalLs: { ratio: 2.5 } /* retail heavy long */,
+    topTraders: { positions: [{ long: 0.3 }] } /* smart short */,
   });
   assert.ok(out.flags.includes('SMART_VS_RETAIL'));
 });
 
 test('SMART_VS_RETAIL — does NOT fire if smart traders are net long', () => {
   const out = detectPumpAndDump({
-    ls: { ratio: 2.5 },
+    globalLs: { ratio: 2.5 },
     topTraders: { positions: [{ long: 0.5 }] } /* >= 0.4 → skip */,
   });
   assert.ok(!out.flags.includes('SMART_VS_RETAIL'));
 });
 
-test('SMART_VS_RETAIL — does NOT fire if retail is not long enough', () => {
+test('SMART_VS_RETAIL — does NOT fire if retail (globalLs) is not long enough', () => {
   const out = detectPumpAndDump({
-    ls: { ratio: 1.9 } /* <= 2 → skip */,
+    globalLs: { ratio: 1.9 } /* <= 2 → skip */,
     topTraders: { positions: [{ long: 0.3 }] },
   });
   assert.ok(!out.flags.includes('SMART_VS_RETAIL'));
 });
 
+test('SMART_VS_RETAIL — does NOT use ls as fallback for the retail half', () => {
+  /* ls is top-trader data; using it for the retail half would re-create
+     the original logical contradiction. The flag must require globalLs. */
+  const out = detectPumpAndDump({
+    ls: { ratio: 2.5 } /* top traders heavy long — not retail */,
+    topTraders: { positions: [{ long: 0.3 }] },
+    /* no globalLs */
+  });
+  assert.ok(
+    !out.flags.includes('SMART_VS_RETAIL'),
+    'must require globalLs explicitly; no ls fallback'
+  );
+});
+
 test('SMART_VS_RETAIL — uses the LATEST position from the array', () => {
   const out = detectPumpAndDump({
-    ls: { ratio: 2.5 },
-    topTraders: { positions: [{ long: 0.5 }, { long: 0.3 }] } /* last is the active one */,
+    globalLs: { ratio: 2.5 },
+    topTraders: { positions: [{ long: 0.5 }, { long: 0.3 }] } /* last is active */,
   });
   assert.ok(out.flags.includes('SMART_VS_RETAIL'));
 });
 
 test('SMART_VS_RETAIL — empty positions array does not fire', () => {
   const out = detectPumpAndDump({
-    ls: { ratio: 2.5 },
+    globalLs: { ratio: 2.5 },
     topTraders: { positions: [] },
   });
   assert.ok(!out.flags.includes('SMART_VS_RETAIL'));
@@ -146,8 +178,16 @@ test('SMART_VS_RETAIL — empty positions array does not fire', () => {
 
 test('SMART_VS_RETAIL — missing topTraders entirely does not fire', () => {
   const out = detectPumpAndDump({
-    ls: { ratio: 2.5 },
+    globalLs: { ratio: 2.5 },
     /* no topTraders */
+  });
+  assert.ok(!out.flags.includes('SMART_VS_RETAIL'));
+});
+
+test('SMART_VS_RETAIL — missing globalLs entirely does not fire', () => {
+  const out = detectPumpAndDump({
+    /* no globalLs */
+    topTraders: { positions: [{ long: 0.3 }] },
   });
   assert.ok(!out.flags.includes('SMART_VS_RETAIL'));
 });

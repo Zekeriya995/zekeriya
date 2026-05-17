@@ -10,11 +10,32 @@
 
      1) VERTICAL          — change >= 15%
      2) FR_EXTREME        — funding rate > 0.1 (% per 8h)
-     3) LS_RETAIL_LONG    — long/short account ratio > 3
+     3) LS_RETAIL_LONG    — retail account long/short ratio > 3
      4) SMART_VS_RETAIL   — top traders short AND retail long (compound)
      5) THIN_PUMP         — change >= 8% AND volume < $30M
 
-   IMPORTANT — runtime reachability of each flag in this PR:
+   Data sources for the LS family (subtle):
+
+     ls          — top-trader POSITION ratio (capital-weighted, from
+                   Binance topLongShortPositionRatio). Read by the
+                   LS_RETAIL_LONG check ONLY when globalLs is absent
+                   — this is the parity fallback for clients without
+                   the retail stream.
+     globalLs    — all-accounts ratio (Binance globalLongShortAccountRatio).
+                   This is the TRUE retail signal. When present, the
+                   LS_RETAIL_LONG check prefers it.
+     topTraders  — top-trader POSITION fractions ({positions:[{long...}]}).
+                   Smart-money positioning. Used by SMART_VS_RETAIL's
+                   "top traders short" half.
+
+   The original client implementation referenced LS[s] (top traders)
+   for both halves of SMART_VS_RETAIL, which made the AND condition
+   logically impossible to satisfy (position long-fraction < 0.4
+   AND position long/short ratio > 2 cannot both hold on the same
+   snapshot). This detector accepts globalLs to fix that contradiction
+   while remaining backward-compatible.
+
+   Runtime reachability of each flag in production:
 
      VERTICAL      DORMANT.  Upstream filter scoreSymbol rejects
                    d.change >= 8 at scanner-engine.js:238 before this
@@ -22,20 +43,13 @@
                    with the client and for the day the upstream
                    filter is restructured.
      FR_EXTREME    LIVE.     ctx.fr is wired in runScannerPass.
-     LS_RETAIL_LONG LIVE.    ctx.ls is wired in runScannerPass.
-     SMART_VS_RETAIL DORMANT. Server does not currently fetch the
-                   top-trader long/short stream; the detector accepts
-                   the data shape and will start firing the flag the
-                   moment the wiring lands (out of scope for Phase
-                   1.1).
+     LS_RETAIL_LONG LIVE.    Reads globalLs when available; falls
+                   back to ls for parity.
+     SMART_VS_RETAIL LIVE (with globalLs).  Requires BOTH topTraders
+                   (top-trader positions) AND globalLs (retail accounts)
+                   to compute the divergence. If either is missing the
+                   flag stays silent.
      THIN_PUMP     DORMANT.  Same upstream filter as VERTICAL.
-
-   So in production this PR adds suppression for the FR_EXTREME and
-   LS_RETAIL_LONG signals, which were previously absent on the
-   server. The 2-flag soft penalty (-25) becomes reachable when both
-   fire on the same coin; the 3-flag kill (-100 floor) requires
-   either the topTraders wiring (later PR) or restructuring the
-   upstream change-pct filter.
 
    Design notes:
    - Pure function — no I/O, no time, no globals. The caller injects
@@ -74,7 +88,11 @@ const SCORE = Object.freeze({
        change:     number  // 24h % change (e.g. +12.5)
        volume:     number  // 24h quote volume in USD
        fr:         { rate: number }  // funding rate, % per 8h
-       ls:         { ratio: number } // global long/short ratio
+       ls:         { ratio: number } // top-trader position ratio
+                                     // (parity fallback for LS_RETAIL_LONG)
+       globalLs:   { ratio: number } // retail account ratio
+                                     // (preferred for LS_RETAIL_LONG and
+                                     //  required for SMART_VS_RETAIL)
        topTraders: { positions: [{ long: number }] } // 0..1 fraction
      }
 
@@ -90,7 +108,7 @@ function detectPumpAndDump(input) {
     return { flags, count: 0, scoreAdjustment: 0 };
   }
 
-  const { change, volume, fr, ls, topTraders } = input;
+  const { change, volume, fr, ls, globalLs, topTraders } = input;
 
   if (typeof change === 'number' && change >= FLAG_THRESHOLDS.VERTICAL_CHANGE_PCT) {
     flags.push('VERTICAL:+' + Math.round(change) + '%');
@@ -100,17 +118,30 @@ function detectPumpAndDump(input) {
     flags.push('FR_EXTREME:' + fr.rate.toFixed(3));
   }
 
-  if (ls && typeof ls.ratio === 'number' && ls.ratio > FLAG_THRESHOLDS.LS_RETAIL_LONG_RATIO) {
-    flags.push('LS_RETAIL_LONG:' + ls.ratio.toFixed(1));
+  /* LS_RETAIL_LONG — prefer globalLs (true retail) when present so the
+     flag reflects retail euphoria. Fall back to ls (top-trader positions)
+     when globalLs is missing, to preserve parity with clients that have
+     not yet adopted the retail stream. */
+  const retailLsRatio =
+    globalLs && typeof globalLs.ratio === 'number'
+      ? globalLs.ratio
+      : ls && typeof ls.ratio === 'number'
+        ? ls.ratio
+        : null;
+  if (retailLsRatio !== null && retailLsRatio > FLAG_THRESHOLDS.LS_RETAIL_LONG_RATIO) {
+    flags.push('LS_RETAIL_LONG:' + retailLsRatio.toFixed(1));
   }
 
+  /* SMART_VS_RETAIL — divergence between smart-money positioning (top
+     trader long fraction) and retail-heavy sentiment (global accounts).
+     Requires BOTH inputs: if either is absent the flag stays silent. */
   if (
     topTraders &&
     Array.isArray(topTraders.positions) &&
     topTraders.positions.length > 0 &&
-    ls &&
-    typeof ls.ratio === 'number' &&
-    ls.ratio > FLAG_THRESHOLDS.SMART_LS_RATIO_ABOVE
+    globalLs &&
+    typeof globalLs.ratio === 'number' &&
+    globalLs.ratio > FLAG_THRESHOLDS.SMART_LS_RATIO_ABOVE
   ) {
     const last = topTraders.positions[topTraders.positions.length - 1];
     if (

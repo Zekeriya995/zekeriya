@@ -17,7 +17,7 @@
    IMPORTANT — runtime reachability of each flag in this PR:
 
      VERTICAL      DORMANT.  Upstream filter scoreSymbol rejects
-                   d.change >= 8 at scanner-engine.js:219 before this
+                   d.change >= 8 at scanner-engine.js:238 before this
                    detector runs. The flag is defined for symmetry
                    with the client and for the day the upstream
                    filter is restructured.

@@ -180,13 +180,19 @@ if (LS[s] && LS[s].ratio > 3) {
   zero flags; a coin at 3.0 fires one — and may flip the total over
   the `pdFlags >= 3` kill-line. Hard cliffs around continuous data
   are a known source of false negatives.
-- **Verdict.** **PORT-WITH-WIDER-BAND**. Recommend the server-side
-  port use `> 2.5` instead of `> 3`, OR a graduated weighting
-  (`>= 3 → 1.0 flag`, `>= 2.5 → 0.5 flag`). The widening yields
-  earlier suppression on borderline retail-heavy coins. Document the
-  change in the Phase 1.1 commit message and CHANGELOG. Confidence
-  **Medium-Low** — happy to revert if the tag-stats endpoint (P3.1)
-  shows the new threshold over-suppresses.
+- **Verdict.** **PORT-WITH-WIDER-BAND** (recommended). Recommend
+  the server-side port use `> 2.5` instead of `> 3`, OR a graduated
+  weighting (`>= 3 → 1.0 flag`, `>= 2.5 → 0.5 flag`). The widening
+  yields earlier suppression on borderline retail-heavy coins.
+  Confidence **Medium-Low** — happy to revert if the tag-stats
+  endpoint (P3.1) shows the new threshold over-suppresses.
+- **As-shipped in Phase 1.1.** The server detector
+  (`src/scanner-pd-detector.js`) lands with the **unchanged client
+  threshold of `> 3`** to preserve strict parity with the client
+  pending Ziko's explicit reply to §8. If §8 returns "Approved §5
+  verdicts", a one-line follow-up PR flips
+  `FLAG_THRESHOLDS.LS_RETAIL_LONG_RATIO` to `2.5` and updates the
+  test boundary assertion.
 
 ---
 

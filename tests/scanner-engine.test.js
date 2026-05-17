@@ -508,3 +508,79 @@ test('Phase 1.2 — ULTRA-scoring signal with LOW manipulation stays ULTRA', () 
   assert.equal(r.tier, 'ULTRA');
   assert.ok(!r.tags.includes('🚫MANIP_CAP'));
 });
+
+test('Phase 1.2 — capped tier does NOT modify the raw score field', () => {
+  /* Documented intent in scanner-engine.js: tier is downgraded, but
+     `score` itself is preserved so /api/all consumers that sort by
+     raw score keep the natural ordering. Locks the contract. */
+  const r = ultraButManipHigh();
+  assert.equal(r.tier, 'STRONG');
+  assert.ok(r.score >= 100, 'score must remain at the pre-cap value (got ' + r.score + ')');
+});
+
+/* ─── Phase 1.1 — P&D detector wiring inside scoreSymbol ───────── */
+
+/* The detector itself is exhaustively covered in
+   tests/scanner-pd-detector.test.js (35 tests). These three tests
+   cover the integration path only: does scoreSymbol invoke the
+   detector with the right ctx fields, push the right tag, and
+   apply the right score adjustment? */
+
+test('Phase 1.1 — P&D 2-flag combo emits P&D_WARN tag and applies -25', () => {
+  /* FR_EXTREME (fr.rate > 0.1) + LS_RETAIL_LONG (ls.ratio > 3) →
+     2 flags → -25 soft penalty + warn tag. Use a low-score ticker
+     so existing FR⚠️ (-8) doesn't drown the assertion. */
+  const baseline = scoreSymbol('NEWCOIN', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    oi: 50_000_000,
+  });
+  const withPD = scoreSymbol('NEWCOIN', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    oi: 50_000_000,
+    fr: { rate: 0.15 } /* FR_EXTREME + existing FR⚠️ -8 */,
+    ls: { ratio: 3.5 } /* LS_RETAIL_LONG */,
+  });
+  assert.ok(baseline && withPD);
+  assert.ok(withPD.tags.some((t) => t.startsWith('⚠️P&D_WARN')));
+  assert.ok(!withPD.tags.some((t) => t.startsWith('🚨P&D_RISK')));
+  /* Score delta: -8 (FR⚠️) + -25 (P&D 2-flag) = -33 vs. baseline. */
+  assert.ok(
+    baseline.score - withPD.score >= 30,
+    'P&D 2-flag penalty + FR⚠️ should drop score by >= 30 (got ' +
+      (baseline.score - withPD.score) +
+      ')'
+  );
+});
+
+test('Phase 1.1 — P&D detector with only one flag emits no P&D tag', () => {
+  const r = scoreSymbol('NEWCOIN', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    oi: 50_000_000,
+    fr: { rate: 0.15 } /* FR_EXTREME only — 1 flag */,
+  });
+  assert.ok(r);
+  assert.ok(!r.tags.some((t) => t.startsWith('⚠️P&D_WARN')));
+  assert.ok(!r.tags.some((t) => t.startsWith('🚨P&D_RISK')));
+});
+
+test('Phase 1.1 — P&D 3+ flags emit P&D_RISK tag and floor score', () => {
+  /* Reach 3 flags via FR_EXTREME + LS_RETAIL_LONG + SMART_VS_RETAIL.
+     SMART_VS_RETAIL needs ls.ratio > 2 (already satisfied) plus
+     topTraders.positions[-1].long < 0.4. The wiring at
+     scanner-engine.js passes ctx.topTraders straight through to
+     the detector, so populating it here triggers the third flag.
+     Result: 3 flags → KILL → score floored at -100 → quality
+     gate at runScannerPass drops the symbol. Test asserts the
+     wiring not the downstream filter, so we call scoreSymbol
+     directly and observe the raw return. */
+  const r = scoreSymbol('NEWCOIN', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    oi: 50_000_000,
+    fr: { rate: 0.15 } /* FR_EXTREME */,
+    ls: { ratio: 3.5 } /* LS_RETAIL_LONG + > 2 for SMART_VS_RETAIL */,
+    topTraders: { positions: [{ long: 0.3 }] } /* < 0.4 → SMART_VS_RETAIL */,
+  });
+  assert.ok(r);
+  assert.ok(r.tags.some((t) => t.startsWith('🚨P&D_RISK')));
+  assert.ok(r.score <= -100, 'KILL should floor score at -100 or lower (got ' + r.score + ')');
+});

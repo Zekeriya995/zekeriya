@@ -1,5 +1,55 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Review Fixes — pre-merge polish] — 2026-05-16
+
+**No behaviour change.** Closes the NITs surfaced by the self-review
+pass before merge — documentation, line refs, test coverage gaps.
+
+### Added
+
+- `tests/scanner-engine.test.js` — 4 new integration tests:
+  - P&D 2-flag combo emits `⚠️P&D_WARN:N/5` tag and drops score by
+    >= 30 (covers detector wiring inside `scoreSymbol`).
+  - P&D 1-flag emits no tag (negative case).
+  - P&D 3-flag combo (including SMART_VS_RETAIL via injected
+    `topTraders`) emits `🚨P&D_RISK:N/5` and floors score at -100.
+  - MANIP_CAP downgrade does NOT modify the raw `score` field (locks
+    the documented "tier capped, score preserved" contract).
+
+### Changed
+
+- `src/scanner-pd-detector.js` header + `CHANGELOG.md` Phase 1.1 entry:
+  fixed off-by-19 line ref (`scanner-engine.js:219` → `:238` — the actual
+  location of the `d.change >= 8` early reject).
+- `src/scanner-engine.js` Phase 1.2 block: added a clarifying comment
+  explaining that `score` is intentionally NOT capped, only the
+  published `tier`. Tied directly to the new contract test.
+- `docs/SCANNER_PD_THRESHOLDS.md` §3.3: added an "as-shipped" note
+  clarifying that the `LS_RETAIL_LONG_RATIO` was kept at `> 3` in
+  Phase 1.1 (preserving client parity) rather than the `> 2.5`
+  widening §5 recommends. The widening lands in a one-line follow-up
+  PR contingent on Ziko's `Approved §5 verdicts` reply.
+- `.env.example` Scanner Remediation Flags block: added `LIVE` /
+  `RSVD` status legend next to each flag so future reads of `.env.example`
+  see at a glance which are wired and which are placeholders for
+  Phase 2 / Phase 4.
+- `data/scanner-baseline-2026-05-15.json` note: updated to reflect
+  the as-shipped state — Phase 1.1 went out with the placeholder
+  still in place; the note now flags the post-deploy `npm run snapshot`
+  as the next action item rather than a pre-condition.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 303 / 303 pass (was 299 + 4).
+- `npx prettier --check .` → clean.
+
+### References
+
+- Self-review pass on 2026-05-16 surfaced 6 NITs + 4 NOTEs, 0 BLOCKERs.
+- This commit addresses every actionable NIT.
+
+---
+
 ## [Scanner Phase 3.1 — Per-tag win-rate endpoint] — 2026-05-16
 
 **New observability endpoint.** Implements P3.1 from
@@ -214,7 +264,7 @@ applies).
 
 | Flag | Reachable today? | Why / how to enable |
 |------|------------------|---------------------|
-| VERTICAL | ❌ dormant | Upstream `d.change >= 8` reject at scanner-engine.js:219 fires first |
+| VERTICAL | ❌ dormant | Upstream `d.change >= 8` reject at scanner-engine.js:238 fires first |
 | FR_EXTREME | ✅ live | `ctx.fr` populated from cache.fr |
 | LS_RETAIL_LONG | ✅ live | `ctx.ls` populated from cache.ls |
 | SMART_VS_RETAIL | ❌ dormant | `cache.topTraders` not fetched yet — wiring future PR |

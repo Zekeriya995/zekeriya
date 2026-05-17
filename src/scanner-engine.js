@@ -573,7 +573,14 @@ function scoreSymbol(sym, ctx) {
      downgrades any would-be ULTRA to STRONG so the push trigger
      (which only fires on ULTRA) never alerts users to a sketchy
      coin, no matter how strong the rest of the signal looks.
-     Tag the override so the UI can explain the downgrade. */
+     Tag the override so the UI can explain the downgrade.
+
+     Intentional: `score` itself is NOT capped, only the published
+     tier. A 102-score MANIP_HIGH coin still serves score=102 in
+     /api/all so any UI that sorts by raw score keeps the natural
+     ordering and the MANIP_CAP tag makes the override explainable.
+     Consumers that gate on tier (push trigger, badge color) get
+     the demotion; consumers that gate on score do not. */
   let tier = _tierFromScore(score);
   if (MANIP_HARD_CAP_ENABLED && manip.verdict === 'HIGH' && tier === 'ULTRA') {
     tier = 'STRONG';

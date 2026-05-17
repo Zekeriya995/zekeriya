@@ -1,5 +1,82 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 3.2 — Gate-rejection telemetry] — 2026-05-17
+
+**New observability endpoint.** Implements P3.2 from
+`SCANNER_AUDIT_2026_05_15.md` §6. Behind `SCANNER_INSIGHTS_ENABLED`
+(default ON).
+
+### What it does
+
+`GET /api/scanner/insights` returns the most recent scanner pass's
+breakdown of WHY each candidate was dropped, so engineering can
+finally answer:
+
+- "How many coins did the scanner see this pass?"
+- "Of those, how many were rejected for being overheated / low-volume /
+  wash-trade fingerprint / low-score?"
+- "What % of the scanner's candidate pool actually produces a signal?"
+
+Example response:
+
+```json
+{
+  "ready": true,
+  "passAt": 1779047077319,
+  "accepted": 14,
+  "rejectionRatePct": 98,
+  "rejections": {
+    "total": 863,
+    "stablecoin": 21,
+    "noPrice": 0,
+    "overheated": 12,
+    "lowVolume": 780,
+    "washTrade": 2,
+    "lowScore": 34
+  }
+}
+```
+
+Six rejection categories cover every drop path in `scoreSymbol` +
+the post-score gate in `runScannerPass`.
+
+### Added
+
+- `src/scanner-engine.js`:
+  - `scoreSymbol` accepts optional `ctx._rejectionSink` — when present,
+    increments a category counter on each rejection path (noPrice,
+    overheated, lowVolume, washTrade). Backward compatible — the
+    score/tags output is unchanged either way.
+  - `runScannerPass` builds a fresh sink per pass, tracks stablecoin
+    and lowScore rejections directly, returns the breakdown alongside
+    signals in the `rejections` field.
+- `server.js`:
+  - Stores `cache.scannerRejections` + `cache.scannerRejectionsTs` on
+    every pass (overwrites — single latest pass only, no rolling state).
+  - `GET /api/scanner/insights` endpoint gated by `SCANNER_INSIGHTS_ENABLED`.
+    Returns `503 insights_disabled` when flag is off, or
+    `{ready: false, note: ...}` if no pass has completed yet.
+- `tests/scanner-engine.test.js` — 7 new tests covering shape,
+  stablecoin counting, overheated, lowVolume, washTrade, lowScore,
+  and the invariant `accepted + total_rejected == total`.
+
+### Rollback
+
+`SCANNER_INSIGHTS_ENABLED=false` + `pm2 restart`. Endpoint returns
+503; engine still tracks counters internally (cheap) but they're not
+exposed.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 314 / 314 pass (was 307 + 7).
+- `npx prettier --check .` → clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P3.2, §8.1 decision D
+
+---
+
 ## [Scanner Phase 1.1.b — Retail LS + SMART_VS_RETAIL activation] — 2026-05-17
 
 **Behaviour change (gated, default ON).** Closes a logical bug

@@ -628,6 +628,11 @@ async function runScannerOnServer() {
   }
   cache.signals = pass.signals;
   cache.top3 = pass.top3;
+  /* Phase 3.2 — overwrite with latest pass's rejection breakdown so
+     /api/scanner/insights serves a fresh per-pass picture instead of
+     a stale or cumulative one. */
+  cache.scannerRejections = pass.rejections;
+  cache.scannerRejectionsTs = pass.ts;
   cache.scannerTs = pass.ts;
   cache.lastUpdate.scanner = pass.ts;
 
@@ -2147,6 +2152,35 @@ app.get('/api/alerts', (req, res) => {
    extension — entries recorded before that deploy have no tags
    and are counted in `totalWithoutTags` but contribute to no
    per-tag bucket. */
+/* Phase 3.2 — gate-rejection telemetry. Returns the most recent
+   scanner pass's breakdown of why each candidate was dropped.
+   Gated by SCANNER_INSIGHTS_ENABLED. Default ON. The payload reflects
+   only the LAST pass (refreshed every CONFIG.SCANNER_INTERVAL) so
+   the numbers are inherently fresh — no rolling-window state to
+   maintain. */
+const INSIGHTS_ENABLED = process.env.SCANNER_INSIGHTS_ENABLED !== 'false';
+app.get('/api/scanner/insights', (req, res) => {
+  if (!INSIGHTS_ENABLED) return res.status(503).json({ error: 'insights_disabled' });
+  if (!cache.scannerRejections) {
+    return res.json({
+      ready: false,
+      note: 'No scanner pass has completed yet since boot.',
+    });
+  }
+  const r = cache.scannerRejections;
+  const accepted = (cache.signals || []).length;
+  res.json({
+    ready: true,
+    passAt: cache.scannerRejectionsTs,
+    accepted: accepted,
+    rejections: r,
+    /* Convenience percentages — rounded ints, sum may not equal 100
+       due to rounding. Computed from r.total (all candidates) so
+       (acceptedPct + sum(rejectionPcts)) ≈ 100. */
+    rejectionRatePct: r.total > 0 ? Math.round(((r.total - accepted) / r.total) * 100) : 0,
+  });
+});
+
 const TAG_STATS_ENABLED = process.env.SCANNER_TAG_STATS_ENABLED !== 'false';
 app.get('/api/scanner/tag-stats', (req, res) => {
   if (!TAG_STATS_ENABLED) return res.status(503).json({ error: 'tag_stats_disabled' });

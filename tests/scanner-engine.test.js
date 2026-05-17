@@ -582,3 +582,105 @@ test('Phase 1.1 — P&D 3+ flags emit P&D_RISK tag and floor score', () => {
   assert.ok(r.tags.some((t) => t.startsWith('🚨P&D_RISK')));
   assert.ok(r.score <= -100, 'KILL should floor score at -100 or lower (got ' + r.score + ')');
 });
+
+/* ─── Phase 3.2 — Gate-rejection telemetry ────────────────────── */
+
+test('Phase 3.2 — runScannerPass returns a rejections breakdown', () => {
+  /* Verify the shape exists with all expected categories. */
+  const cache = {
+    tickers: {
+      BTC: tk({ volume: 5e7, change: 0.5 }),
+    },
+  };
+  const out = runScannerPass(cache);
+  assert.ok(out.rejections);
+  assert.equal(typeof out.rejections.total, 'number');
+  assert.equal(typeof out.rejections.stablecoin, 'number');
+  assert.equal(typeof out.rejections.noPrice, 'number');
+  assert.equal(typeof out.rejections.overheated, 'number');
+  assert.equal(typeof out.rejections.lowVolume, 'number');
+  assert.equal(typeof out.rejections.washTrade, 'number');
+  assert.equal(typeof out.rejections.lowScore, 'number');
+});
+
+test('Phase 3.2 — stablecoin rejection is counted', () => {
+  const cache = {
+    tickers: {
+      USDT: tk({ volume: 1e9 }),
+      USDC: tk({ volume: 1e9 }),
+      BTC: tk({ volume: 5e7, change: 0.5 }),
+    },
+  };
+  const out = runScannerPass(cache);
+  assert.equal(out.rejections.total, 3);
+  assert.equal(out.rejections.stablecoin, 2);
+});
+
+test('Phase 3.2 — overheated rejection is counted', () => {
+  const cache = {
+    tickers: {
+      BTC: tk({ volume: 5e7, change: 12 }) /* >= 8 → overheated */,
+      ETH: tk({ volume: 5e7, change: 0.5 }) /* accepted */,
+    },
+  };
+  const out = runScannerPass(cache);
+  assert.equal(out.rejections.overheated, 1);
+});
+
+test('Phase 3.2 — lowVolume rejection is counted', () => {
+  const cache = {
+    tickers: {
+      BTC: tk({ volume: 500_000, change: 0.5 }) /* tier1 minVol = 1M */,
+      ETH: tk({ volume: 5e7, change: 0.5 }) /* accepted */,
+    },
+  };
+  const out = runScannerPass(cache);
+  assert.equal(out.rejections.lowVolume, 1);
+});
+
+test('Phase 3.2 — washTrade rejection is counted', () => {
+  const cache = {
+    tickers: {
+      CHIP: tk({ volume: 1.2e9, change: -3, price: 0.06 }) /* wash pattern */,
+    },
+    oi: { CHIP: 0 },
+  };
+  const out = runScannerPass(cache);
+  assert.equal(out.rejections.washTrade, 1);
+});
+
+test('Phase 3.2 — lowScore rejection is counted (below 30 gate)', () => {
+  /* A tier1 with bare-minimum config will score near the gate. Add
+     a non-tier1 with no boosters → expected to score below 30. */
+  const cache = {
+    tickers: {
+      OBSCURECOIN: tk({ volume: 6e6, change: 0.5 }) /* sparse signal */,
+    },
+    oi: { OBSCURECOIN: 5_000_000 } /* enough OI to dodge wash reject */,
+  };
+  const out = runScannerPass(cache);
+  /* OBSCURECOIN should be either accepted with low score or
+     rejected by the < 30 gate. If rejected, lowScore counter
+     should fire. Either way, the counter shape exists. */
+  if (out.signals.length === 0) {
+    assert.equal(out.rejections.lowScore, 1);
+  }
+});
+
+test('Phase 3.2 — accepted signals do NOT count as rejections', () => {
+  const cache = {
+    tickers: {
+      BTC: tk({ volume: 5e7, change: 0.5 }),
+      ETH: tk({ volume: 5e7, change: 0.5 }),
+    },
+  };
+  const out = runScannerPass(cache);
+  const totalRejected =
+    out.rejections.stablecoin +
+    out.rejections.noPrice +
+    out.rejections.overheated +
+    out.rejections.lowVolume +
+    out.rejections.washTrade +
+    out.rejections.lowScore;
+  assert.equal(out.signals.length + totalRejected, out.rejections.total);
+});

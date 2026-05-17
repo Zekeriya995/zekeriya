@@ -11,6 +11,7 @@ const assert = require('node:assert/strict');
 const {
   EVAL_AFTER_MS,
   RECORD_COOLDOWN_MS,
+  MAX_TAGS,
   loadHistory,
   recordSignal,
   evaluateOpenSignals,
@@ -85,6 +86,46 @@ test('recordSignal — caps at MAX_HISTORY (oldest dropped)', () => {
   }
   assert.equal(h.length, 1000);
   assert.equal(h[0].s, 'S100', 'oldest 100 entries should have been dropped');
+});
+
+/* ─── recordSignal — tags persistence (Phase 1.0b) ─────────────── */
+
+test('recordSignal — sig.tags is persisted on the entry', () => {
+  const h = [];
+  const sig = { ...ultra('BTC'), tags: ['🚀VERTICAL', '🔥FR_EXTREME', 'BTC✅'] };
+  recordSignal(h, sig, NOW);
+  assert.deepEqual(h[0].tags, ['🚀VERTICAL', '🔥FR_EXTREME', 'BTC✅']);
+});
+
+test('recordSignal — missing sig.tags defaults to empty array', () => {
+  const h = [];
+  recordSignal(h, ultra('BTC'), NOW); /* no tags property at all */
+  assert.deepEqual(h[0].tags, []);
+});
+
+test('recordSignal — non-array sig.tags coerced to empty array', () => {
+  const h = [];
+  recordSignal(h, { ...ultra('BTC'), tags: 'not-an-array' }, NOW);
+  assert.deepEqual(h[0].tags, []);
+  recordSignal(h, { ...ultra('ETH'), tags: null }, NOW);
+  assert.deepEqual(h[1].tags, []);
+});
+
+test('recordSignal — sig.tags is capped at MAX_TAGS', () => {
+  const h = [];
+  const bloated = Array.from({ length: MAX_TAGS + 50 }, (_, i) => 'TAG' + i);
+  recordSignal(h, { ...ultra('BTC'), tags: bloated }, NOW);
+  assert.equal(h[0].tags.length, MAX_TAGS);
+  assert.equal(h[0].tags[0], 'TAG0');
+  assert.equal(h[0].tags[MAX_TAGS - 1], 'TAG' + (MAX_TAGS - 1));
+});
+
+test('recordSignal — tags array is independent (slice, not reference)', () => {
+  const h = [];
+  const tags = ['A', 'B'];
+  recordSignal(h, { ...ultra('BTC'), tags }, NOW);
+  tags.push('C'); /* mutate caller's array AFTER recording */
+  assert.deepEqual(h[0].tags, ['A', 'B'], 'recorded tags should not see post-record mutation');
 });
 
 /* ─── evaluateOpenSignals ─────────────────────────────────────────── */

@@ -18,6 +18,25 @@
 
 'use strict';
 
+const pdDetector = require('./scanner-pd-detector');
+
+/* Server-side P&D detector kill-switch. Default ON; set
+   SCANNER_SERVER_PD_ENABLED=false in the env for instant rollback
+   without removing the wiring. Read once at module load — pm2
+   restart required to flip. See SCANNER_AUDIT_2026_05_15.md §8.1
+   decision D and docs/SCANNER_PD_THRESHOLDS.md. */
+const PD_DETECTOR_ENABLED = process.env.SCANNER_SERVER_PD_ENABLED !== 'false';
+
+/* Manipulation HIGH → tier hard-cap kill-switch (Phase 1.2).
+   When ON, any signal whose manipulation verdict is HIGH cannot
+   tier above STRONG, even if its raw score would otherwise reach
+   ULTRA (>= 100). Without this cap, the existing -15 score
+   penalty on HIGH was sometimes recoverable for a strong setup
+   and the symbol would still publish as ULTRA — which is exactly
+   the failure mode the audit (§2.4) flagged. Default ON; set
+   SCANNER_MANIP_HARD_CAP=false to roll back. */
+const MANIP_HARD_CAP_ENABLED = process.env.SCANNER_MANIP_HARD_CAP !== 'false';
+
 const STABLE_SET = new Set([
   /* Established stablecoins */
   'USDT',
@@ -509,6 +528,31 @@ function scoreSymbol(sym, ctx) {
     tags.push('⚠️MANIP_MED');
   }
 
+  /* Pump & Dump risk detector (Phase 1.1). Mirrors the client-side
+     detector at app.js:2459-2476 so the server never publishes an
+     ULTRA push on a coin that the client would have suppressed.
+     Today only FR_EXTREME and LS_RETAIL_LONG are reachable on the
+     server — see src/scanner-pd-detector.js header for why
+     VERTICAL / SMART_VS_RETAIL / THIN_PUMP are dormant in this PR.
+     Behind PD_DETECTOR_ENABLED so we can roll back instantly via
+     SCANNER_SERVER_PD_ENABLED=false. */
+  if (PD_DETECTOR_ENABLED) {
+    const pd = pdDetector.detectPumpAndDump({
+      change: d.change,
+      volume: d.volume,
+      fr: ctx.fr,
+      ls: ctx.ls,
+      topTraders: ctx.topTraders,
+    });
+    if (pd.flags.length >= 3) {
+      score = pdDetector.applyToScore(score, pd);
+      tags.push('🚨P&D_RISK:' + pd.count + '/5');
+    } else if (pd.flags.length === 2) {
+      score = pdDetector.applyToScore(score, pd);
+      tags.push('⚠️P&D_WARN:' + pd.count + '/5');
+    }
+  }
+
   /* Risk/Reward levels. Computing them server-side means the PWA
      can render entry/SL/TP cards without re-deriving the maths on
      every device, and downstream consumers (Paper Trading, push
@@ -524,11 +568,30 @@ function scoreSymbol(sym, ctx) {
      recomputing. */
   const rr = 5 / 3;
 
+  /* Tier resolution. The score → tier mapping is straightforward
+     except for the Phase 1.2 hard-cap: a HIGH manipulation verdict
+     downgrades any would-be ULTRA to STRONG so the push trigger
+     (which only fires on ULTRA) never alerts users to a sketchy
+     coin, no matter how strong the rest of the signal looks.
+     Tag the override so the UI can explain the downgrade.
+
+     Intentional: `score` itself is NOT capped, only the published
+     tier. A 102-score MANIP_HIGH coin still serves score=102 in
+     /api/all so any UI that sorts by raw score keeps the natural
+     ordering and the MANIP_CAP tag makes the override explainable.
+     Consumers that gate on tier (push trigger, badge color) get
+     the demotion; consumers that gate on score do not. */
+  let tier = _tierFromScore(score);
+  if (MANIP_HARD_CAP_ENABLED && manip.verdict === 'HIGH' && tier === 'ULTRA') {
+    tier = 'STRONG';
+    tags.push('🚫MANIP_CAP');
+  }
+
   return {
     s: sym,
     score: Math.round(score * 10) / 10,
     tags: tags,
-    tier: _tierFromScore(score),
+    tier: tier,
     direction: _directionLabel(score, d.change),
     price: d.price,
     change: d.change,
@@ -570,6 +633,11 @@ function runScannerPass(cache) {
       taker: cache.taker ? cache.taker[sym] : null,
       depth: cache.depth ? cache.depth[sym] : null,
       oi: cache.oi ? cache.oi[sym] : null,
+      /* topTraders feeds the P&D detector's SMART_VS_RETAIL flag.
+         Server doesn't currently populate cache.topTraders, so the
+         flag stays dormant. Wired here so future PRs that add the
+         data source get the suppression for free. */
+      topTraders: cache.topTraders ? cache.topTraders[sym] : null,
       coinalyzeOI: czOI[sym] || null,
       coinalyzeFR: czFR[sym] || null,
       hyperliquid: hl[sym] || null,

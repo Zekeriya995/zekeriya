@@ -436,3 +436,151 @@ test('runScannerPass — multi-exchange context flows through to scoring', () =>
     'enrichment should raise the score'
   );
 });
+
+/* ─── Phase 1.2 — Manipulation HIGH tier hard-cap ─────────────── */
+
+/* Build a scenario where a non-tier1 coin scores high enough to
+   reach ULTRA AND triggers a HIGH manipulation verdict. The
+   stacked bonuses (whale A, MTF bullish, indicators, bitfinex)
+   push the score over 100; the penny price + extreme funding +
+   spoofed book imbalance push manipulation risk over 50. */
+function ultraButManipHigh() {
+  return scoreSymbol('SHADYCOIN', {
+    ticker: { price: 0.005, change: 0.5, volume: 2e8, high: 0.005, low: 0.005 },
+    fr: { rate: 0.6 } /* extreme funding → +20 manip risk + FR⚠️ -8 */,
+    whaleWave: { engine: { rank: 'A' } } /* +20 */,
+    mtfAgreement: { strength: 'full', agreement: 'bullish' } /* +15 */,
+    indicator: { rsi: 25, macd: { cross: 'bull' } } /* +10 + +12 */,
+    bitfinex: { longPct: 70 } /* +6 */,
+    depth: {
+      bids: [['1000', '1']] /* total 1000 */,
+      asks: [['10', '0.01']] /* total 0.1 → ratio 10000:1 */,
+    },
+  });
+}
+
+test('Phase 1.2 — manipulation HIGH caps an ULTRA-scoring signal at STRONG', () => {
+  const r = ultraButManipHigh();
+  assert.ok(r, 'fixture should produce a signal');
+  assert.equal(r.manipulationRisk.verdict, 'HIGH', 'fixture should trigger HIGH manipulation');
+  assert.ok(r.score >= 100, 'pre-cap score should reach the ULTRA cutoff (got ' + r.score + ')');
+  assert.equal(r.tier, 'STRONG', 'tier must be capped at STRONG, not ULTRA');
+  assert.ok(r.tags.includes('🚫MANIP_CAP'), 'cap tag must be present so the UI can explain it');
+});
+
+test('Phase 1.2 — non-ULTRA score with HIGH manipulation does NOT add the cap tag', () => {
+  /* Same penny / funding / book setup but without the score
+     boosters. Manipulation is still HIGH, but the tier was already
+     below ULTRA so the cap is irrelevant — and the tag must not
+     fire (otherwise users would see it on every shady gray-zone
+     symbol regardless of tier). */
+  const r = scoreSymbol('SHADYCOIN', {
+    ticker: { price: 0.005, change: 0.5, volume: 2e8, high: 0.005, low: 0.005 },
+    fr: { rate: 0.6 },
+    depth: {
+      bids: [['1000', '1']],
+      asks: [['10', '0.01']],
+    },
+  });
+  assert.ok(r);
+  assert.equal(r.manipulationRisk.verdict, 'HIGH');
+  assert.notEqual(r.tier, 'ULTRA');
+  assert.ok(
+    !r.tags.includes('🚫MANIP_CAP'),
+    'cap tag should not appear when tier was not ULTRA in the first place'
+  );
+});
+
+test('Phase 1.2 — ULTRA-scoring signal with LOW manipulation stays ULTRA', () => {
+  /* Tier-1 BTC with the same boosters but no manipulation flags →
+     verifies the cap does not over-trigger on clean signals. */
+  const r = scoreSymbol('BTC', {
+    ticker: tk({ volume: 2e9, change: 0.5 }),
+    whaleWave: { engine: { rank: 'A' } },
+    mtfAgreement: { strength: 'full', agreement: 'bullish' },
+    indicator: { rsi: 25, macd: { cross: 'bull' } },
+    coinalyzeFR: { rate: -0.02 },
+    bitfinex: { longPct: 70 },
+  });
+  assert.ok(r);
+  assert.notEqual(r.manipulationRisk.verdict, 'HIGH');
+  assert.ok(r.score >= 100, 'BTC fixture should reach ULTRA (got ' + r.score + ')');
+  assert.equal(r.tier, 'ULTRA');
+  assert.ok(!r.tags.includes('🚫MANIP_CAP'));
+});
+
+test('Phase 1.2 — capped tier does NOT modify the raw score field', () => {
+  /* Documented intent in scanner-engine.js: tier is downgraded, but
+     `score` itself is preserved so /api/all consumers that sort by
+     raw score keep the natural ordering. Locks the contract. */
+  const r = ultraButManipHigh();
+  assert.equal(r.tier, 'STRONG');
+  assert.ok(r.score >= 100, 'score must remain at the pre-cap value (got ' + r.score + ')');
+});
+
+/* ─── Phase 1.1 — P&D detector wiring inside scoreSymbol ───────── */
+
+/* The detector itself is exhaustively covered in
+   tests/scanner-pd-detector.test.js (35 tests). These three tests
+   cover the integration path only: does scoreSymbol invoke the
+   detector with the right ctx fields, push the right tag, and
+   apply the right score adjustment? */
+
+test('Phase 1.1 — P&D 2-flag combo emits P&D_WARN tag and applies -25', () => {
+  /* FR_EXTREME (fr.rate > 0.1) + LS_RETAIL_LONG (ls.ratio > 3) →
+     2 flags → -25 soft penalty + warn tag. Use a low-score ticker
+     so existing FR⚠️ (-8) doesn't drown the assertion. */
+  const baseline = scoreSymbol('NEWCOIN', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    oi: 50_000_000,
+  });
+  const withPD = scoreSymbol('NEWCOIN', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    oi: 50_000_000,
+    fr: { rate: 0.15 } /* FR_EXTREME + existing FR⚠️ -8 */,
+    ls: { ratio: 3.5 } /* LS_RETAIL_LONG */,
+  });
+  assert.ok(baseline && withPD);
+  assert.ok(withPD.tags.some((t) => t.startsWith('⚠️P&D_WARN')));
+  assert.ok(!withPD.tags.some((t) => t.startsWith('🚨P&D_RISK')));
+  /* Score delta: -8 (FR⚠️) + -25 (P&D 2-flag) = -33 vs. baseline. */
+  assert.ok(
+    baseline.score - withPD.score >= 30,
+    'P&D 2-flag penalty + FR⚠️ should drop score by >= 30 (got ' +
+      (baseline.score - withPD.score) +
+      ')'
+  );
+});
+
+test('Phase 1.1 — P&D detector with only one flag emits no P&D tag', () => {
+  const r = scoreSymbol('NEWCOIN', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    oi: 50_000_000,
+    fr: { rate: 0.15 } /* FR_EXTREME only — 1 flag */,
+  });
+  assert.ok(r);
+  assert.ok(!r.tags.some((t) => t.startsWith('⚠️P&D_WARN')));
+  assert.ok(!r.tags.some((t) => t.startsWith('🚨P&D_RISK')));
+});
+
+test('Phase 1.1 — P&D 3+ flags emit P&D_RISK tag and floor score', () => {
+  /* Reach 3 flags via FR_EXTREME + LS_RETAIL_LONG + SMART_VS_RETAIL.
+     SMART_VS_RETAIL needs ls.ratio > 2 (already satisfied) plus
+     topTraders.positions[-1].long < 0.4. The wiring at
+     scanner-engine.js passes ctx.topTraders straight through to
+     the detector, so populating it here triggers the third flag.
+     Result: 3 flags → KILL → score floored at -100 → quality
+     gate at runScannerPass drops the symbol. Test asserts the
+     wiring not the downstream filter, so we call scoreSymbol
+     directly and observe the raw return. */
+  const r = scoreSymbol('NEWCOIN', {
+    ticker: tk({ volume: 5e7, change: 0.5 }),
+    oi: 50_000_000,
+    fr: { rate: 0.15 } /* FR_EXTREME */,
+    ls: { ratio: 3.5 } /* LS_RETAIL_LONG + > 2 for SMART_VS_RETAIL */,
+    topTraders: { positions: [{ long: 0.3 }] } /* < 0.4 → SMART_VS_RETAIL */,
+  });
+  assert.ok(r);
+  assert.ok(r.tags.some((t) => t.startsWith('🚨P&D_RISK')));
+  assert.ok(r.score <= -100, 'KILL should floor score at -100 or lower (got ' + r.score + ')');
+});

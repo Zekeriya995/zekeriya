@@ -1,5 +1,378 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Review Fixes — pre-merge polish] — 2026-05-16
+
+**No behaviour change.** Closes the NITs surfaced by the self-review
+pass before merge — documentation, line refs, test coverage gaps.
+
+### Added
+
+- `tests/scanner-engine.test.js` — 4 new integration tests:
+  - P&D 2-flag combo emits `⚠️P&D_WARN:N/5` tag and drops score by
+    >= 30 (covers detector wiring inside `scoreSymbol`).
+  - P&D 1-flag emits no tag (negative case).
+  - P&D 3-flag combo (including SMART_VS_RETAIL via injected
+    `topTraders`) emits `🚨P&D_RISK:N/5` and floors score at -100.
+  - MANIP_CAP downgrade does NOT modify the raw `score` field (locks
+    the documented "tier capped, score preserved" contract).
+
+### Changed
+
+- `src/scanner-pd-detector.js` header + `CHANGELOG.md` Phase 1.1 entry:
+  fixed off-by-19 line ref (`scanner-engine.js:219` → `:238` — the actual
+  location of the `d.change >= 8` early reject).
+- `src/scanner-engine.js` Phase 1.2 block: added a clarifying comment
+  explaining that `score` is intentionally NOT capped, only the
+  published `tier`. Tied directly to the new contract test.
+- `docs/SCANNER_PD_THRESHOLDS.md` §3.3: added an "as-shipped" note
+  clarifying that the `LS_RETAIL_LONG_RATIO` was kept at `> 3` in
+  Phase 1.1 (preserving client parity) rather than the `> 2.5`
+  widening §5 recommends. The widening lands in a one-line follow-up
+  PR contingent on Ziko's `Approved §5 verdicts` reply.
+- `.env.example` Scanner Remediation Flags block: added `LIVE` /
+  `RSVD` status legend next to each flag so future reads of `.env.example`
+  see at a glance which are wired and which are placeholders for
+  Phase 2 / Phase 4.
+- `data/scanner-baseline-2026-05-15.json` note: updated to reflect
+  the as-shipped state — Phase 1.1 went out with the placeholder
+  still in place; the note now flags the post-deploy `npm run snapshot`
+  as the next action item rather than a pre-condition.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 303 / 303 pass (was 299 + 4).
+- `npx prettier --check .` → clean.
+
+### References
+
+- Self-review pass on 2026-05-16 surfaced 6 NITs + 4 NOTEs, 0 BLOCKERs.
+- This commit addresses every actionable NIT.
+
+---
+
+## [Scanner Phase 3.1 — Per-tag win-rate endpoint] — 2026-05-16
+
+**New observability endpoint.** Implements P3.1 from
+`SCANNER_AUDIT_2026_05_15.md` §6. Behind `SCANNER_TAG_STATS_ENABLED`
+env var (default ON; reserved in Phase 0).
+
+### What it does
+
+`GET /api/scanner/tag-stats?days=7&min=3` aggregates the rolling
+`scanner-history.json` by individual tag and returns a per-tag
+breakdown: count, wins, losses, winRate, avgGain, best/worst signal.
+Engineering can now answer questions like "what's the win rate of
+signals that fired 🐋WHALE_A?" or "do MANIP_CAP coins actually
+under-perform now that Phase 1.2 caps them?".
+
+### Query parameters
+
+| Param | Range | Default |
+|-------|-------|---------|
+| `days` | 1-90 | 7 |
+| `min`  | 1-100 | 3 (drops tags with fewer samples to cut noise) |
+
+### Data dependency
+
+This endpoint relies on the `tags` field added to recorded entries
+by Phase 1.0b. Entries persisted before P1.0b deploys have
+`tags: undefined`; they are counted in `totalWithoutTags` but do
+not contribute to any per-tag bucket. So for ~7 days post-deploy
+the `perTag` map will fill in gradually as fresh signals close out
+their 24h evaluation window.
+
+### Added
+
+- `src/scanner-tag-stats.js` — pure `computeTagStats(history, opts)`
+  function; ~140 lines including the JSDoc and the empty-result helper.
+- `tests/scanner-tag-stats.test.js` — 15 tests covering window
+  filtering, pre-extension entries handling, minSamples cutoff,
+  per-tag aggregation correctness, multi-tag entries, defensive
+  inputs, output shape, sort order, ISO timestamp format.
+- `GET /api/scanner/tag-stats` endpoint in `server.js`, gated by
+  `SCANNER_TAG_STATS_ENABLED`. Returns `503 tag_stats_disabled` when
+  the flag is off.
+
+### Rollback
+
+`SCANNER_TAG_STATS_ENABLED=false` + `pm2 restart`. Endpoint returns
+503 until re-enabled. No data migration needed.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 299 / 299 pass (was 284 + 15).
+- `npx prettier --check .` → clean.
+- `node --check server.js` → syntax clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P3.1, §8.1 decision D
+- Depends on Phase 1.0b (`tags` field on `recordSignal`)
+
+---
+
+## [Scanner Phase 1.3 — Smart ULTRA cooldown bypass on score delta] — 2026-05-16
+
+**Behaviour change (gated, default ON).** Implements P1.3 from
+`SCANNER_AUDIT_2026_05_15.md` §6. Behind `SCANNER_ULTRA_DELTA_PUSH`
+env var.
+
+### Problem
+
+The ULTRA push had a flat 5-minute per-symbol cooldown to stop a
+sticky signal from spamming the user. But the same cooldown muted
+the case the user actually wants to know about: a coin that pushed
+ULTRA at score 102 and 90 seconds later jumps to 135 — that's
+qualitatively a stronger setup, not a duplicate. The audit called
+this the "ULTRA reborn" failure mode.
+
+### Fix
+
+`runScannerOnServer`'s ULTRA push gate now checks two conditions and
+allows the push if EITHER fires:
+
+- **Age path (unchanged):** previous push for the symbol older than
+  COOLDOWN_MS (5 minutes).
+- **Delta path (NEW, Phase 1.3):** new score exceeds last-pushed
+  score by DELTA_THRESHOLD (30) or more, even within the cooldown
+  window.
+
+Logic moved out of `server.js` into the new pure module
+`src/scanner-push-cooldown.js` so it can be unit-tested without
+spinning up the proxy. Per-symbol state shape changed from
+`{[sym]: ts}` to `{[sym]: {ts, score}}` to track the previous score
+for the delta comparison.
+
+### Rollback
+
+`SCANNER_ULTRA_DELTA_PUSH=false` + `pm2 restart`. Falls back to the
+original age-only cooldown — the delta path is never consulted.
+
+### Test coverage
+
+19 new tests in `tests/scanner-push-cooldown.test.js` cover:
+- First push always allowed; per-symbol independence.
+- Age path: blocked within cooldown, allowed at exactly the boundary,
+  always allowed past it.
+- Delta path: bypass at exactly DELTA_THRESHOLD, blocked one below,
+  blocked on negative delta (score going down).
+- `deltaPushEnabled: false` reverts to age-only behaviour.
+- Defensive guards: null state, non-string symbol, non-finite score.
+- `recordUltraPush` mutation + idempotent overwrite.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 284 / 284 pass (was 265 + 19).
+- `npx prettier --check .` → clean.
+- `node --check server.js` → syntax clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P1.3, §8.1 decision D
+- New: `src/scanner-push-cooldown.js`,
+  `tests/scanner-push-cooldown.test.js`
+- Touched: `server.js` (push gate refactored)
+
+---
+
+## [Scanner Phase 1.2 — Manipulation HIGH tier hard-cap] — 2026-05-16
+
+**Behaviour change (gated, default ON).** Implements P1.2 from
+`SCANNER_AUDIT_2026_05_15.md` §6 / §2.4. Behind
+`SCANNER_MANIP_HARD_CAP` env var.
+
+### Problem
+
+`_computeManipulationRisk` already classified shady setups as HIGH (vol/OI
+gap + penny price + extreme funding + book imbalance) and applied a -15
+score penalty. But for a strong-enough setup the -15 was recoverable, and
+the symbol could still publish as ULTRA — the scanner's loudest tier and
+the only one the push trigger fires on. Real-world failure mode:
+manipulated penny coins with extreme funding still hitting the
+notification path.
+
+### Fix
+
+`scoreSymbol` now resolves tier in a two-step path:
+1. Map score → tier as before.
+2. If `manipulationRisk.verdict === 'HIGH'` AND `tier === 'ULTRA'` →
+   downgrade to `STRONG`, push tag `🚫MANIP_CAP` so the UI can
+   explain the override.
+
+The cap deliberately fires only when the result *would have been*
+ULTRA — STRONG / MEDIUM / WEAK signals already carry the manipulation
+warning tag and don't need a tier change.
+
+### Test coverage
+
+Three new tests in `tests/scanner-engine.test.js`:
+- HIGH manipulation + score ≥ 100 → tier downgraded to STRONG, tag set.
+- HIGH manipulation + score < 100 → no tag, tier unchanged.
+- LOW manipulation + score ≥ 100 → tier stays ULTRA (cap doesn't over-trigger).
+
+### Rollback
+
+`SCANNER_MANIP_HARD_CAP=false` + `pm2 restart`. Cap disabled, manipulation
+HIGH coins can publish as ULTRA again (the -15 score penalty still
+applies).
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 265 / 265 pass (was 262 + 3 new).
+- `npx prettier --check .` → clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §2.4, §6, §8.1 decision D
+- `src/scanner-engine.js` (manipulation block + tier resolution)
+
+---
+
+## [Scanner Phase 1.1 — Server-side P&D Detector] — 2026-05-16
+
+**Behaviour change (gated, default ON).** Implements P1.1 from
+`SCANNER_AUDIT_2026_05_15.md` §6 and the porting strategy in
+`docs/SCANNER_PD_THRESHOLDS.md` §5.
+
+### Added
+
+- `src/scanner-pd-detector.js` — pure-function port of the client's
+  detectPumpAndDump (app.js:2459-2476). 5 flags (VERTICAL,
+  FR_EXTREME, LS_RETAIL_LONG, SMART_VS_RETAIL, THIN_PUMP),
+  ladder: 2 flags = -25, 3+ flags = score floored at -100.
+  Defensive against missing fields — never throws.
+- `tests/scanner-pd-detector.test.js` — 35 tests covering every flag
+  fires/doesn't fire boundary, defensive input handling, score-
+  adjustment ladder, FLAG_THRESHOLDS parity assertion.
+- `topTraders` field on the ctx passed to `scoreSymbol` — wired now
+  even though `cache.topTraders` isn't populated yet, so the day
+  the data source lands the SMART_VS_RETAIL flag starts firing
+  with no further engine changes.
+
+### Changed
+
+- `src/scanner-engine.js`:
+  - Imports `scanner-pd-detector` and reads
+    `SCANNER_SERVER_PD_ENABLED` env var at module load (default
+    true, set to `false` for instant rollback).
+  - `scoreSymbol` runs the P&D detector after the manipulation
+    block. 2 flags → tag `⚠️P&D_WARN:N/5`, score -25. 3+ flags →
+    tag `🚨P&D_RISK:N/5`, score floored at -100 (downstream
+    qualityFilter rejects).
+
+### Runtime reachability (this PR)
+
+| Flag | Reachable today? | Why / how to enable |
+|------|------------------|---------------------|
+| VERTICAL | ❌ dormant | Upstream `d.change >= 8` reject at scanner-engine.js:238 fires first |
+| FR_EXTREME | ✅ live | `ctx.fr` populated from cache.fr |
+| LS_RETAIL_LONG | ✅ live | `ctx.ls` populated from cache.ls |
+| SMART_VS_RETAIL | ❌ dormant | `cache.topTraders` not fetched yet — wiring future PR |
+| THIN_PUMP | ❌ dormant | Same upstream filter as VERTICAL |
+
+Net production effect: server now applies the same
+FR_EXTREME / LS_RETAIL_LONG suppression the client always had.
+2-flag soft penalty is reachable when both fire on one coin.
+
+### Rollback
+
+Set `SCANNER_SERVER_PD_ENABLED=false` in the proxy's `.env` and
+`pm2 restart`. Detector no longer runs; tags no longer pushed; no
+score adjustment. No data migration needed.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 262 / 262 pass (was 227 + 35
+  new detector tests).
+- `npx prettier --check .` → clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P1.1, §8.1 decision A & D
+- `docs/SCANNER_PD_THRESHOLDS.md` §5 (verdicts), §3 (per-flag rationale)
+- `app.js:2459-2476` (client detector being mirrored)
+
+---
+
+## [Scanner Phase 1.0 — P&D Threshold Validation] — 2026-05-16
+
+**Analysis + schema extension. No runtime behaviour change.**
+Implements the P1.0 step recorded in `SCANNER_AUDIT_2026_05_15.md` §8.1
+decision C (validate before porting).
+
+### Added
+
+- `docs/SCANNER_PD_THRESHOLDS.md` — per-flag economic / microstructure
+  rationale for the 5 P&D flags in `app.js:2459-2476`. Verdicts:
+  port 4 of 5 as-is or with a small widening (LS_RETAIL_LONG: > 3 →
+  > 2.5); defer THIN_PUMP until quantitative data is available.
+- `src/scanner-history.js` — `tags: string[]` field on persisted entries,
+  capped at `MAX_TAGS = 30` per entry. Defensive slice() so caller
+  mutations don't leak in. Enables the future
+  `vps/validate-pd-thresholds.js` quantitative pass.
+- `tests/scanner-history.test.js` — 5 new tests covering tag persistence,
+  empty default, non-array coercion, MAX_TAGS cap, mutation isolation.
+
+### Changed
+
+- `recordSignal()` now also persists `sig.tags` (or `[]` if absent).
+  Pure-additive schema — old entries with no `tags` field still work
+  (readers must use `entry.tags || []`).
+
+### Rollback
+
+- N/A — schema is pure-additive with no consumer; reverting only requires
+  removing the new field. Decision D's flag requirement is waived per its
+  exemption clause for "documentation-only and pure-refactor PRs"; the
+  schema field has no behaviour impact.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §8.1 (decision C), §6 (P1.0)
+- `docs/SCANNER_PD_THRESHOLDS.md` §2 (verdicts), §6 (schema proposal)
+
+### Open question for Ziko
+
+`docs/SCANNER_PD_THRESHOLDS.md` §8 asks whether to:
+(a) accept the §5 verdicts (port 4 of 5, widen LS, defer THIN_PUMP), or
+(b) port all 5 as-is matching the external plan exactly.
+Phase 1.1 begins on (a); flip to (b) by replying in the PR.
+
+---
+
+## [Scanner Phase 0 — Safety Net] — 2026-05-15
+
+**Scanner remediation infrastructure only — no behaviour change.**
+Implements SCANNER_AUDIT_2026_05_15.md §6 Phase 0 (compressed variant
+approved in §8.1).
+
+### Added
+
+- `SCANNER_AUDIT_2026_05_15.md` — consolidated audit (external 10-engineer
+  review + internal Wasted-Pipeline finding) and 5-phase remediation plan
+- `vps/snapshot-scanner-metrics.sh` — idempotent baseline-capture script
+- `data/scanner-baseline-2026-05-15.json` — placeholder baseline (replace
+  with real production snapshot before Phase 1.1 deploys)
+- `tests/scanner-contract.test.js` — empty skeleton, populated in Phase 2.A.5
+- Eight rollback flag names reserved in `.env.example` (`SCANNER_*_ENABLED`)
+- Five rollback flag names reserved in `app.js` header (`nxScannerFix_*`)
+- npm scripts: `npm run snapshot`, `npm run test:contract`
+
+### Changed
+
+- None. This phase introduces no behaviour changes — pure infrastructure.
+
+### Rollback
+
+- N/A — pure infrastructure. Revert the merge commit if needed.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 (Phase 0), §8.1 (Decisions Recorded)
+- PR #100
+
+---
+
 ## ملفات للرفع (4 ملفات)
 
 | الملف | الحجم | الحالة |

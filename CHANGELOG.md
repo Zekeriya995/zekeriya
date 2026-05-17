@@ -1,5 +1,57 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 1.1.c — LS_RETAIL_LONG widening (3 → 2.5)] — 2026-05-17
+
+**One-line threshold change.** Ziko approved §5 verdict in
+`docs/SCANNER_PD_THRESHOLDS.md` on 2026-05-17: widen the
+`LS_RETAIL_LONG` threshold from `> 3` to `> 2.5` to catch
+borderline retail-heavy coins earlier and soften the hard
+cliff at 3.0 flagged in §3.3.
+
+### Changed
+
+- `src/scanner-pd-detector.js` — `FLAG_THRESHOLDS.LS_RETAIL_LONG_RATIO`
+  from `3` to `2.5`. Comment explains the Phase 1.1.c approval.
+- `tests/scanner-pd-detector.test.js`:
+  - Boundary test `does NOT fire at exactly 3` → updated to
+    `does NOT fire at exactly 2.5`.
+  - New test `fires above new 2.5 threshold` locks the widened
+    boundary (regression catch for any future revert).
+  - `FLAG_THRESHOLDS — locked constants` test asserts the new
+    `2.5` value.
+- `docs/SCANNER_PD_THRESHOLDS.md`:
+  - §2 summary table — verdict shipped as "PORTED-WITH-WIDER-BAND
+    (was 3 → now 2.5, Ziko 2026-05-17)".
+  - §3.3 "as-shipped" note — updated to reflect the new threshold.
+
+### Rollback
+
+Single-line revert: change `LS_RETAIL_LONG_RATIO: 2.5` back to
+`3` in `src/scanner-pd-detector.js`, restore the old boundary
+test. No data migration. The flag itself has no separate env var
+because the threshold is a constant; if it ever needs runtime
+flexibility, expose `process.env.SCANNER_LS_RETAIL_THRESHOLD` as
+an override in a future PR.
+
+### Client parity
+
+The client at `app.js:2459-2476` still uses `> 3`. Phase 2.A.1's
+unified rules registry will close the gap by importing
+`FLAG_THRESHOLDS` directly. Until then, server is intentionally
+more aggressive on this flag — the audit's stated goal.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 324 / 324 pass (was 323 + 1).
+- `npx prettier --check .` → clean.
+
+### References
+
+- `docs/SCANNER_PD_THRESHOLDS.md` §3.3, §5, §8 (now resolved)
+- `SCANNER_AUDIT_2026_05_15.md` §8.1 decision C ("validate then port")
+
+---
+
 ## [Scanner Phase 3.3 — Alpha-based win rate] — 2026-05-17
 
 **Pure-additive analytics enhancement.** Implements P3.3 from

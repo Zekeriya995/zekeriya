@@ -66,7 +66,12 @@
 const FLAG_THRESHOLDS = Object.freeze({
   VERTICAL_CHANGE_PCT: 15,
   FR_EXTREME_RATE: 0.1,
-  LS_RETAIL_LONG_RATIO: 3,
+  /* Phase 1.1.c — Ziko approved §5 verdict on 2026-05-17: widen
+     LS_RETAIL_LONG from > 3 to > 2.5 to catch borderline retail-
+     heavy coins earlier. The hard cliff at 3.0 was the original
+     concern in docs/SCANNER_PD_THRESHOLDS.md §3.3. Reverts to 3
+     if the tag-stats endpoint shows over-suppression. */
+  LS_RETAIL_LONG_RATIO: 2.5,
   SMART_TRADER_LONG_BELOW: 0.4,
   SMART_LS_RATIO_ABOVE: 2,
   THIN_PUMP_CHANGE_PCT: 8,

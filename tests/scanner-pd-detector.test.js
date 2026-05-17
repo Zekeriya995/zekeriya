@@ -107,11 +107,19 @@ test('LS_RETAIL_LONG — globalLs takes precedence over ls when both present', (
   assert.deepEqual(out.flags, [], 'globalLs (retail) should override ls');
 });
 
-test('LS_RETAIL_LONG — does NOT fire at exactly 3 (strict >)', () => {
-  const outGlobal = detectPumpAndDump({ globalLs: { ratio: 3 } });
+test('LS_RETAIL_LONG — does NOT fire at exactly 2.5 (strict >)', () => {
+  /* Phase 1.1.c — boundary moved from 3 to 2.5 per Ziko's §5 verdict.
+     Threshold is strict >, so exactly 2.5 must NOT fire on either source. */
+  const outGlobal = detectPumpAndDump({ globalLs: { ratio: 2.5 } });
   assert.deepEqual(outGlobal.flags, []);
-  const outLs = detectPumpAndDump({ ls: { ratio: 3 } });
+  const outLs = detectPumpAndDump({ ls: { ratio: 2.5 } });
   assert.deepEqual(outLs.flags, []);
+});
+
+test('LS_RETAIL_LONG — fires above new 2.5 threshold (Phase 1.1.c widening)', () => {
+  /* Used to NOT fire at 2.6 (old threshold 3); now fires. Locks the new boundary. */
+  const out = detectPumpAndDump({ globalLs: { ratio: 2.6 } });
+  assert.equal(out.flags[0], 'LS_RETAIL_LONG:2.6');
 });
 
 test('LS_RETAIL_LONG — does NOT fire when both sources are missing or malformed', () => {
@@ -289,14 +297,16 @@ test('FLAG_THRESHOLDS — frozen so accidental mutation throws / no-ops', () => 
   });
 });
 
-test('FLAG_THRESHOLDS — values match the client-side detector at app.js:2466-2474', () => {
-  /* Parity check — these constants must mirror the client values
-     that decision A (Unify) commits us to. Bumping any of these
-     without updating app.js will break the contract test in
-     Phase 2.A.5. */
+test('FLAG_THRESHOLDS — locked constants (Phase 1.1.c approved widening)', () => {
+  /* These values are the canonical thresholds the server detector
+     uses. LS_RETAIL_LONG_RATIO was 3 pre-Phase 1.1.c and is now 2.5
+     per Ziko's §5 verdict (2026-05-17). The client at
+     app.js:2459-2476 still uses 3; Phase 2.A.1 will close that gap
+     in the unified rules registry. Bumping any of these without
+     updating the corresponding client constant breaks parity. */
   assert.equal(FLAG_THRESHOLDS.VERTICAL_CHANGE_PCT, 15);
   assert.equal(FLAG_THRESHOLDS.FR_EXTREME_RATE, 0.1);
-  assert.equal(FLAG_THRESHOLDS.LS_RETAIL_LONG_RATIO, 3);
+  assert.equal(FLAG_THRESHOLDS.LS_RETAIL_LONG_RATIO, 2.5);
   assert.equal(FLAG_THRESHOLDS.SMART_TRADER_LONG_BELOW, 0.4);
   assert.equal(FLAG_THRESHOLDS.SMART_LS_RATIO_ABOVE, 2);
   assert.equal(FLAG_THRESHOLDS.THIN_PUMP_CHANGE_PCT, 8);

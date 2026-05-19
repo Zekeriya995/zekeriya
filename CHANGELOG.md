@@ -1,5 +1,325 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner pre-merge review fixes] — 2026-05-19
+
+**Two fixes surfaced by parallel reviewer agents before merging PR #101.**
+
+### 🔴 BLOCKER fix — health alert flood on rollback
+
+`server.js:1765` registered `globalLs: { stale: 120000, down: 300000 }`
+in `HEALTH_THRESHOLDS` unconditionally. But `fetchGlobalLs()` is gated
+by `SCANNER_RETAIL_LS_ENABLED` and returns early when the flag is off
+— so `cache.lastUpdate.globalLs` never gets stamped, and
+`evaluateAlerts` emits a permanent CRITICAL `cache "globalLs" has
+never been populated` alert every health-check tick.
+
+This means the documented rollback path
+(`SCANNER_RETAIL_LS_ENABLED=false` + `pm2 restart`) would itself
+flood `/api/health` with a critical alert that no monitor can
+distinguish from a real outage.
+
+**Fix:** moved the `globalLs` threshold registration out of the
+literal and into a conditional:
+
+```js
+if (RETAIL_LS_ENABLED) {
+  HEALTH_THRESHOLDS.globalLs = { stale: 120000, down: 300000 };
+}
+```
+
+Now turning the flag off cleanly removes the cache from the health
+check. The `/api/health` `status` field was unaffected either way
+(it only mirrors tickers), but any monitor parsing the `alerts`
+array would have paged on every poll.
+
+### 🟡 NIT fix — non-deterministic `lowScore` test
+
+`tests/scanner-engine.test.js` Phase 3.2 `lowScore` test used a
+defensive `if (out.signals.length === 0) { assert... }` guard. If a
+future scoring change pushed `OBSCURECOIN` over the 30 gate, the
+assertion would silently NOT run and the test would pass vacuously
+— hiding the regression.
+
+**Fix:** removed the guard, added unconditional assertions on both
+`signals.length === 0` AND `rejections.lowScore === 1`. Any future
+scoring change that breaks the fixture fails the test loudly.
+
+### Test results
+
+- `npm run check` → lint clean, format clean, 633 / 633 tests pass.
+- `node --check server.js` → clean.
+
+### References
+
+- Pre-merge SRE review agent (BLOCKER)
+- Pre-merge correctness review agent (NIT 3 in their findings)
+
+---
+
+## [Scanner Phase 1.1.c — LS_RETAIL_LONG widening (3 → 2.5)] — 2026-05-17
+
+**One-line threshold change.** Ziko approved §5 verdict in
+`docs/SCANNER_PD_THRESHOLDS.md` on 2026-05-17: widen the
+`LS_RETAIL_LONG` threshold from `> 3` to `> 2.5` to catch
+borderline retail-heavy coins earlier and soften the hard
+cliff at 3.0 flagged in §3.3.
+
+### Changed
+
+- `src/scanner-pd-detector.js` — `FLAG_THRESHOLDS.LS_RETAIL_LONG_RATIO`
+  from `3` to `2.5`. Comment explains the Phase 1.1.c approval.
+- `tests/scanner-pd-detector.test.js`:
+  - Boundary test `does NOT fire at exactly 3` → updated to
+    `does NOT fire at exactly 2.5`.
+  - New test `fires above new 2.5 threshold` locks the widened
+    boundary (regression catch for any future revert).
+  - `FLAG_THRESHOLDS — locked constants` test asserts the new
+    `2.5` value.
+- `docs/SCANNER_PD_THRESHOLDS.md`:
+  - §2 summary table — verdict shipped as "PORTED-WITH-WIDER-BAND
+    (was 3 → now 2.5, Ziko 2026-05-17)".
+  - §3.3 "as-shipped" note — updated to reflect the new threshold.
+
+### Rollback
+
+Single-line revert: change `LS_RETAIL_LONG_RATIO: 2.5` back to
+`3` in `src/scanner-pd-detector.js`, restore the old boundary
+test. No data migration. The flag itself has no separate env var
+because the threshold is a constant; if it ever needs runtime
+flexibility, expose `process.env.SCANNER_LS_RETAIL_THRESHOLD` as
+an override in a future PR.
+
+### Client parity
+
+The client at `app.js:2459-2476` still uses `> 3`. Phase 2.A.1's
+unified rules registry will close the gap by importing
+`FLAG_THRESHOLDS` directly. Until then, server is intentionally
+more aggressive on this flag — the audit's stated goal.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 324 / 324 pass (was 323 + 1).
+- `npx prettier --check .` → clean.
+
+### References
+
+- `docs/SCANNER_PD_THRESHOLDS.md` §3.3, §5, §8 (now resolved)
+- `SCANNER_AUDIT_2026_05_15.md` §8.1 decision C ("validate then port")
+
+---
+
+## [Scanner Phase 3.3 — Alpha-based win rate] — 2026-05-17
+
+**Pure-additive analytics enhancement.** Implements P3.3 from
+`SCANNER_AUDIT_2026_05_15.md` §6. No flag — the new `alpha` field
+is appended to the existing `cache.scannerStats` payload; consumers
+that ignore it see no change.
+
+### What it does
+
+The existing `winRate` is a threshold-based metric: signal counts as
+a "win" if pctChange >= +5. That captures absolute movement but says
+nothing about whether the scanner's selection was actually picking
+**above-average** movers in the same window.
+
+`alpha` answers exactly that: each signal's pctChange minus the
+median pctChange across the entire evaluated basket. Surfaced as:
+
+```json
+"alpha": {
+  "basketMedian": 4.0,
+  "avgAlpha": 0.0,
+  "alphaWinRate": 33,
+  "bestAlpha":  { "s": "BIG",   "pctChange": 10, "alpha": 6  },
+  "worstAlpha": { "s": "SMALL", "pctChange": -2, "alpha": -6 }
+}
+```
+
+A high `alphaWinRate` (>= 60%) means the scanner picks above-median
+movers; ~50% means selection is no better than random; below 50%
+means the scoring rules actively pick UNDER-performers.
+
+### Added
+
+- `src/scanner-history.js`:
+  - `_median(values)` helper — robust central tendency.
+  - `computeStats` now returns `alpha: { basketMedian, avgAlpha,
+    alphaWinRate, bestAlpha, worstAlpha }` when the evaluated basket
+    has ≥ 3 samples. Returns `alpha: null` otherwise (single-sample
+    "median" is meaningless).
+- `tests/scanner-history.test.js` — 9 new tests covering:
+  - Suppression below 3 samples.
+  - Median computation (odd / even basket sizes).
+  - avgAlpha arithmetic correctness.
+  - alphaWinRate counts only alpha > 0 (not >= 0).
+  - bestAlpha / worstAlpha identification on skewed distributions.
+  - Empty-history fallback.
+
+### Rollback
+
+N/A — pure-additive field. Consumers that don't read `alpha` see no
+change. To remove: drop the alpha block from computeStats.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 323 / 323 pass (was 314 + 9).
+- `npx prettier --check .` → clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P3.3
+
+---
+
+## [Scanner Phase 3.2 — Gate-rejection telemetry] — 2026-05-17
+
+**New observability endpoint.** Implements P3.2 from
+`SCANNER_AUDIT_2026_05_15.md` §6. Behind `SCANNER_INSIGHTS_ENABLED`
+(default ON).
+
+### What it does
+
+`GET /api/scanner/insights` returns the most recent scanner pass's
+breakdown of WHY each candidate was dropped, so engineering can
+finally answer:
+
+- "How many coins did the scanner see this pass?"
+- "Of those, how many were rejected for being overheated / low-volume /
+  wash-trade fingerprint / low-score?"
+- "What % of the scanner's candidate pool actually produces a signal?"
+
+Example response:
+
+```json
+{
+  "ready": true,
+  "passAt": 1779047077319,
+  "accepted": 14,
+  "rejectionRatePct": 98,
+  "rejections": {
+    "total": 863,
+    "stablecoin": 21,
+    "noPrice": 0,
+    "overheated": 12,
+    "lowVolume": 780,
+    "washTrade": 2,
+    "lowScore": 34
+  }
+}
+```
+
+Six rejection categories cover every drop path in `scoreSymbol` +
+the post-score gate in `runScannerPass`.
+
+### Added
+
+- `src/scanner-engine.js`:
+  - `scoreSymbol` accepts optional `ctx._rejectionSink` — when present,
+    increments a category counter on each rejection path (noPrice,
+    overheated, lowVolume, washTrade). Backward compatible — the
+    score/tags output is unchanged either way.
+  - `runScannerPass` builds a fresh sink per pass, tracks stablecoin
+    and lowScore rejections directly, returns the breakdown alongside
+    signals in the `rejections` field.
+- `server.js`:
+  - Stores `cache.scannerRejections` + `cache.scannerRejectionsTs` on
+    every pass (overwrites — single latest pass only, no rolling state).
+  - `GET /api/scanner/insights` endpoint gated by `SCANNER_INSIGHTS_ENABLED`.
+    Returns `503 insights_disabled` when flag is off, or
+    `{ready: false, note: ...}` if no pass has completed yet.
+- `tests/scanner-engine.test.js` — 7 new tests covering shape,
+  stablecoin counting, overheated, lowVolume, washTrade, lowScore,
+  and the invariant `accepted + total_rejected == total`.
+
+### Rollback
+
+`SCANNER_INSIGHTS_ENABLED=false` + `pm2 restart`. Endpoint returns
+503; engine still tracks counters internally (cheap) but they're not
+exposed.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 314 / 314 pass (was 307 + 7).
+- `npx prettier --check .` → clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P3.2, §8.1 decision D
+
+---
+
+## [Scanner Phase 1.1.b — Retail LS + SMART_VS_RETAIL activation] — 2026-05-17
+
+**Behaviour change (gated, default ON).** Closes a logical bug
+discovered while wiring `topTraders` for Phase 1.1's
+`SMART_VS_RETAIL` flag.
+
+### The bug
+
+Original implementation (both client `app.js:2469-2472` and the
+initial server port) referenced `LS[s]` for the "retail long"
+half AND `topTradersLS[s].positions[last]` for the "smart short"
+half of `SMART_VS_RETAIL`. **Both sources read the same Binance
+endpoint** (`topLongShortPositionRatio`), so the AND condition
+was logically impossible to satisfy: `positions.long < 0.4`
+implies `positions.ratio < 0.67`, never `> 2`. The flag was dead
+code on both sides — never fired in production.
+
+### Fix
+
+Added Binance `globalLongShortAccountRatio` as a separate data
+source (TRUE retail-account signal, not top traders):
+
+- New fetcher `fetchGlobalLs()` in `server.js`; same 30-symbol
+  scope and refresh interval as `fetchLongShort()`.
+- New cache slot `cache.globalLs[sym] = { long, short, ratio }`.
+- New cache slot `cache.topTraders[sym] = { positions: [...] }`,
+  populated alongside `cache.ls` in the same `fetchLongShort()` call
+  (no extra network round-trip — same Binance payload, different
+  unit shape that matches the detector's `positions[].long < 0.4`
+  check).
+- `src/scanner-pd-detector.js` detector now accepts `globalLs` as
+  a separate input. `LS_RETAIL_LONG` prefers it when present,
+  falls back to `ls` for parity. `SMART_VS_RETAIL` requires both
+  `globalLs` (retail) AND `topTraders` (smart) — no fallback —
+  so the divergence is real.
+- `src/scanner-engine.js` `runScannerPass` wires both new fields
+  into the ctx passed to `scoreSymbol`.
+
+### Rollback
+
+`SCANNER_RETAIL_LS_ENABLED=false` + `pm2 restart`. `fetchGlobalLs()`
+exits early, `cache.globalLs` stays empty, detector falls back to
+ls for LS_RETAIL_LONG, SMART_VS_RETAIL goes back to silent. No
+data migration needed.
+
+### Test coverage
+
+`tests/scanner-pd-detector.test.js` updated:
+- LS_RETAIL_LONG: fires from globalLs when present, falls back to ls.
+- LS_RETAIL_LONG: globalLs takes precedence over ls when both set.
+- SMART_VS_RETAIL: fires with globalLs (no longer dead).
+- SMART_VS_RETAIL: explicitly does NOT use ls as fallback (would
+  re-create the original contradiction).
+- SMART_VS_RETAIL: missing globalLs → silent.
+
+`tests/scanner-engine.test.js` Phase 1.1 3-flag integration test
+updated to provide `globalLs` instead of `ls` for the retail half.
+
+### Test results
+
+- `node --test tests/scanner-*.test.js` → 307 / 307 pass (was 303 + 4 net).
+- `npx prettier --check .` → clean.
+- `node --check server.js` → clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §2.1 (P&D detection)
+- `docs/SCANNER_PD_THRESHOLDS.md` §3.4 (now annotated with the discovery)
+- Binance API: `globalLongShortAccountRatio` vs. `topLongShortPositionRatio`
+
+---
+
 ## [Scanner Review Fixes — pre-merge polish] — 2026-05-16
 
 **No behaviour change.** Closes the NITs surfaced by the self-review

@@ -233,13 +233,29 @@ function _directionLabel(score, change) {
    tier, direction } so the caller decides whether to keep / push /
    surface it. */
 function scoreSymbol(sym, ctx) {
+  /* Optional ctx._rejectionSink — when present, scoreSymbol increments
+     a category counter on each rejection path. Backward compatible:
+     callers that don't pass a sink get the original behavior, and the
+     score/tags output is unchanged either way. Used by Phase 3.2's
+     gate-rejection telemetry (/api/scanner/insights). */
+  const sink = ctx._rejectionSink || null;
+
   const d = ctx.ticker;
-  if (!d || !d.price || d.price <= 0) return null;
-  if (d.change >= 8) return null;
+  if (!d || !d.price || d.price <= 0) {
+    if (sink) sink.noPrice++;
+    return null;
+  }
+  if (d.change >= 8) {
+    if (sink) sink.overheated++;
+    return null;
+  }
 
   const isTier1 = TIER1_SYMBOLS.has(sym);
   const minVol = isTier1 ? 1_000_000 : 5_000_000;
-  if (d.volume < minVol) return null;
+  if (d.volume < minVol) {
+    if (sink) sink.lowVolume++;
+    return null;
+  }
 
   /* Wash-trading reject. Huge spot volume with no perpetual interest
      is bot wash trading — the May 2026 audit caught CHIP this way
@@ -252,6 +268,7 @@ function scoreSymbol(sym, ctx) {
      can't ever cost us its signal. */
   const oiUsd = typeof ctx.oi === 'number' ? ctx.oi : 0;
   if (!isTier1 && d.volume > WASH_VOLUME_FLOOR && oiUsd < WASH_OI_FLOOR) {
+    if (sink) sink.washTrade++;
     return null;
   }
 
@@ -542,6 +559,7 @@ function scoreSymbol(sym, ctx) {
       volume: d.volume,
       fr: ctx.fr,
       ls: ctx.ls,
+      globalLs: ctx.globalLs,
       topTraders: ctx.topTraders,
     });
     if (pd.flags.length >= 3) {
@@ -623,20 +641,45 @@ function runScannerPass(cache) {
      this pass, so we resolve it once outside the loop. */
   const newsSentiment = cache.newsSentiment || null;
   const results = [];
+  /* Phase 3.2 — per-pass rejection telemetry. scoreSymbol increments
+     these counters via ctx._rejectionSink; runScannerPass also tracks
+     stablecoin and lowScore rejections it owns directly. The shape is
+     returned alongside signals so the server can serve it from
+     /api/scanner/insights. */
+  const rejections = {
+    total: 0,
+    stablecoin: 0,
+    noPrice: 0,
+    overheated: 0,
+    lowVolume: 0,
+    washTrade: 0,
+    lowScore: 0,
+  };
   for (const sym in tickers) {
-    if (STABLE_SET.has(sym)) continue;
+    rejections.total++;
+    if (STABLE_SET.has(sym)) {
+      rejections.stablecoin++;
+      continue;
+    }
     const mtfEntry = indicatorsMtf[sym];
     const r = scoreSymbol(sym, {
+      _rejectionSink: rejections,
       ticker: tickers[sym],
       fr: cache.fr ? cache.fr[sym] : null,
       ls: cache.ls ? cache.ls[sym] : null,
+      /* globalLs (Phase 1.x.b) — TRUE retail signal from
+         globalLongShortAccountRatio. The P&D detector's
+         SMART_VS_RETAIL flag uses this to compare smart-money
+         (top traders) against retail-heavy (global accounts). */
+      globalLs: cache.globalLs ? cache.globalLs[sym] : null,
       taker: cache.taker ? cache.taker[sym] : null,
       depth: cache.depth ? cache.depth[sym] : null,
       oi: cache.oi ? cache.oi[sym] : null,
-      /* topTraders feeds the P&D detector's SMART_VS_RETAIL flag.
-         Server doesn't currently populate cache.topTraders, so the
-         flag stays dormant. Wired here so future PRs that add the
-         data source get the suppression for free. */
+      /* topTraders — top-trader POSITION fractions (0..1). Same
+         underlying Binance data as cache.ls but in raw unit form
+         the P&D detector expects (positions[].long compared against
+         the < 0.4 threshold). Populated alongside cache.ls in
+         fetchLongShort(). */
       topTraders: cache.topTraders ? cache.topTraders[sym] : null,
       coinalyzeOI: czOI[sym] || null,
       coinalyzeFR: czFR[sym] || null,
@@ -647,13 +690,18 @@ function runScannerPass(cache) {
       indicator: indicators[sym] || null,
       newsSentiment: newsSentiment,
     });
-    if (!r || r.score < 30) continue;
+    if (!r) continue; /* already counted in rejections by scoreSymbol */
+    if (r.score < 30) {
+      rejections.lowScore++;
+      continue;
+    }
     results.push(r);
   }
   results.sort((a, b) => b.score - a.score);
   return {
     signals: results,
     top3: results.slice(0, 3),
+    rejections: rejections,
     ts: Date.now(),
   };
 }

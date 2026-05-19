@@ -156,10 +156,30 @@ function evaluateOpenSignals(history, prices, now) {
   return { history, updated };
 }
 
+/* _median(values) — robust central tendency helper. Sorts a copy
+   of the input and returns the middle element (or the mean of the
+   two middles for even-length arrays). Empty input → 0. Used by
+   the Phase 3.3 alpha calculation. */
+function _median(values) {
+  if (!values || values.length === 0) return 0;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const n = sorted.length;
+  if (n % 2 === 1) return sorted[(n - 1) / 2];
+  return (sorted[n / 2 - 1] + sorted[n / 2]) / 2;
+}
+
 /* computeStats(history, daysBack) — aggregates the evaluated
    entries within the last `daysBack` days into the headline stats
    the win-rate card shows. Anything still open or older than the
-   window is filtered out. */
+   window is filtered out.
+
+   Phase 3.3 — adds an `alpha` block alongside the existing
+   threshold-based winRate. Alpha is each signal's pctChange minus
+   the median pctChange across the entire evaluated basket in the
+   same window. A signal is an "alpha win" if its alpha is > 0
+   (it beat the median signal). This is a self-relative measure
+   that exposes whether the scanner's selection actually picked
+   above-average movers, independently of the fixed +5%/-3% ladder. */
 function computeStats(history, daysBack, now) {
   const days = daysBack || 7;
   const ts = now || Date.now();
@@ -175,6 +195,7 @@ function computeStats(history, daysBack, now) {
     bestSignal: null,
     worstSignal: null,
     byTier: {},
+    alpha: null,
   };
   if (evaluated.length === 0) return empty;
 
@@ -201,6 +222,43 @@ function computeStats(history, daysBack, now) {
     };
   }
 
+  /* Alpha block (Phase 3.3). The basket = the same evaluated set
+     used for the threshold stats above, so winRate and alphaWinRate
+     refer to the same coins over the same window — directly
+     comparable. With < 3 samples the alpha block is noise (median
+     undefined-ish), so we suppress it until the basket is meaningful. */
+  let alpha = null;
+  if (evaluated.length >= 3) {
+    const pcts = evaluated.map((h) => h.pctChange || 0);
+    const basketMedian = _median(pcts);
+    const alphas = evaluated.map((h) => (h.pctChange || 0) - basketMedian);
+    const alphaWins = alphas.filter((a) => a > 0).length;
+    const avgAlpha = alphas.reduce((s, a) => s + a, 0) / alphas.length;
+    /* Best / worst by alpha — same coins as best/worst by raw pct
+       in symmetric distributions, but can differ on skewed ones. */
+    let bestIdx = 0;
+    let worstIdx = 0;
+    for (let i = 1; i < alphas.length; i++) {
+      if (alphas[i] > alphas[bestIdx]) bestIdx = i;
+      if (alphas[i] < alphas[worstIdx]) worstIdx = i;
+    }
+    alpha = {
+      basketMedian: Math.round(basketMedian * 100) / 100,
+      avgAlpha: Math.round(avgAlpha * 100) / 100,
+      alphaWinRate: Math.round((alphaWins / alphas.length) * 100),
+      bestAlpha: {
+        s: evaluated[bestIdx].s,
+        pctChange: evaluated[bestIdx].pctChange,
+        alpha: Math.round(alphas[bestIdx] * 100) / 100,
+      },
+      worstAlpha: {
+        s: evaluated[worstIdx].s,
+        pctChange: evaluated[worstIdx].pctChange,
+        alpha: Math.round(alphas[worstIdx] * 100) / 100,
+      },
+    };
+  }
+
   return {
     totalEvaluated: evaluated.length,
     wins: wins.length,
@@ -214,6 +272,7 @@ function computeStats(history, daysBack, now) {
       ? { s: worst.s, pctChange: worst.pctChange, tier: worst.tier, recordedAt: worst.recordedAt }
       : null,
     byTier,
+    alpha,
     daysBack: days,
   };
 }

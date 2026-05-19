@@ -47,13 +47,13 @@ the quantitative pass later.
 
 ## 2. Summary table
 
-| #   | Flag              | Threshold                                 | Confidence     | Verdict for Phase 1.1                                            |
-| --- | ----------------- | ----------------------------------------- | -------------- | ---------------------------------------------------------------- |
-| 1   | `VERTICAL`        | `d.c >= 15` (24h % change ≥ +15)          | **High**       | **PORT as-is**                                                   |
-| 2   | `FR_EXTREME`      | `fr.rate > 0.1` (per 8h, ≈ 0.1%)          | **Medium**     | **PORT as-is, add unit assertion in test**                       |
-| 3   | `LS_RETAIL_LONG`  | `LS[s].ratio > 2.5` (shipped Phase 1.1.c) | **Medium-Low** | **PORTED-WITH-WIDER-BAND** (was 3 → now 2.5, Ziko 2026-05-17)    |
-| 4   | `SMART_VS_RETAIL` | `topTrader.long < 0.4` AND `LS.ratio > 2` | **Medium**     | **PORT as-is** (compound condition is self-validating)           |
-| 5   | `THIN_PUMP`       | `d.c >= 8` AND `d.v < 3e7` (USD)          | **Low**        | **DEFER until schema extension yields ≥ 7 days of flag data**    |
+| #   | Flag              | Threshold                                 | Confidence     | Verdict for Phase 1.1                                         |
+| --- | ----------------- | ----------------------------------------- | -------------- | ------------------------------------------------------------- |
+| 1   | `VERTICAL`        | `d.c >= 15` (24h % change ≥ +15)          | **High**       | **PORT as-is**                                                |
+| 2   | `FR_EXTREME`      | `fr.rate > 0.1` (per 8h, ≈ 0.1%)          | **Medium**     | **PORT as-is, add unit assertion in test**                    |
+| 3   | `LS_RETAIL_LONG`  | `LS[s].ratio > 2.5` (shipped Phase 1.1.c) | **Medium-Low** | **PORTED-WITH-WIDER-BAND** (was 3 → now 2.5, Ziko 2026-05-17) |
+| 4   | `SMART_VS_RETAIL` | `topTrader.long < 0.4` AND `LS.ratio > 2` | **Medium**     | **PORT as-is** (compound condition is self-validating)        |
+| 5   | `THIN_PUMP`       | `d.c >= 8` AND `d.v < 3e7` (USD)          | **Low**        | **DEFER until schema extension yields ≥ 7 days of flag data** |
 
 Aggregate verdict: **port 4 of 5 flags as-is or with a small widening,
 defer 1 until quantitative data is available.** This keeps the spirit

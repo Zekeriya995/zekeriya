@@ -650,8 +650,11 @@ test('Phase 3.2 — washTrade rejection is counted', () => {
 });
 
 test('Phase 3.2 — lowScore rejection is counted (below 30 gate)', () => {
-  /* A tier1 with bare-minimum config will score near the gate. Add
-     a non-tier1 with no boosters → expected to score below 30. */
+  /* Non-tier1 symbol with no boosters: NEW tag is +2, volume is below
+     all VOL tiers, change is flat so no momentum bonuses. Score should
+     land at +2 — well below the 30 gate — and reliably hit lowScore.
+     Assertions are unconditional so any future scoring change that
+     bumps OBSCURECOIN over 30 fails the test loudly. */
   const cache = {
     tickers: {
       OBSCURECOIN: tk({ volume: 6e6, change: 0.5 }) /* sparse signal */,
@@ -659,12 +662,8 @@ test('Phase 3.2 — lowScore rejection is counted (below 30 gate)', () => {
     oi: { OBSCURECOIN: 5_000_000 } /* enough OI to dodge wash reject */,
   };
   const out = runScannerPass(cache);
-  /* OBSCURECOIN should be either accepted with low score or
-     rejected by the < 30 gate. If rejected, lowScore counter
-     should fire. Either way, the counter shape exists. */
-  if (out.signals.length === 0) {
-    assert.equal(out.rejections.lowScore, 1);
-  }
+  assert.equal(out.signals.length, 0, 'fixture must score below the 30 gate');
+  assert.equal(out.rejections.lowScore, 1, 'rejection must be categorized as lowScore');
 });
 
 test('Phase 3.2 — accepted signals do NOT count as rejections', () => {

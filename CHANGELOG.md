@@ -1,5 +1,61 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner pre-merge review fixes] — 2026-05-19
+
+**Two fixes surfaced by parallel reviewer agents before merging PR #101.**
+
+### 🔴 BLOCKER fix — health alert flood on rollback
+
+`server.js:1765` registered `globalLs: { stale: 120000, down: 300000 }`
+in `HEALTH_THRESHOLDS` unconditionally. But `fetchGlobalLs()` is gated
+by `SCANNER_RETAIL_LS_ENABLED` and returns early when the flag is off
+— so `cache.lastUpdate.globalLs` never gets stamped, and
+`evaluateAlerts` emits a permanent CRITICAL `cache "globalLs" has
+never been populated` alert every health-check tick.
+
+This means the documented rollback path
+(`SCANNER_RETAIL_LS_ENABLED=false` + `pm2 restart`) would itself
+flood `/api/health` with a critical alert that no monitor can
+distinguish from a real outage.
+
+**Fix:** moved the `globalLs` threshold registration out of the
+literal and into a conditional:
+
+```js
+if (RETAIL_LS_ENABLED) {
+  HEALTH_THRESHOLDS.globalLs = { stale: 120000, down: 300000 };
+}
+```
+
+Now turning the flag off cleanly removes the cache from the health
+check. The `/api/health` `status` field was unaffected either way
+(it only mirrors tickers), but any monitor parsing the `alerts`
+array would have paged on every poll.
+
+### 🟡 NIT fix — non-deterministic `lowScore` test
+
+`tests/scanner-engine.test.js` Phase 3.2 `lowScore` test used a
+defensive `if (out.signals.length === 0) { assert... }` guard. If a
+future scoring change pushed `OBSCURECOIN` over the 30 gate, the
+assertion would silently NOT run and the test would pass vacuously
+— hiding the regression.
+
+**Fix:** removed the guard, added unconditional assertions on both
+`signals.length === 0` AND `rejections.lowScore === 1`. Any future
+scoring change that breaks the fixture fails the test loudly.
+
+### Test results
+
+- `npm run check` → lint clean, format clean, 633 / 633 tests pass.
+- `node --check server.js` → clean.
+
+### References
+
+- Pre-merge SRE review agent (BLOCKER)
+- Pre-merge correctness review agent (NIT 3 in their findings)
+
+---
+
 ## [Scanner Phase 1.1.c — LS_RETAIL_LONG widening (3 → 2.5)] — 2026-05-17
 
 **One-line threshold change.** Ziko approved §5 verdict in

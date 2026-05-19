@@ -1762,7 +1762,6 @@ const HEALTH_THRESHOLDS = {
   fr: { stale: 120000, down: 300000 },
   oi: { stale: 120000, down: 300000 },
   ls: { stale: 120000, down: 300000 },
-  globalLs: { stale: 120000, down: 300000 },
   taker: { stale: 120000, down: 300000 },
   depth: { stale: 60000, down: 180000 },
   liq: { stale: 120000, down: 600000 },
@@ -1775,6 +1774,15 @@ const HEALTH_THRESHOLDS = {
   hyperliquid: { stale: 180000, down: 600000 },
   news: { stale: 900000, down: 3600000 },
 };
+/* globalLs threshold is registered only when SCANNER_RETAIL_LS_ENABLED
+   is on. Without this gate, an operator who rolls back via
+   SCANNER_RETAIL_LS_ENABLED=false would hit a permanent
+   "cache 'globalLs' has never been populated" critical alert from
+   evaluateAlerts() because cache.lastUpdate.globalLs never gets stamped
+   (fetchGlobalLs returns early). Surfaced by the pre-merge SRE review. */
+if (RETAIL_LS_ENABLED) {
+  HEALTH_THRESHOLDS.globalLs = { stale: 120000, down: 300000 };
+}
 function _classifyAge(last, thresholds, now) {
   if (!last) return { ageMs: null, status: 'down' };
   const age = now - last;

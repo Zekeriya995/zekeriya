@@ -47,26 +47,37 @@
  *
  * Expected `ctx` shape (built by the consumer before iterating rules):
  *   {
- *     isTier1:        boolean
- *     isTier2:        boolean (CLIENT-only — server omits this field;
- *                              TIER2_BONUS strict-checks `=== true` so
- *                              an absent isTier2 cleanly no-ops on the
- *                              server side. Added in PR C.)
- *     volume:         number — 24h quote volume in USD
- *     change:         number — 24h percentage change
- *     frRate:         number — futures funding rate as a decimal (e.g.
- *                              0.0001 = 0.01%). Both sides populate when
- *                              fr data is available; rules strict-check
- *                              typeof === 'number' so missing data
- *                              cleanly no-ops. (Added in PR D.)
- *     lsRatio:        number — long/short ratio (server: ctx.ls.ratio;
- *                              client: LS[s].ratio). Strict-checked too.
- *                              (Added in PR D.)
- *     coinalyzeFRRate:number — multi-exchange aggregated FR rate
- *                              (server-only — client has no
- *                              coinalyzeFR feed). Strict-check
- *                              makes COINALYZE_FR_NEG no-op on the
- *                              client. (Added in PR D.)
+ *     isTier1:         boolean
+ *     isTier2:         boolean (CLIENT-only — server omits this field;
+ *                               TIER2_BONUS strict-checks `=== true` so
+ *                               an absent isTier2 cleanly no-ops on the
+ *                               server side. Added in PR C.)
+ *     volume:          number — 24h quote volume in USD
+ *     change:          number — 24h percentage change
+ *     frRate:          number — futures funding rate as a decimal (e.g.
+ *                               0.0001 = 0.01%). Both sides populate when
+ *                               fr data is available; rules strict-check
+ *                               typeof === 'number' so missing data
+ *                               cleanly no-ops. (Added in PR D.)
+ *     lsRatio:         number — long/short ratio (server: ctx.ls.ratio;
+ *                               client: LS[s].ratio). Strict-checked too.
+ *                               (Added in PR D.)
+ *     coinalyzeFRRate: number — multi-exchange aggregated FR rate
+ *                               (server: ctx.coinalyzeFR.rate;
+ *                               client: coinalyzeFR[s].rate via
+ *                               /api/all multi-exchange data — the SRE
+ *                               review on PR #117 caught that the
+ *                               client DOES populate this). Strict-check.
+ *                               (Added in PR D.)
+ *     mtfStrength:     'full' | 'partial' | undefined  — server-only
+ *                      (client has no MTF computation in quickScan).
+ *                      Added in PR E.
+ *     mtfBias:         'bullish' | 'bearish' | undefined — server-only.
+ *                      Added in PR E.
+ *     rsi:             number | undefined — server-only (kline-derived
+ *                      indicator). Added in PR E.
+ *     macdCross:       'bull' | 'bear' | undefined — server-only;
+ *                      MACD histogram crossing event. Added in PR E.
  *   }
  *
  * Adding a new rule: append to RULES. Adding a new field to ctx:
@@ -253,6 +264,68 @@ const RULES = Object.freeze([
     weight: -50,
     tag: '🔪FALLING',
     condition: (ctx) => typeof ctx.change === 'number' && ctx.change < -10,
+  }),
+  /* Phase 2.A.1 PR E — MTF agreement + indicator rules.
+     All 8 below are SERVER-ONLY data (client has no MTF / RSI /
+     MACD computation in quickScan — those come from the server
+     via /api/all when needed). Each rule strict-checks its ctx
+     field so missing data — including the client's complete
+     absence of these fields — cleanly no-ops the rule (same
+     Option-C pattern as TIER2_BONUS in PR C and COINALYZE_FR_NEG
+     in PR D).
+
+     The four MTF_* rules are mutually exclusive by construction:
+     `mtfStrength` is exactly one of 'full' / 'partial' /
+     undefined, and `mtfBias` is exactly one of 'bullish' /
+     'bearish' / undefined. So at most ONE of the four can fire
+     per ctx — matching the inline if/else if behaviour. */
+  Object.freeze({
+    id: 'MTF_BULL_FULL',
+    weight: 15,
+    tag: '🎯MTF_BULL',
+    condition: (ctx) => ctx.mtfStrength === 'full' && ctx.mtfBias === 'bullish',
+  }),
+  Object.freeze({
+    id: 'MTF_BULL_PARTIAL',
+    weight: 8,
+    tag: '🎯MTF_BULL_2',
+    condition: (ctx) => ctx.mtfStrength === 'partial' && ctx.mtfBias === 'bullish',
+  }),
+  Object.freeze({
+    id: 'MTF_BEAR_FULL',
+    weight: -10,
+    tag: '🎯MTF_BEAR',
+    condition: (ctx) => ctx.mtfStrength === 'full' && ctx.mtfBias === 'bearish',
+  }),
+  Object.freeze({
+    id: 'MTF_BEAR_PARTIAL',
+    weight: -5,
+    tag: '🎯MTF_BEAR_2',
+    condition: (ctx) => ctx.mtfStrength === 'partial' && ctx.mtfBias === 'bearish',
+  }),
+  Object.freeze({
+    id: 'RSI_OS',
+    weight: 10,
+    tag: '📉RSI_OS',
+    condition: (ctx) => typeof ctx.rsi === 'number' && ctx.rsi < 30,
+  }),
+  Object.freeze({
+    id: 'RSI_OB',
+    weight: -8,
+    tag: '📈RSI_OB',
+    condition: (ctx) => typeof ctx.rsi === 'number' && ctx.rsi > 70,
+  }),
+  Object.freeze({
+    id: 'MACD_BULL_CROSS',
+    weight: 12,
+    tag: '📊MACD_BULL',
+    condition: (ctx) => ctx.macdCross === 'bull',
+  }),
+  Object.freeze({
+    id: 'MACD_BEAR_CROSS',
+    weight: -8,
+    tag: '📊MACD_BEAR',
+    condition: (ctx) => ctx.macdCross === 'bear',
   }),
 ]);
 

@@ -402,6 +402,165 @@ test('applyRules — client ctx (no coinalyzeFR) skips COINALYZE_FR_NEG cleanly'
   assert.ok(!out.tagsDelta.includes('🌐FR_NEG'), 'client must NOT see server-only tag');
 });
 
+/* ─── Phase 2.A.1 PR E — MTF / RSI / MACD rules (server-only data) */
+
+test('MTF_BULL_FULL — fires only on strength=full AND bias=bullish', () => {
+  assert.equal(fire('MTF_BULL_FULL', { mtfStrength: 'full', mtfBias: 'bullish' }), true);
+  assert.equal(fire('MTF_BULL_FULL', { mtfStrength: 'full', mtfBias: 'bearish' }), false);
+  assert.equal(fire('MTF_BULL_FULL', { mtfStrength: 'partial', mtfBias: 'bullish' }), false);
+  const r = RULES.find((r) => r.id === 'MTF_BULL_FULL');
+  assert.equal(r.weight, 15);
+  assert.equal(r.tag, '🎯MTF_BULL');
+});
+
+test('MTF_BULL_PARTIAL — fires only on strength=partial AND bias=bullish', () => {
+  assert.equal(fire('MTF_BULL_PARTIAL', { mtfStrength: 'partial', mtfBias: 'bullish' }), true);
+  assert.equal(fire('MTF_BULL_PARTIAL', { mtfStrength: 'full', mtfBias: 'bullish' }), false);
+  const r = RULES.find((r) => r.id === 'MTF_BULL_PARTIAL');
+  assert.equal(r.weight, 8);
+  assert.equal(r.tag, '🎯MTF_BULL_2');
+});
+
+test('MTF_BEAR_FULL — fires only on strength=full AND bias=bearish', () => {
+  assert.equal(fire('MTF_BEAR_FULL', { mtfStrength: 'full', mtfBias: 'bearish' }), true);
+  assert.equal(fire('MTF_BEAR_FULL', { mtfStrength: 'partial', mtfBias: 'bearish' }), false);
+  const r = RULES.find((r) => r.id === 'MTF_BEAR_FULL');
+  assert.equal(r.weight, -10);
+  assert.equal(r.tag, '🎯MTF_BEAR');
+});
+
+test('MTF_BEAR_PARTIAL — fires only on strength=partial AND bias=bearish', () => {
+  assert.equal(fire('MTF_BEAR_PARTIAL', { mtfStrength: 'partial', mtfBias: 'bearish' }), true);
+  assert.equal(fire('MTF_BEAR_PARTIAL', { mtfStrength: 'full', mtfBias: 'bearish' }), false);
+  const r = RULES.find((r) => r.id === 'MTF_BEAR_PARTIAL');
+  assert.equal(r.weight, -5);
+  assert.equal(r.tag, '🎯MTF_BEAR_2');
+});
+
+test('MTF — at most ONE of the 4 rules fires per ctx', () => {
+  /* The inline pre-PR-E was an if/else if/else if/else if chain.
+     The 4 registry rules cover the 4 unique (strength, bias)
+     combos, so at most one matches. Verify exhaustively. */
+  const inputs = [
+    { mtfStrength: 'full', mtfBias: 'bullish', expected: 'MTF_BULL_FULL' },
+    { mtfStrength: 'partial', mtfBias: 'bullish', expected: 'MTF_BULL_PARTIAL' },
+    { mtfStrength: 'full', mtfBias: 'bearish', expected: 'MTF_BEAR_FULL' },
+    { mtfStrength: 'partial', mtfBias: 'bearish', expected: 'MTF_BEAR_PARTIAL' },
+    { mtfStrength: undefined, mtfBias: undefined, expected: null },
+    { mtfStrength: 'partial', mtfBias: 'neutral', expected: null } /* unknown bias */,
+    { mtfStrength: 'unknown', mtfBias: 'bullish', expected: null } /* unknown strength */,
+  ];
+  for (const { mtfStrength, mtfBias, expected } of inputs) {
+    const fired = ['MTF_BULL_FULL', 'MTF_BULL_PARTIAL', 'MTF_BEAR_FULL', 'MTF_BEAR_PARTIAL'].filter(
+      (id) => fire(id, { mtfStrength, mtfBias })
+    );
+    if (expected) {
+      assert.deepEqual(fired, [expected], `strength=${mtfStrength} bias=${mtfBias}`);
+    } else {
+      assert.deepEqual(fired, [], `strength=${mtfStrength} bias=${mtfBias}`);
+    }
+  }
+});
+
+test('MTF rules — missing ctx fields (client) fire nothing', () => {
+  /* The client doesn't compute MTF in quickScan — it passes no
+     mtfStrength/mtfBias. Strict equality checks (=== 'full',
+     === 'partial' etc.) cleanly reject undefined. */
+  const clientCtx = { isTier1: false, isTier2: false, volume: 1e8, change: 1 };
+  const fired = ['MTF_BULL_FULL', 'MTF_BULL_PARTIAL', 'MTF_BEAR_FULL', 'MTF_BEAR_PARTIAL'].filter(
+    (id) => fire(id, clientCtx)
+  );
+  assert.deepEqual(fired, [], 'client ctx must fire no MTF rule');
+});
+
+test('RSI_OS — fires on rsi < 30', () => {
+  assert.equal(fire('RSI_OS', { rsi: 25 }), true);
+  assert.equal(fire('RSI_OS', { rsi: 29.9 }), true);
+  /* Boundary: exactly 30 does NOT fire (strict <). */
+  assert.equal(fire('RSI_OS', { rsi: 30 }), false);
+  assert.equal(fire('RSI_OS', { rsi: 50 }), false);
+  const r = RULES.find((r) => r.id === 'RSI_OS');
+  assert.equal(r.weight, 10);
+  assert.equal(r.tag, '📉RSI_OS');
+});
+
+test('RSI_OB — fires on rsi > 70', () => {
+  assert.equal(fire('RSI_OB', { rsi: 75 }), true);
+  /* Boundary: exactly 70 does NOT fire (strict >). */
+  assert.equal(fire('RSI_OB', { rsi: 70 }), false);
+  assert.equal(fire('RSI_OB', { rsi: 50 }), false);
+  const r = RULES.find((r) => r.id === 'RSI_OB');
+  assert.equal(r.weight, -8);
+  assert.equal(r.tag, '📈RSI_OB');
+});
+
+test('RSI rules — missing rsi (typeof !== number) fires nothing', () => {
+  for (const bad of [undefined, null, NaN, '50', {}, [], true]) {
+    assert.equal(fire('RSI_OS', { rsi: bad }), false, `RSI_OS rsi=${String(bad)}`);
+    assert.equal(fire('RSI_OB', { rsi: bad }), false, `RSI_OB rsi=${String(bad)}`);
+  }
+});
+
+test('MACD_BULL_CROSS — fires only on macdCross === "bull"', () => {
+  assert.equal(fire('MACD_BULL_CROSS', { macdCross: 'bull' }), true);
+  assert.equal(fire('MACD_BULL_CROSS', { macdCross: 'bear' }), false);
+  assert.equal(fire('MACD_BULL_CROSS', { macdCross: undefined }), false);
+  const r = RULES.find((r) => r.id === 'MACD_BULL_CROSS');
+  assert.equal(r.weight, 12);
+  assert.equal(r.tag, '📊MACD_BULL');
+});
+
+test('MACD_BEAR_CROSS — fires only on macdCross === "bear"', () => {
+  assert.equal(fire('MACD_BEAR_CROSS', { macdCross: 'bear' }), true);
+  assert.equal(fire('MACD_BEAR_CROSS', { macdCross: 'bull' }), false);
+  const r = RULES.find((r) => r.id === 'MACD_BEAR_CROSS');
+  assert.equal(r.weight, -8);
+  assert.equal(r.tag, '📊MACD_BEAR');
+});
+
+test('applyRules — full MTF bullish + RSI oversold + MACD bull cross sums correctly', () => {
+  /* Tier-1 BTC-shaped ctx with all three momentum confirmations:
+     TIER1 (+10) + SILENT_ACC (+25) + EARLY (+20) + MTF_BULL_FULL (+15)
+     + RSI_OS (+10) + MACD_BULL_CROSS (+12) = +92.
+     STEALTH does NOT fire (8e7 not > 8e7, strict). */
+  const out = applyRules({
+    isTier1: true,
+    volume: 8e7,
+    change: 0.5,
+    mtfStrength: 'full',
+    mtfBias: 'bullish',
+    rsi: 25,
+    macdCross: 'bull',
+  });
+  assert.equal(out.scoreDelta, 92);
+  assert.ok(out.tagsDelta.includes('🎯MTF_BULL'));
+  assert.ok(out.tagsDelta.includes('📉RSI_OS'));
+  assert.ok(out.tagsDelta.includes('📊MACD_BULL'));
+});
+
+test('applyRules — client ctx (no MTF/RSI/MACD fields) skips all 8 rules', () => {
+  /* Regression guard: passing a client-shaped ctx with no MTF / rsi
+     / macdCross fields produces the same score as if those rules
+     didn't exist. Important because the client doesn't compute
+     these values in quickScan, so PR E must NOT change client
+     scoring. */
+  const out = applyRules({ isTier1: false, isTier2: false, volume: 8e7, change: 1 });
+  /* NEW (2) + SILENT_ACC (25, 8e7>5e7 && abs(1)<2) + EARLY (20). Total = 47. */
+  assert.equal(out.scoreDelta, 47);
+  for (const t of [
+    '🎯MTF_BULL',
+    '🎯MTF_BULL_2',
+    '🎯MTF_BEAR',
+    '🎯MTF_BEAR_2',
+    '📉RSI_OS',
+    '📈RSI_OB',
+    '📊MACD_BULL',
+    '📊MACD_BEAR',
+  ]) {
+    assert.ok(!out.tagsDelta.includes(t), `client must NOT see ${t}`);
+  }
+});
+
 /* ─── applyRules — aggregate behavior ─────────────────────────── */
 
 test('applyRules — TIER1 coin with high vol + flat change fires multiple rules', () => {

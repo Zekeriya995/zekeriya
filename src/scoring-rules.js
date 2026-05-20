@@ -118,6 +118,33 @@ const RULES = Object.freeze([
     tag: '🔍STEALTH',
     condition: (ctx) => ctx.volume > 8e7 && ctx.change >= 0.5 && ctx.change < 3,
   }),
+  Object.freeze({
+    /* FALLING_KNIFE — defensive suppression rule (NOT a migration).
+       Triggered by the SAGA finding on 2026-05-20: three STRONG signals
+       fired into a coin that had crashed -14% to -16% over its 24h
+       window. The scanner saw enough volume + a tiny green tick to
+       score 70-90, but the larger picture was clearly bearish.
+
+       Penalty of -50 drops any rule-set total from 70-90 down to
+       20-40, taking the signal out of MEDIUM/STRONG tier and below
+       the qualityFilter gate at 30. The rule is INTENTIONALLY
+       aggressive — a coin down >10% in 24h is statistically a tail
+       event, and chasing it usually loses (verified against history).
+
+       Edge case: legitimate reversals from -10% to flat will be
+       suppressed too. The audit's stated philosophy is "prefer false
+       negatives over false positives" — missing a recovery is less
+       costly than chasing a continuation crash. If the tag-stats
+       endpoint shows the rule over-suppresses real bounces, the
+       threshold can widen from -10 to -15 in a single-line PR.
+
+       No per-rule env flag — consistent with the other 5 rules in
+       the registry. Rollback = revert this commit. */
+    id: 'FALLING_KNIFE',
+    weight: -50,
+    tag: '🔪FALLING',
+    condition: (ctx) => typeof ctx.change === 'number' && ctx.change < -10,
+  }),
 ]);
 
 /* applyRules(ctx) — pure function. Runs every rule against the ctx

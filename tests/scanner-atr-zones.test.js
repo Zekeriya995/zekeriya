@@ -109,6 +109,22 @@ test('atrZones — non-numeric override mults fall back to defaults', () => {
   assert.equal(out.tp2, 105);
 });
 
+test('atrZones — Infinity override mults fall back to defaults (correctness NIT A1)', () => {
+  /* `+Infinity > 0` is true but Number.isFinite catches it. Without
+     this guard the stop becomes -Infinity (rescued later by the
+     degenerate guard) but the override gate would be inconsistent
+     with how NaN / -Infinity are already filtered. */
+  const out = atrZones(100, 1, { stop: Infinity, tp1: Infinity, tp2: Infinity });
+  assert.equal(out.stop, 98.5);
+  assert.equal(out.tp1, 103);
+  assert.equal(out.tp2, 105);
+});
+
+test('atrZones — -Infinity override mults fall back to defaults', () => {
+  const out = atrZones(100, 1, { stop: -Infinity });
+  assert.equal(out.stop, 98.5);
+});
+
 /* ─── Degenerate-setup guard ───────────────────────────────────── */
 
 test('atrZones — ATR large enough to drive stop ≤ 0 returns null', () => {

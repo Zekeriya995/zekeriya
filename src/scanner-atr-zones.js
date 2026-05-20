@@ -49,12 +49,17 @@ function atrZones(price, atr, opts) {
   /* Resolve each multiplier: use override when it's a positive
      finite number, fall back to the default otherwise. Rejecting
      non-positive or non-finite overrides is intentional — a
-     negative `stop` mult would flip the stop ABOVE price, and a
-     zero would put stop AT price (zero risk = degenerate). */
-  const sM =
-    opts && typeof opts.stop === 'number' && opts.stop > 0 ? opts.stop : DEFAULT_MULTS.stop;
-  const t1M = opts && typeof opts.tp1 === 'number' && opts.tp1 > 0 ? opts.tp1 : DEFAULT_MULTS.tp1;
-  const t2M = opts && typeof opts.tp2 === 'number' && opts.tp2 > 0 ? opts.tp2 : DEFAULT_MULTS.tp2;
+     negative `stop` mult would flip the stop ABOVE price, a zero
+     would put stop AT price (zero risk = degenerate), and a
+     positive Infinity would multiply ATR to Infinity, producing
+     stop = -Infinity (caught later by the guard but inconsistent
+     with how NaN / -Infinity are already filtered here). The
+     Number.isFinite check rejects all three pathological cases
+     up-front. Surfaced by pre-merge correctness review (NIT A1). */
+  const _isPos = (v) => Number.isFinite(v) && v > 0;
+  const sM = opts && _isPos(opts.stop) ? opts.stop : DEFAULT_MULTS.stop;
+  const t1M = opts && _isPos(opts.tp1) ? opts.tp1 : DEFAULT_MULTS.tp1;
+  const t2M = opts && _isPos(opts.tp2) ? opts.tp2 : DEFAULT_MULTS.tp2;
 
   const stop = price - sM * atr;
   const tp1 = price + t1M * atr;

@@ -87,10 +87,47 @@ back to the legacy fixed ladder. No tag added in that case. So:
 return to the legacy fixed ladder. No data migration. No flag-on
 data is lost because nothing is persisted differently.
 
+### ⚠ Known limitation — outcome evaluator threshold mismatch
+
+`src/scanner-history.js:143-146` (`evaluateOpenSignals`) classifies
+win / loss / partial outcomes against **fixed** +5% / 0% / -3%
+thresholds, **ignoring the per-signal `sl` / `tp1` values it
+persists**. With Phase 2.A.4, ATR-zoned BTC signals carry tighter
+SL (~-2.25%) and tighter TP1 (~+4.5%) than the legacy ladder, so:
+
+- A BTC trade that hits its real ATR stop at -2.5% is logged as
+  `partial_loss` (would be `loss` if evaluator read `entry.sl`).
+- A BTC trade that hits its real TP1 at +4.5% is logged as
+  `partial_win` (would be `win` if evaluator read `entry.tp1`).
+
+This biases the tag-stats report (Phase 3.1 and the new validator
+in PR #103): the `📐ATR_ZONES` family will appear to have a
+*worse* threshold-based win rate than identical-quality legacy
+signals — not because the ATR bounds are worse, but because the
+outcome ladder is locked to the legacy thresholds.
+
+Proper fix is a Phase 4 deliverable (per-signal outcome evaluation
+using `entry.sl` / `entry.tp1` / `entry.tp2`). Until then, treat
+ATR_ZONES vs. legacy win-rate comparisons as suggestive, not
+authoritative. The `avgGain` metric is unaffected — it uses raw
+`pctChange` from the evaluation, which doesn't depend on
+thresholds.
+
+Surfaced by the pre-merge SRE review.
+
+### Pre-merge review fixes applied
+
+- `src/scanner-atr-zones.js` — multiplier override now uses
+  `Number.isFinite(v) && v > 0` instead of `typeof === 'number' && v > 0`
+  (correctness review NIT A1). Catches `+Infinity` overrides up-front
+  rather than relying on the downstream degenerate-setup guard.
+- `tests/scanner-atr-zones.test.js` — 2 new tests lock the
+  `Infinity` / `-Infinity` fallback behavior.
+
 ### Test results
 
-- `npm run check` → lint clean, format clean, 658 / 658 tests pass
-  (was 633 + 21 atr-zones + 4 integration).
+- `npm run check` → lint clean, format clean, 660 / 660 tests pass
+  (was 633 + 21 atr-zones + 4 integration + 2 review fix).
 - `node --check server.js` → clean.
 
 ### References
@@ -98,6 +135,7 @@ data is lost because nothing is persisted differently.
 - `SCANNER_AUDIT_2026_05_15.md` §2.5, §6 P2.A.4, §8.1 decision D
 - `src/scanner-helpers.js:78-113` (browser counterpart — same math)
 - `src/indicator-engine.js:106-199` (ATR computation source)
+- Pre-merge correctness + SRE review agents (2026-05-20)
 
 ---
 

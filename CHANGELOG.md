@@ -1,5 +1,104 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.2.1 — Client overlays server-computed SL/TP/RR] — 2026-05-20
+
+**Client-side change. PARTIAL convergence to Phase 2.A.2.**
+First ratchet of "PWA reads server signals". For any symbol the
+server scanner has a fresh signal for (`/api/all` → `signals[]`,
+indexed by `s`), the PWA overlays `sl` / `tp1` / `tp2` / `rr` from
+the server result onto its own `deepAnalyze` output. Score, tier,
+and other tags stay client-side for now (deferred to PR D2.A.2.2 /
+.3).
+
+### Why this finally surfaces 2.A.4.b for users
+
+Phase 2.A.4.b shipped tier-aware ATR multipliers server-side, but
+the BTC card in the PWA still showed the wider non-tier-1 TP1
+(+6.5%) because the client's `scanner-helpers.js` atrZones never
+knew about `TIER1_MULTS`. After this PR, the card shows the
+server's tier-1 bounds directly (+3.92% TP1 on a typical BTC
+setup). The `📡SRV` observability tag marks any signal whose
+SL/TP/RR was overlaid from the server.
+
+Note on tag-stats scope: `📡SRV` is added on the CLIENT after
+the overlay step, so the server's `/api/scanner/tag-stats`
+endpoint (which aggregates `pass.signals` produced by
+`scoreSymbol` server-side) does NOT see this tag — it only sees
+its own server tags (`📐ATR_ZONES`, `📐ATR_T1`, `🪙ULTRA`, ...).
+The client's local `tagPerf` map (`app.js:1504`) DOES capture
+`📡SRV` and persists per-tag outcomes to localStorage for that
+individual user. A future server-side complement (emit `📡SRV`
+on server signals whose bounds came from full-data scoring)
+would let the cross-user tag-stats endpoint slice by this tag
+too. Deferred.
+
+### Files changed
+
+- `app.js` line ~1973 (in `loadTk()`): captures `all.signals` into
+  `window.__serverSignals` (keyed by symbol) and timestamps the
+  capture. Falsy when the server has not run a pass yet — the
+  overlay step no-ops cleanly.
+- `app.js` line ~944 (in `getScanResults()`): after `deepAnalyze`
+  resolves, walks the result list and overlays the server bounds
+  in TWO places (the second is what makes the UI actually
+  change):
+    1. Top-level `_row.sl / .tp1 / .tp2 / .rr` — for any future
+       consumer that reads them.
+    2. `_row.smartEntry.stop / .target1 / .target2 / .rr` —
+       this is the data path every visible card reads
+       (`app.js:1353` trade-zone card, `:3111` ultraCard,
+       `:6321` top-3 opps, `:2898` openTrade). Preserves the
+       string-typed `rr` contract (`.toFixed(1)`) from
+       deepAnalyze's `smartEntry` construction at line 2774.
+       Also aligns `smartEntry.entry` to the server's
+       reference price so displayed pct is exact, not a mix
+       of server target / local entry.
+  Adds the `📡SRV` tag to the overlaid row.
+- `CHANGELOG.md` — this entry.
+
+### Freshness + safety
+
+- Server signals must be fresher than **5 minutes** to apply.
+  Anything older falls back to the client's own values — defends
+  against a stuck server scanner returning ancient bounds.
+- Numeric overlay values must satisfy ALL of: `Number.isFinite`
+  on `sl`/`tp1`/`tp2`/`rr`, plus `sl > 0`, `tp1 > sl`,
+  `tp2 > 0`, `rr > 0`. Anything that fails any gate falls back
+  to the client's local values unchanged.
+- The entire overlay is wrapped in `try/catch` and never throws.
+  Any failure is logged via `_scanWarn` (rate-limited) and the
+  pass continues with pure-local bounds.
+
+### Rollback (browser-side, no redeploy)
+
+In the user's browser DevTools console:
+```js
+localStorage.setItem('nxScannerFix_server_signals','off');
+location.reload();
+```
+The overlay block reads the flag every pass, so flipping it OFF
+reverts to pure-local quickScan + deepAnalyze.
+
+### Verification
+
+- `npm run check` — lint + format + tests still green (app.js has
+  no Node test suite; only the static bits are checked).
+- **Manual browser verification REQUIRED** post-deploy:
+  1. Pull on VPS, restart pm2
+  2. Open `shamcyrpto.com` in browser
+  3. Scanner tab — find a BTC or ETH signal
+  4. The card should show TP1 ~+3-4% (was +6-7%)
+  5. The card's tag chips should include `📡SRV`
+  6. DevTools console: `window.__serverSignals` is a non-empty
+     object keyed by symbol
+  7. **Rollback test:** in DevTools console run
+     `localStorage.setItem('nxScannerFix_server_signals','off')`
+     then wait one scanner tick (~60s) OR `location.reload()`,
+     and confirm: TP1 reverts to the local +6-7% value AND the
+     `📡SRV` tag chip is gone. Then re-enable with
+     `localStorage.removeItem('nxScannerFix_server_signals')`
+     and verify the overlay returns.
+
 ## [Scanner Phase 2.A.4.b — Tier-aware ATR multipliers] — 2026-05-20
 
 **Server-side behavior change. Tighter TP/SL bounds for tier-1 majors.**

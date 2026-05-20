@@ -953,6 +953,18 @@ function getScanResults(forceFresh){
          approximations. Score / tier / tags stay client-side for
          now — those migrations are Phase 2.A.2.2 / .3.
 
+         CRITICAL: the UI reads bounds from `smartEntry.target1`
+         /target2/stop (line 1353 trade-zone card, line 3111
+         ultraCard, line 6321 top-3 opps). Writing only to top-
+         level r.sl/tp1/tp2/rr is a no-op — the first iteration
+         of this PR missed that and was caught in correctness
+         review. We now overlay smartEntry IN-PLACE when it
+         exists, preserving the string-typed `rr` contract that
+         deepAnalyze established at line 2774 (`.toFixed(1)`).
+         Top-level r.sl/tp1/tp2/rr are also written for any
+         future consumer that reads them, but the visible cards
+         depend on the smartEntry overlay.
+
          Rollback: localStorage.setItem('nxScannerFix_server_signals','off')
          in the browser console, then reload. No redeploy needed. */
       try{
@@ -963,16 +975,43 @@ function getScanResults(forceFresh){
           for(var _ri=0;_ri<r.length;_ri++){
             var _row=r[_ri];
             var _srv=window.__serverSignals[_row.s];
-            if(_srv && Number.isFinite(+_srv.sl) && Number.isFinite(+_srv.tp1)
-               && +_srv.sl>0 && +_srv.tp1>+_srv.sl){
-              _row.sl=+_srv.sl;
-              _row.tp1=+_srv.tp1;
-              _row.tp2=+_srv.tp2;
-              _row.rr=+_srv.rr;
-              /* Observability tag so the user (and tag-stats) can
-                 see which signals had the server overlay applied.
-                 Pushed only if not already present (idempotent on
-                 repeated overlays of the same row). */
+            /* Validate every numeric field independently. The server
+               constructs sl/tp1/tp2/rr together so partial corruption
+               is unlikely, but guards are cheap and rule out NaN /
+               Infinity write-through if a future server change
+               introduces a divergence. */
+            if(_srv
+               && Number.isFinite(+_srv.sl) && +_srv.sl>0
+               && Number.isFinite(+_srv.tp1) && +_srv.tp1>+_srv.sl
+               && Number.isFinite(+_srv.tp2) && +_srv.tp2>0
+               && Number.isFinite(+_srv.rr) && +_srv.rr>0){
+              var _sSl=+_srv.sl, _sTp1=+_srv.tp1, _sTp2=+_srv.tp2, _sRr=+_srv.rr;
+              _row.sl=_sSl;
+              _row.tp1=_sTp1;
+              _row.tp2=_sTp2;
+              _row.rr=_sRr;
+              /* Overlay smartEntry too — this is the field every
+                 visible card actually reads. Preserve smartEntry.rr
+                 as a string (toFixed(1)) to match deepAnalyze's
+                 type contract; downstream renderers do `1:'+se.rr`
+                 string concat. */
+              if(_row.smartEntry){
+                _row.smartEntry.stop=_sSl;
+                _row.smartEntry.target1=_sTp1;
+                _row.smartEntry.target2=_sTp2;
+                _row.smartEntry.rr=_sRr.toFixed(1);
+                /* Also align the entry price to the server's
+                   reference so the displayed pct ((target1 -
+                   entry) / entry × 100) is bit-exact with the
+                   server's tier-aware math — not a mix of server
+                   target and local entry. Only when the server
+                   price is itself a sane positive number. */
+                if(Number.isFinite(+_srv.price) && +_srv.price>0){
+                  _row.smartEntry.entry=+_srv.price;
+                }
+              }
+              /* Observability tag — added only if not already
+                 present (idempotent on repeated overlays). */
               if(Array.isArray(_row.tags) && _row.tags.indexOf('📡SRV')===-1){
                 _row.tags.push('📡SRV');
               }

@@ -39,8 +39,20 @@ too. Deferred.
   capture. Falsy when the server has not run a pass yet — the
   overlay step no-ops cleanly.
 - `app.js` line ~944 (in `getScanResults()`): after `deepAnalyze`
-  resolves, walks the result list and overlays
-  `sl`/`tp1`/`tp2`/`rr` for any symbol with a server signal.
+  resolves, walks the result list and overlays the server bounds
+  in TWO places (the second is what makes the UI actually
+  change):
+    1. Top-level `_row.sl / .tp1 / .tp2 / .rr` — for any future
+       consumer that reads them.
+    2. `_row.smartEntry.stop / .target1 / .target2 / .rr` —
+       this is the data path every visible card reads
+       (`app.js:1353` trade-zone card, `:3111` ultraCard,
+       `:6321` top-3 opps, `:2898` openTrade). Preserves the
+       string-typed `rr` contract (`.toFixed(1)`) from
+       deepAnalyze's `smartEntry` construction at line 2774.
+       Also aligns `smartEntry.entry` to the server's
+       reference price so displayed pct is exact, not a mix
+       of server target / local entry.
   Adds the `📡SRV` tag to the overlaid row.
 - `CHANGELOG.md` — this entry.
 
@@ -49,9 +61,10 @@ too. Deferred.
 - Server signals must be fresher than **5 minutes** to apply.
   Anything older falls back to the client's own values — defends
   against a stuck server scanner returning ancient bounds.
-- Numeric overlay values must satisfy `Number.isFinite(sl)`,
-  `Number.isFinite(tp1)`, `sl > 0`, `tp1 > sl`. Anything that
-  fails the gate falls back to the client.
+- Numeric overlay values must satisfy ALL of: `Number.isFinite`
+  on `sl`/`tp1`/`tp2`/`rr`, plus `sl > 0`, `tp1 > sl`,
+  `tp2 > 0`, `rr > 0`. Anything that fails any gate falls back
+  to the client's local values unchanged.
 - The entire overlay is wrapped in `try/catch` and never throws.
   Any failure is logged via `_scanWarn` (rate-limited) and the
   pass continues with pure-local bounds.

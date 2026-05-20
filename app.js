@@ -975,13 +975,66 @@ function getScanResults(forceFresh){
           for(var _ri=0;_ri<r.length;_ri++){
             var _row=r[_ri];
             var _srv=window.__serverSignals[_row.s];
-            /* Validate every numeric field independently. The server
-               constructs sl/tp1/tp2/rr together so partial corruption
-               is unlikely, but guards are cheap and rule out NaN /
+            if(!_srv) continue;
+
+            /* Phase 2.A.2.2 — tier overlay (hoisted above the
+               numeric bounds gate per SRE NIT #1 on PR #113).
+               ASYMMETRIC by design: we only DEMOTE the client's
+               ULTRA/CONFIRMED flag when the server emits a
+               protective tag for the same symbol. Never promote
+               — the client has richer scoring rules (TIER2_BONUS,
+               WHALE_TARGET, CVD_BUY, TAKER, depth, BID_PRESS,
+               OI_BUILD, …) that the server doesn't compute, so a
+               client ULTRA based on those signals shouldn't get
+               capped by a quieter server view. But if the server
+               has caught a manipulation-cap, P&D risk, or
+               FALLING_KNIFE that the client doesn't track, we
+               surface that as a visual demotion so the user sees
+               the safer tier.
+
+               Hoisted ABOVE the bounds-validity gate so that a
+               server signal with `🚫MANIP_CAP` but corrupt
+               sl/tp1/tp2 still demotes — protective demotion is
+               strictly safer than bounds overlay and shouldn't
+               be coupled to bounds validity.
+
+               Demotion principle:
+                 client ULTRA  → demoted to CONFIRMED
+                 client CONF   → demoted to neither (cleared)
+               The 🛑SRV_DEMOTE tag marks the row so users (and
+               tag-stats) can audit which signals got demoted by
+               which server flag. */
+            var _srvTags = Array.isArray(_srv.tags) ? _srv.tags : [];
+            var _hasDemoteFlag = false;
+            for(var _ti=0;_ti<_srvTags.length;_ti++){
+              var _t = _srvTags[_ti];
+              if(typeof _t !== 'string') continue;
+              if(_t.indexOf('🚫MANIP_CAP')===0
+                 || _t.indexOf('🚨MANIP_HIGH')===0
+                 || _t.indexOf('🔪FALLING')===0
+                 || _t.indexOf('🚨P&D_RISK')===0){
+                _hasDemoteFlag = true; break;
+              }
+            }
+            if(_hasDemoteFlag){
+              var _wasUltra = _row.ultra === true;
+              var _wasConf  = _row.confirmed === true;
+              if(_wasUltra){ _row.ultra = false; _row.confirmed = true; }
+              else if(_wasConf){ _row.confirmed = false; }
+              if(_wasUltra || _wasConf){
+                if(Array.isArray(_row.tags) && _row.tags.indexOf('🛑SRV_DEMOTE')===-1){
+                  _row.tags.push('🛑SRV_DEMOTE');
+                }
+              }
+            }
+
+            /* Phase 2.A.2.1 — bounds overlay. Validate every
+               numeric field independently. The server constructs
+               sl/tp1/tp2/rr together so partial corruption is
+               unlikely, but guards are cheap and rule out NaN /
                Infinity write-through if a future server change
                introduces a divergence. */
-            if(_srv
-               && Number.isFinite(+_srv.sl) && +_srv.sl>0
+            if(Number.isFinite(+_srv.sl) && +_srv.sl>0
                && Number.isFinite(+_srv.tp1) && +_srv.tp1>+_srv.sl
                && Number.isFinite(+_srv.tp2) && +_srv.tp2>0
                && Number.isFinite(+_srv.rr) && +_srv.rr>0){

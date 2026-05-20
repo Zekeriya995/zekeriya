@@ -57,12 +57,23 @@ test cases pin this property as a contract.
 ### Rollback
 
 This PR has no behaviour change so no rollback flag is strictly
-needed. To revert: `git revert <merge-commit>`. The defensive
-`else` fallback in `quickScan` (which mirrors the inline
-pre-PR-B/C path) provides per-page rollback via the existing
-`nxScannerFix_unified_rules` localStorage flag (Phase 0
-namespace at `app.js:14`) — if a user sets that to 'off', they
-get the inline path for both PR B and PR C rules.
+needed. To revert: `git revert <merge-commit>` on the server.
+
+The Phase 0 namespace at `app.js:14` reserves
+`nxScannerFix_unified_rules` for per-page localStorage rollback
+of Phase 2.A.1 work, but the reservation is currently a
+no-op — **no code reads it yet**. If a future PR needs to wire
+real per-page rollback, it would gate the `if (window.SCORING_RULES)`
+branch on that flag and fall back to the inline `else` path
+when the flag is set to 'off'. Out of scope for PR C since
+there's no behaviour to roll back.
+
+The defensive `else` fallback in `quickScan` (which mirrors the
+inline pre-PR-B/C path) only fires when `window.SCORING_RULES`
+itself failed to load (CDN issue, ad-blocker stripping the
+`<script>` tag, …). It is NOT a flag-driven rollback path —
+flagging that distinction here so a future on-call doesn't
+expect setting the flag to do anything.
 
 ### Parity ratchet status
 

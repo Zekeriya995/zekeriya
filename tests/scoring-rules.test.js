@@ -141,6 +141,39 @@ test('NEW_BONUS — does NOT fire when isTier2=true (excludes tier-2 from NEW)',
   assert.equal(fire('NEW_BONUS', TIER2_CTX), false);
 });
 
+test('TIER2_BONUS — does NOT fire when isTier1=true even if isTier2=true (TIER1>TIER2 precedence)', () => {
+  /* PR C regression guard: the client's `tier2Coins` list (a
+     ranked-by-volume slice at app.js:79-81) is NOT enforced
+     disjoint from the hardcoded TIER1 set. A hot major (BTC,
+     ETH, SOL …) can land in BOTH. The inline if/else if was
+     mutually exclusive by syntax — only the first branch fired,
+     so BTC scored +10 (TIER1) not +15 (TIER1+TIER2). The
+     `isTier1 !== true` gate on TIER2_BONUS preserves this
+     precedence under the registry's independent-rules model.
+     This test pins the regression — flipping the gate off
+     would surface as BTC suddenly scoring +5 higher. */
+  const overlapCtx = { isTier1: true, isTier2: true, volume: 1e8, change: 1 };
+  assert.equal(fire('TIER1_BONUS', overlapCtx), true, 'TIER1 still fires');
+  assert.equal(fire('TIER2_BONUS', overlapCtx), false, 'TIER2 must NOT fire when TIER1 wins');
+  assert.equal(fire('NEW_BONUS', overlapCtx), false, 'NEW does not fire either');
+});
+
+test('applyRules — TIER1∩TIER2 overlap coin scores +10 (TIER1 only), NOT +15', () => {
+  /* End-to-end regression: a BTC-shaped ctx that's both tier-1
+     AND in the client's tier-2 list should produce the same
+     score as before PR C (+10 from TIER1_BONUS only). If a
+     future refactor inadvertently removes the precedence gate
+     on TIER2_BONUS, this test catches it. */
+  const out = applyRules({ isTier1: true, isTier2: true, volume: 6e7, change: 1.5 });
+  /* Score: TIER1 (+10) + SILENT_ACC (+25, since 6e7>5e7 and
+     abs(1.5)<2) + EARLY_ENTRY (+20, since 6e7>3e7 and 1.5 in
+     [0.3, 2)). NO TIER2, NO NEW. Total = 55. */
+  assert.equal(out.scoreDelta, 55);
+  assert.ok(out.tagsDelta.includes('🏆TOP100'), 'must carry TIER1 tag');
+  assert.ok(!out.tagsDelta.includes('🥈T2'), 'must NOT carry TIER2 tag on overlap');
+  assert.ok(!out.tagsDelta.includes('🔍NEW'), 'must NOT carry NEW tag');
+});
+
 test('NEW_BONUS — fires for server-side ctx that omits isTier2 (preserves pre-PR-C server behaviour)', () => {
   /* `isTier2 !== true` is intentional (not `=== false`) so that an
      undefined isTier2 still passes the gate. This is exactly the

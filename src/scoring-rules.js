@@ -10,7 +10,11 @@
  * later PRs — surfaced by pre-merge SRE review):
  *   - Mutually-exclusive `else if` chains (MEGA_VOL/HIGH_VOL/VOL):
  *     workable as N rules with disjoint conditions, but loses the
- *     "exactly one fires" guarantee. PR C will address.
+ *     "exactly one fires" guarantee. PR C addresses the TIER
+ *     chain by encoding precedence in the conditions themselves
+ *     (TIER1 > TIER2 > NEW); the same pattern will work for the
+ *     VOL chain in PR D. The 3-way mutual exclusion contract is
+ *     pinned by tests/scoring-rules.test.js.
  *   - Multi-tag tier rules (whaleWave A/B/C/D, mtfAgreement):
  *     could be N rows or a `tagFn(ctx)` field. Decide in PR D.
  *   - Non-additive scoring (P&D KILL → score floor at -100):
@@ -44,6 +48,10 @@
  * Expected `ctx` shape (built by the consumer before iterating rules):
  *   {
  *     isTier1:  boolean
+ *     isTier2:  boolean (CLIENT-only — server omits this field;
+ *                        TIER2_BONUS strict-checks `=== true` so
+ *                        an absent isTier2 cleanly no-ops on the
+ *                        server side. Added in PR C.)
  *     volume:   number  — 24h quote volume in USD
  *     change:   number  — 24h percentage change
  *   }
@@ -102,8 +110,19 @@ const RULES = Object.freeze([
        data into the server: the server passes no `isTier2` field
        (its applyRules ctx omits it), so the strict `=== true`
        check cleanly no-ops on the server side. Net behaviour:
-       server unchanged, client now reads tier-2 from the registry. */
-    condition: (ctx) => ctx.isTier2 === true,
+       server unchanged, client now reads tier-2 from the registry.
+
+       The `isTier1 !== true` half of the gate is REQUIRED to
+       preserve the inline if/else if/else mutual exclusion. The
+       client's `tier2Coins` list (populated from a ranked-by-vol
+       slice at app.js:79-81) is NOT enforced disjoint from the
+       hardcoded `TIER1` set, so a hot major (BTC, ETH, SOL …)
+       can appear in BOTH. Without the tier-1 exclusion, BTC
+       would silently start scoring +15 (TIER1 +10 + TIER2 +5)
+       instead of +10 — a drift the SRE review of PR #114
+       caught. Symmetric with the `isTier2 !== true` gate on
+       NEW_BONUS: precedence is TIER1 > TIER2 > NEW. */
+    condition: (ctx) => ctx.isTier2 === true && ctx.isTier1 !== true,
   }),
   Object.freeze({
     id: 'NEW_BONUS',

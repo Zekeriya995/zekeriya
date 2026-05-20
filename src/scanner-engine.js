@@ -19,6 +19,7 @@
 'use strict';
 
 const pdDetector = require('./scanner-pd-detector');
+const atrZonesModule = require('./scanner-atr-zones');
 
 /* Server-side P&D detector kill-switch. Default ON; set
    SCANNER_SERVER_PD_ENABLED=false in the env for instant rollback
@@ -26,6 +27,13 @@ const pdDetector = require('./scanner-pd-detector');
    restart required to flip. See SCANNER_AUDIT_2026_05_15.md §8.1
    decision D and docs/SCANNER_PD_THRESHOLDS.md. */
 const PD_DETECTOR_ENABLED = process.env.SCANNER_SERVER_PD_ENABLED !== 'false';
+
+/* Phase 2.A.4 — ATR-aware SL/TP kill switch. When ON, scoreSymbol
+   uses ctx.indicator.atr (when present) to compute volatility-
+   aware stop/target bounds via scanner-atr-zones. When OFF (or
+   no ATR for the symbol), falls back to the fixed -3% / +5% / +10%
+   ladder. Default ON. */
+const ATR_ZONES_ENABLED = process.env.SCANNER_SERVER_ATR_ZONES !== 'false';
 
 /* Manipulation HIGH → tier hard-cap kill-switch (Phase 1.2).
    When ON, any signal whose manipulation verdict is HIGH cannot
@@ -574,17 +582,38 @@ function scoreSymbol(sym, ctx) {
   /* Risk/Reward levels. Computing them server-side means the PWA
      can render entry/SL/TP cards without re-deriving the maths on
      every device, and downstream consumers (Paper Trading, push
-     payload) get a consistent reference. The percentages are kept
-     intentionally conservative so the R:R holds across volatility
-     regimes — tighter targets earn more often than wide ones. */
-  const sl = +(d.price * 0.97).toFixed(8);
-  const tp1 = +(d.price * 1.05).toFixed(8);
-  const tp2 = +(d.price * 1.1).toFixed(8);
-  /* Reward (TP1 minus entry) / Risk (entry minus SL) ≈ 1.67 — the
-     same number for every signal because the percentages are fixed.
-     Exposed anyway so the UI can show "R:R 1.67" without
-     recomputing. */
-  const rr = 5 / 3;
+     payload) get a consistent reference.
+
+     Phase 2.A.4 — when an ATR(14) reading is available on this
+     symbol (computed every 60s by indicator-engine on 15m klines
+     for the INDICATOR_SYMBOLS short-list), use it for volatility-
+     aware bounds. Otherwise fall back to the legacy fixed-percent
+     ladder so coins outside the indicator coverage keep working.
+
+     The ATR path is gated by SCANNER_SERVER_ATR_ZONES so it can be
+     flipped off without redeploy if the new bounds cause issues. */
+  const atrInput =
+    ATR_ZONES_ENABLED && ctx.indicator && typeof ctx.indicator.atr === 'number'
+      ? ctx.indicator.atr
+      : null;
+  const zones = atrInput ? atrZonesModule.atrZones(d.price, atrInput) : null;
+  let sl;
+  let tp1;
+  let tp2;
+  let rr;
+  if (zones) {
+    sl = zones.stop;
+    tp1 = zones.tp1;
+    tp2 = zones.tp2;
+    rr = zones.rr;
+    tags.push('📐ATR_ZONES');
+  } else {
+    /* Legacy fixed-percent fallback. -3% / +5% / +10% gives R:R = 1.67. */
+    sl = +(d.price * 0.97).toFixed(8);
+    tp1 = +(d.price * 1.05).toFixed(8);
+    tp2 = +(d.price * 1.1).toFixed(8);
+    rr = Math.round((5 / 3) * 100) / 100;
+  }
 
   /* Tier resolution. The score → tier mapping is straightforward
      except for the Phase 1.2 hard-cap: a HIGH manipulation verdict

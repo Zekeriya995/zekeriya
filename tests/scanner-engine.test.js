@@ -683,3 +683,61 @@ test('Phase 3.2 — accepted signals do NOT count as rejections', () => {
     out.rejections.lowScore;
   assert.equal(out.signals.length + totalRejected, out.rejections.total);
 });
+
+/* ─── Phase 2.A.4 — ATR-aware SL/TP wiring ─────────────────────── */
+
+test('Phase 2.A.4 — ATR present → ATR_ZONES tag + non-fixed sl/tp', () => {
+  /* BTC at 50,000 with ATR 750 → SL=48,875, TP1=52,250, TP2=53,750.
+     Compare with the legacy fixed ladder (48,500 / 52,500 / 55,000). */
+  const r = scoreSymbol('BTC', {
+    ticker: { price: 50000, change: 0.5, volume: 5e7, high: 50500, low: 49500 },
+    indicator: { atr: 750 },
+  });
+  assert.ok(r);
+  assert.ok(r.tags.includes('📐ATR_ZONES'), 'must tag the override');
+  assert.equal(r.sl, 48875);
+  assert.equal(r.tp1, 52250);
+  assert.equal(r.tp2, 53750);
+  assert.equal(r.rr, 2, 'default 1.5/3.0 mults give R:R = 2.0');
+});
+
+test('Phase 2.A.4 — no ATR → falls back to fixed -3% / +5% / +10%', () => {
+  /* Same fixture without indicator.atr — must use the legacy ladder. */
+  const r = scoreSymbol('BTC', {
+    ticker: { price: 50000, change: 0.5, volume: 5e7, high: 50500, low: 49500 },
+    /* no indicator → no atr */
+  });
+  assert.ok(r);
+  assert.ok(!r.tags.includes('📐ATR_ZONES'), 'must NOT tag when fallback fires');
+  assert.equal(r.sl, +(50000 * 0.97).toFixed(8));
+  assert.equal(r.tp1, +(50000 * 1.05).toFixed(8));
+  assert.equal(r.tp2, +(50000 * 1.1).toFixed(8));
+});
+
+test('Phase 2.A.4 — ATR <= 0 falls back to fixed ladder', () => {
+  /* indicator-engine returns 0 when there are not enough klines.
+     scoreSymbol must treat this as "no ATR available". */
+  const r = scoreSymbol('BTC', {
+    ticker: { price: 50000, change: 0.5, volume: 5e7, high: 50500, low: 49500 },
+    indicator: { atr: 0 },
+  });
+  assert.ok(r);
+  assert.ok(!r.tags.includes('📐ATR_ZONES'));
+  assert.equal(r.sl, 48500); /* 50000 * 0.97 */
+});
+
+test('Phase 2.A.4 — high-volatility altcoin gets a wider stop than fixed', () => {
+  /* DOGE-shaped: price 0.10, ATR 0.004 (4% of price).
+     ATR stop = 0.10 - 1.5 * 0.004 = 0.094 (-6%) vs fixed -3% = 0.097.
+     The wider stop is the whole point — fixed -3% would get knocked
+     out by normal noise on this coin. */
+  const r = scoreSymbol('DOGE', {
+    ticker: { price: 0.1, change: 0.5, volume: 5e7, high: 0.105, low: 0.095 },
+    indicator: { atr: 0.004 },
+  });
+  assert.ok(r);
+  assert.ok(r.tags.includes('📐ATR_ZONES'));
+  assert.ok(Math.abs(r.sl - 0.094) < 1e-9);
+  /* Wider than the legacy -3% stop (0.097) — explicitly. */
+  assert.ok(r.sl < 0.1 * 0.97, 'ATR stop must be lower than legacy -3% for high-vol coins');
+});

@@ -702,6 +702,10 @@ test('Phase 2.A.4 — ATR present → ATR_ZONES tag + non-fixed sl/tp (tier-1 pa
   });
   assert.ok(r);
   assert.ok(r.tags.includes('📐ATR_ZONES'), 'must tag the override');
+  assert.ok(
+    r.tags.includes('📐ATR_T1'),
+    'tier-1 symbol with tier-aware flag ON must carry the observability tag'
+  );
   assert.equal(r.sl, 49100);
   assert.equal(r.tp1, 51350);
   assert.equal(r.tp2, 52250);
@@ -787,4 +791,11 @@ test('Phase 2.A.4.b — non-tier-1 symbol keeps DEFAULT_MULTS (regression guard)
   assert.ok(r);
   assert.ok(Math.abs(r.tp1 - 0.0000224) < 1e-12, 'non-tier-1 must use 3.0× ATR for TP1');
   assert.equal(r.rr, 2, 'non-tier-1 R:R = 2.0');
+  /* Observability invariant: non-tier-1 must NOT carry the ATR_T1
+     tag — pairs with the SHIB tier-aware test above to lock that
+     the tag only fires for tier-1 symbols. */
+  assert.ok(
+    !r.tags.includes('📐ATR_T1'),
+    'non-tier-1 symbol must NOT carry the ATR_T1 observability tag'
+  );
 });

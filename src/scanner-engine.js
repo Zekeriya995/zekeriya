@@ -631,6 +631,15 @@ function scoreSymbol(sym, ctx) {
     tp2 = zones.tp2;
     rr = zones.rr;
     tags.push('📐ATR_ZONES');
+    /* Phase 2.A.4.b observability: stamp an extra tag when the
+       tier-1 multipliers were actually applied. Lets the Phase 3.1
+       tag-stats pipeline answer the post-hoc question "did the
+       tighter tier-1 multipliers actually improve win rate?"
+       Without this tag the two regimes are indistinguishable in
+       historical data. Cheap to add now; impossible to retrofit. */
+    if (TIER_AWARE_ATR_ENABLED && isTier1) {
+      tags.push('📐ATR_T1');
+    }
   } else {
     /* Legacy fixed-percent fallback. -3% / +5% / +10% gives R:R = 1.67. */
     sl = +(d.price * 0.97).toFixed(8);

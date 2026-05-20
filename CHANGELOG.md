@@ -54,14 +54,24 @@ the new tier-1 R:R = 1.5 stays clear of it. A future tune below
 - `.env.example` — documents `SCANNER_TIER_AWARE_ATR_ZONES=true`.
 - `CHANGELOG.md` — this entry.
 
+### Observability
+
+When the tier-1 path fires, the engine adds a second tag
+`📐ATR_T1` alongside the existing `📐ATR_ZONES`. The Phase 3.1
+tag-stats pipeline picks this up automatically so we can answer
+"did the tighter tier-1 multipliers actually improve win rate?"
+after a few days of data. Without this tag, the two regimes
+would be indistinguishable in historical data — impossible to
+retrofit later.
+
 ### Rollback
 
 `SCANNER_TIER_AWARE_ATR_ZONES=false` in `.env`, then
 `sudo -u nexus pm2 restart nexus-proxy --update-env`. Engine
 stops passing `isTier1=true` and tier-1 symbols revert to the
-non-tier-1 multipliers (the only call-site is line 600-ish in
-`src/scanner-engine.js`). The flag is read once at module load
-so a restart is required.
+non-tier-1 multipliers (the only call-site is the
+`atrZonesModule.atrZones(` call in `src/scanner-engine.js`).
+The flag is read once at module load so a restart is required.
 
 ### Verification
 

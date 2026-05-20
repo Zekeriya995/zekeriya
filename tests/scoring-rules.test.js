@@ -197,3 +197,44 @@ test('UMD loader — exports are reachable from CommonJS require', () => {
   assert.ok(THRESHOLDS);
   assert.equal(typeof applyRules, 'function');
 });
+
+test('UMD loader — browser branch attaches to window.SCORING_RULES (NIT fix)', () => {
+  /* Pre-merge SRE review flagged that only the CommonJS branch of
+     the UMD-lite loader had test coverage. Run the same file in a
+     vm context with `window` defined and `module` undefined to
+     exercise the browser branch. Catches a regression where the
+     browser global path silently breaks (e.g., a future ES-module
+     migration that drops the window assignment). */
+  const vm = require('node:vm');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const src = fs.readFileSync(path.join(__dirname, '..', 'src', 'scoring-rules.js'), 'utf8');
+  const sandbox = { window: {} };
+  vm.createContext(sandbox);
+  vm.runInContext(src, sandbox);
+  assert.ok(sandbox.window.SCORING_RULES, 'window.SCORING_RULES must be defined');
+  assert.ok(Array.isArray(sandbox.window.SCORING_RULES.RULES));
+  assert.equal(typeof sandbox.window.SCORING_RULES.applyRules, 'function');
+  assert.equal(sandbox.window.SCORING_RULES.THRESHOLDS.ULTRA, 100);
+});
+
+/* ─── Deep-freeze contract (NIT fix from correctness review) ──── */
+
+test('RULES — each rule object is individually frozen', () => {
+  /* The outer Object.freeze(RULES) prevents push/pop but not
+     RULES[0].weight = 999. The PR-A polish wraps each rule in its
+     own Object.freeze so the registry is genuinely tamper-proof. */
+  for (const rule of RULES) {
+    assert.ok(Object.isFrozen(rule), `${rule.id}: rule object must be frozen`);
+  }
+});
+
+test('RULES — mutating a rule throws (strict mode)', () => {
+  /* This file is strict mode; in non-strict mode the assignment
+     would silently fail. Either way, the value never changes. */
+  assert.throws(() => {
+    RULES[0].weight = 999;
+  });
+  /* And verify the value did not change. */
+  assert.equal(RULES[0].weight, 10);
+});

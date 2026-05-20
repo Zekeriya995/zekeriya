@@ -6,6 +6,20 @@
  * here becomes structurally impossible to drift between the two
  * sides — the test runner imports this file and pins the contract.
  *
+ * Known un-expressible patterns (will need shape extensions in
+ * later PRs — surfaced by pre-merge SRE review):
+ *   - Mutually-exclusive `else if` chains (MEGA_VOL/HIGH_VOL/VOL):
+ *     workable as N rules with disjoint conditions, but loses the
+ *     "exactly one fires" guarantee. PR C will address.
+ *   - Multi-tag tier rules (whaleWave A/B/C/D, mtfAgreement):
+ *     could be N rows or a `tagFn(ctx)` field. Decide in PR D.
+ *   - Non-additive scoring (P&D KILL → score floor at -100):
+ *     `scoreFn(score, ctx)` field or a separate kind: 'modifier'.
+ *     Stays inline for now.
+ *   - Dynamic tag strings ('📗BID:Nx'): need `tagFn(ctx)` field.
+ *   - Compound rules reading earlier rule outputs: no inter-rule
+ *     state today; would need a two-pass evaluator.
+ *
  * Phase 2.A.1 PR A (this file's first incarnation) ships 5
  * representative simple rules to prove the loader pattern + the
  * server-side wiring. Subsequent PRs migrate the remaining ~40
@@ -56,37 +70,54 @@ const THRESHOLDS = Object.freeze({
   WASH_OI_FLOOR: 100_000,
 });
 
+/* Deep-freeze: outer array AND each rule object. Without freezing
+   the inner objects, `RULES[0].weight = 999` would silently mutate
+   at runtime. Hardening surfaced by pre-merge correctness review.
+   Note that `condition` (a function) cannot be frozen in any
+   meaningful sense — but the closure captures no state, so it
+   doesn't need to be. */
 const RULES = Object.freeze([
-  {
+  Object.freeze({
     id: 'TIER1_BONUS',
     weight: 10,
     tag: '🏆TOP100',
+    /* Strict `=== true` — NOT just truthy. The client-side migration
+       (PR B) MUST pass a real boolean for isTier1, not undefined or
+       a Set membership result that could be missing. The companion
+       NEW_BONUS rule below uses strict `=== false` for the same
+       reason. */
     condition: (ctx) => ctx.isTier1 === true,
-  },
-  {
+  }),
+  Object.freeze({
     id: 'NEW_BONUS',
     weight: 2,
     tag: '🔍NEW',
+    /* Strict `=== false`: the inline code this replaces was an
+       `else` branch which would fire on undefined/null. The strict
+       check is INTENTIONAL — both sides must pass a real boolean.
+       If undefined isTier1 ever reaches the registry, NEITHER
+       TIER1_BONUS nor NEW_BONUS fires, which is safer than silently
+       firing NEW_BONUS for what might actually be a tier-1 symbol. */
     condition: (ctx) => ctx.isTier1 === false,
-  },
-  {
+  }),
+  Object.freeze({
     id: 'SILENT_ACCUMULATION',
     weight: 25,
     tag: '🐋ACC',
     condition: (ctx) => ctx.volume > 5e7 && Math.abs(ctx.change) < 2,
-  },
-  {
+  }),
+  Object.freeze({
     id: 'EARLY_ENTRY',
     weight: 20,
     tag: '🔍EARLY',
     condition: (ctx) => ctx.volume > 3e7 && ctx.change >= 0.3 && ctx.change < 2,
-  },
-  {
+  }),
+  Object.freeze({
     id: 'STEALTH',
     weight: 15,
     tag: '🔍STEALTH',
     condition: (ctx) => ctx.volume > 8e7 && ctx.change >= 0.5 && ctx.change < 3,
-  },
+  }),
 ]);
 
 /* applyRules(ctx) — pure function. Runs every rule against the ctx

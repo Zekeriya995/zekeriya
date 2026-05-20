@@ -10,9 +10,10 @@ the Phase 2.A.1 migration per `docs/SCANNER_UNIFIED_RULES_REGISTRY_DESIGN.md`
 
 A new file `src/scoring-rules.js` exporting `RULES`, `THRESHOLDS`, and
 `applyRules(ctx)` — the **single source of truth** for scanner scoring
-rules. Loaded via UMD-lite (same pattern as `src/utils.js`) so it
-works as CommonJS on the server AND as a `window.SCORING_RULES`
-global in the browser. Zero build step.
+rules. Loaded via UMD-lite (forward-looking — the `module.exports`
+branch handles CommonJS on the server, the `window.SCORING_RULES`
+branch handles direct `<script>` loading in the browser). Zero build
+step. Both branches are unit-tested.
 
 Five "simple" rules migrated in this PR (the rest follow in PR B+):
 
@@ -102,9 +103,42 @@ remains but unused (no consumer). No data migration, no flag.
 Each will follow the same pattern: tiny diff, parity preserved at
 every commit.
 
+### Pre-merge review fixes applied
+
+Two parallel reviewer agents (correctness + SRE) cleared the PR
+with 0 blockers. Applied 4 small hardenings:
+
+- **Deep-freeze inner rule objects** (correctness NOTE 1).
+  `Object.freeze(RULES)` only froze the outer array; `RULES[0].weight =
+  999` would have silently mutated at runtime. Each rule object is
+  now individually frozen. New test asserts mutation throws.
+- **Document strict-equality semantics** (correctness NOTE 2). Added
+  comments on TIER1_BONUS / NEW_BONUS explaining the intentional
+  `=== true` / `=== false` and the contract this imposes on the
+  client's `buildCtx` (must pass real booleans, not undefined).
+- **UMD browser-path test** (SRE NOTE 3). Used `vm.runInContext` with
+  a sandbox `{ window: {} }` to exercise the `window.SCORING_RULES`
+  branch of the loader. Catches regressions in the browser path
+  before PR B lands.
+- **Comment listing un-expressible patterns** (SRE NOTE 1). Top of
+  `src/scoring-rules.js` now lists the 5 patterns the current
+  `{id, weight, tag, condition}` shape can't express (else-if
+  chains, multi-tag tier rules, non-additive scoring, dynamic tag
+  strings, compound rules). Future PRs read this before trying to
+  shoehorn.
+
+Deferred to PR B/D:
+- **`CTX_KEYS` frozen export + dev-mode validator** (SRE NOTE 2).
+  Worth doing when ctx grows past ~12 fields; today's 3 fields don't
+  warrant the layer.
+- **THRESHOLDS consumption** (SRE NOTE 5). PR B should wire
+  `_tierFromScore` to read `THRESHOLDS.ULTRA` etc. so the constant
+  isn't orphan.
+
 ### Test results
 
-- `npm run check` → lint clean, format clean, 692 / 692 tests pass.
+- `npm run check` → lint clean, format clean, 695 / 695 tests pass
+  (was 692 + 3 from the review-fix hardening).
 - `node --check src/scoring-rules.js` → clean.
 - `node --check src/scanner-engine.js` → clean.
 

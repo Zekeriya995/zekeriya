@@ -20,6 +20,7 @@
 
 const pdDetector = require('./scanner-pd-detector');
 const atrZonesModule = require('./scanner-atr-zones');
+const scoringRules = require('./scoring-rules');
 
 /* Server-side P&D detector kill-switch. Default ON; set
    SCANNER_SERVER_PD_ENABLED=false in the env for instant rollback
@@ -283,28 +284,21 @@ function scoreSymbol(sym, ctx) {
   let score = 0;
   const tags = [];
 
-  /* Tier bonus */
-  if (isTier1) {
-    score += 10;
-    tags.push('🏆TOP100');
-  } else {
-    score += 2;
-    tags.push('🔍NEW');
-  }
-
-  /* Silent accumulation — high volume, flat price */
-  if (d.volume > 5e7 && Math.abs(d.change) < 2) {
-    score += 25;
-    tags.push('🐋ACC');
-  }
-  if (d.volume > 3e7 && d.change >= 0.3 && d.change < 2) {
-    score += 20;
-    tags.push('🔍EARLY');
-  }
-  if (d.volume > 8e7 && d.change >= 0.5 && d.change < 3) {
-    score += 15;
-    tags.push('🔍STEALTH');
-  }
+  /* Phase 2.A.1 PR A — five rules migrated to the unified registry.
+     TIER1_BONUS, NEW_BONUS, SILENT_ACCUMULATION, EARLY_ENTRY, STEALTH
+     all live in src/scoring-rules.js now. The inline replacements that
+     were here previously have been deleted; the contract test in
+     tests/scoring-rules.test.js pins the exact weights / conditions /
+     tags so any drift fails CI. Future PRs migrate the rest of the
+     rule bag here in small batches (per docs/SCANNER_UNIFIED_RULES_REGISTRY_DESIGN.md
+     §4 "parity ratchet"). */
+  const registryResult = scoringRules.applyRules({
+    isTier1: isTier1,
+    volume: d.volume,
+    change: d.change,
+  });
+  score += registryResult.scoreDelta;
+  for (const t of registryResult.tagsDelta) tags.push(t);
 
   /* Already running */
   if (d.change >= 3 && d.change < 5) {

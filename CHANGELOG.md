@@ -1,5 +1,144 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.4 — Server-side ATR-aware SL/TP] — 2026-05-19
+
+**Behaviour change (gated, default ON).** Implements P2.A.4 from
+`SCANNER_AUDIT_2026_05_15.md` §6. Behind `SCANNER_SERVER_ATR_ZONES`.
+
+### Motivation
+
+The legacy SL/TP ladder priced BTC and DOGE identically:
+
+| Coin     | Daily range | Legacy SL  | Outcome                          |
+| -------- | ----------- | ---------- | -------------------------------- |
+| BTC      | ~1.5%       | -3%        | Stop too far — wastes capital    |
+| DOGE     | ~6-8%       | -3%        | Stop inside noise — knocked out  |
+
+Same fixed -3% / +5% / +10% for every coin regardless of how it
+actually moves. The R:R ratio is constant (~1.67) but the realised
+win rate suffers on both extremes.
+
+### Fix
+
+`scoreSymbol` now reads `ctx.indicator.atr` (Average True Range over
+14 × 15m candles, already computed by `src/indicator-engine.js`). When
+ATR is available and positive:
+
+```
+sl  = price - 1.5 × ATR
+tp1 = price + 3.0 × ATR
+tp2 = price + 5.0 × ATR
+```
+
+R:R is preserved at 2.0 (default), but the absolute distances scale
+with the coin's actual volatility. Applied bounds:
+
+| Coin     | Price   | ATR    | New SL    | New TP1   | vs Legacy SL  |
+| -------- | ------- | ------ | --------- | --------- | ------------- |
+| BTC      | 50,000  | 750    | 48,875    | 52,250    | tighter (-2.25%) |
+| DOGE     | 0.10    | 0.004  | 0.094     | 0.112     | wider (-6%)   |
+
+Signals using ATR bounds get a `📐ATR_ZONES` tag so the UI can
+distinguish them from fallback signals.
+
+### Fallback
+
+When `ctx.indicator.atr` is null / 0 / non-finite (the symbol isn't
+in the `INDICATOR_SYMBOLS` short-list, or indicator-engine hasn't
+computed it yet), or when `atrZones()` rejects the inputs (degenerate
+setup — ATR large enough to drive stop ≤ 0), `scoreSymbol` falls
+back to the legacy fixed ladder. No tag added in that case. So:
+
+- ~10 INDICATOR_SYMBOLS get ATR bounds.
+- All other symbols keep the legacy ladder (parity).
+
+### Added
+
+- `src/scanner-atr-zones.js` — pure `atrZones(price, atr, opts)`
+  module. Defaults `{ stop: 1.5, tp1: 3.0, tp2: 5.0 }`. Frozen.
+  Returns `{ stop, tp1, tp2, rr, atr }` or `null` on bad inputs.
+  Defensive against non-finite numbers, non-positive overrides,
+  degenerate setups.
+- `tests/scanner-atr-zones.test.js` — 21 tests covering all
+  boundaries: defensive inputs, BTC and DOGE shaped fixtures,
+  multiplier overrides (including non-positive / non-numeric
+  fallbacks), degenerate-setup rejection, R:R scale invariance,
+  token-precision (8 decimal) rounding, frozen constants contract.
+- Integration tests in `tests/scanner-engine.test.js` (4 new):
+  ATR present → ATR_ZONES tag + correct sl/tp;
+  no ATR → fixed ladder fallback;
+  ATR = 0 → fixed ladder fallback;
+  DOGE-shaped → wider stop than legacy -3%.
+
+### Changed
+
+- `src/scanner-engine.js` — imports `scanner-atr-zones`, reads
+  `SCANNER_SERVER_ATR_ZONES` env at module load. `scoreSymbol`
+  branches on `ctx.indicator.atr`; falls back to fixed-ladder
+  computation otherwise. Tag `📐ATR_ZONES` pushed when ATR path
+  fires.
+- `.env.example` — `SCANNER_SERVER_ATR_ZONES` promoted from RSVD
+  to LIVE with documentation.
+- `eslint.config.mjs` — new file added to the Node files list.
+
+### Rollback
+
+`SCANNER_SERVER_ATR_ZONES=false` + `pm2 restart` → all signals
+return to the legacy fixed ladder. No data migration. No flag-on
+data is lost because nothing is persisted differently.
+
+### ⚠ Known limitation — outcome evaluator threshold mismatch
+
+`src/scanner-history.js:143-146` (`evaluateOpenSignals`) classifies
+win / loss / partial outcomes against **fixed** +5% / 0% / -3%
+thresholds, **ignoring the per-signal `sl` / `tp1` values it
+persists**. With Phase 2.A.4, ATR-zoned BTC signals carry tighter
+SL (~-2.25%) and tighter TP1 (~+4.5%) than the legacy ladder, so:
+
+- A BTC trade that hits its real ATR stop at -2.5% is logged as
+  `partial_loss` (would be `loss` if evaluator read `entry.sl`).
+- A BTC trade that hits its real TP1 at +4.5% is logged as
+  `partial_win` (would be `win` if evaluator read `entry.tp1`).
+
+This biases the tag-stats report (Phase 3.1 and the new validator
+in PR #103): the `📐ATR_ZONES` family will appear to have a
+*worse* threshold-based win rate than identical-quality legacy
+signals — not because the ATR bounds are worse, but because the
+outcome ladder is locked to the legacy thresholds.
+
+Proper fix is a Phase 4 deliverable (per-signal outcome evaluation
+using `entry.sl` / `entry.tp1` / `entry.tp2`). Until then, treat
+ATR_ZONES vs. legacy win-rate comparisons as suggestive, not
+authoritative. The `avgGain` metric is unaffected — it uses raw
+`pctChange` from the evaluation, which doesn't depend on
+thresholds.
+
+Surfaced by the pre-merge SRE review.
+
+### Pre-merge review fixes applied
+
+- `src/scanner-atr-zones.js` — multiplier override now uses
+  `Number.isFinite(v) && v > 0` instead of `typeof === 'number' && v > 0`
+  (correctness review NIT A1). Catches `+Infinity` overrides up-front
+  rather than relying on the downstream degenerate-setup guard.
+- `tests/scanner-atr-zones.test.js` — 2 new tests lock the
+  `Infinity` / `-Infinity` fallback behavior.
+
+### Test results
+
+- `npm run check` → lint clean, format clean, 660 / 660 tests pass
+  (was 633 + 21 atr-zones + 4 integration + 2 review fix).
+- `node --check server.js` → clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §2.5, §6 P2.A.4, §8.1 decision D
+- `src/scanner-helpers.js:78-113` (browser counterpart — same math)
+- `src/indicator-engine.js:106-199` (ATR computation source)
+- Pre-merge correctness + SRE review agents (2026-05-20)
+
+---
+
 ## [Scanner pre-merge review fixes] — 2026-05-19
 
 **Two fixes surfaced by parallel reviewer agents before merging PR #101.**

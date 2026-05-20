@@ -686,19 +686,50 @@ test('Phase 3.2 — accepted signals do NOT count as rejections', () => {
 
 /* ─── Phase 2.A.4 — ATR-aware SL/TP wiring ─────────────────────── */
 
-test('Phase 2.A.4 — ATR present → ATR_ZONES tag + non-fixed sl/tp', () => {
-  /* BTC at 50,000 with ATR 750 → SL=48,875, TP1=52,250, TP2=53,750.
-     Compare with the legacy fixed ladder (48,500 / 52,500 / 55,000). */
+test('Phase 2.A.4 — ATR present → ATR_ZONES tag + non-fixed sl/tp (tier-1 path)', () => {
+  /* BTC is in TIER1_SYMBOLS so Phase 2.A.4.b tier-aware multipliers
+     apply (stop=1.2, tp1=1.8, tp2=3.0). At price 50,000 / ATR 750:
+       stop = 50000 - 1.2 * 750 = 49,100
+       tp1  = 50000 + 1.8 * 750 = 51,350
+       tp2  = 50000 + 3.0 * 750 = 52,250
+       R:R  = 1.50
+     Compare with the legacy fixed ladder (48,500 / 52,500 / 55,000).
+     The TP1 is meaningfully tighter than fixed (+2.7% vs +5%) — the
+     whole point of the tier-aware change. */
   const r = scoreSymbol('BTC', {
     ticker: { price: 50000, change: 0.5, volume: 5e7, high: 50500, low: 49500 },
     indicator: { atr: 750 },
   });
   assert.ok(r);
   assert.ok(r.tags.includes('📐ATR_ZONES'), 'must tag the override');
-  assert.equal(r.sl, 48875);
-  assert.equal(r.tp1, 52250);
-  assert.equal(r.tp2, 53750);
-  assert.equal(r.rr, 2, 'default 1.5/3.0 mults give R:R = 2.0');
+  assert.ok(
+    r.tags.includes('📐ATR_T1'),
+    'tier-1 symbol with tier-aware flag ON must carry the observability tag'
+  );
+  assert.equal(r.sl, 49100);
+  assert.equal(r.tp1, 51350);
+  assert.equal(r.tp2, 52250);
+  assert.equal(r.rr, 1.5, 'tier-1 1.2/1.8 mults give R:R = 1.5');
+});
+
+test('Phase 2.A.4.b — BTC screenshot fixture ($77,160 / ATR $1,680) → tier-1 bounds', () => {
+  /* The exact case Ziko flagged on 2026-05-20: entry $77,160 with
+     ATR(14) ~$1,680 was showing TP1 +6.5% over a stated 1-4h window.
+     Tier-1 multipliers compress this to:
+       stop = 77160 - 1.2 * 1680 = 75,144  (-2.61%)
+       tp1  = 77160 + 1.8 * 1680 = 80,184  (+3.92%)
+       tp2  = 77160 + 3.0 * 1680 = 82,200  (+6.53%)
+     Locks the numbers so any future drift gets caught here. */
+  const r = scoreSymbol('BTC', {
+    ticker: { price: 77160, change: 0.5, volume: 5e7, high: 77800, low: 76500 },
+    indicator: { atr: 1680 },
+  });
+  assert.ok(r);
+  assert.ok(r.tags.includes('📐ATR_ZONES'));
+  assert.equal(r.sl, 75144);
+  assert.equal(r.tp1, 80184);
+  assert.equal(r.tp2, 82200);
+  assert.equal(r.rr, 1.5);
 });
 
 test('Phase 2.A.4 — no ATR → falls back to fixed -3% / +5% / +10%', () => {
@@ -726,18 +757,45 @@ test('Phase 2.A.4 — ATR <= 0 falls back to fixed ladder', () => {
   assert.equal(r.sl, 48500); /* 50000 * 0.97 */
 });
 
-test('Phase 2.A.4 — high-volatility altcoin gets a wider stop than fixed', () => {
-  /* DOGE-shaped: price 0.10, ATR 0.004 (4% of price).
-     ATR stop = 0.10 - 1.5 * 0.004 = 0.094 (-6%) vs fixed -3% = 0.097.
-     The wider stop is the whole point — fixed -3% would get knocked
-     out by normal noise on this coin. */
-  const r = scoreSymbol('DOGE', {
-    ticker: { price: 0.1, change: 0.5, volume: 5e7, high: 0.105, low: 0.095 },
-    indicator: { atr: 0.004 },
+test('Phase 2.A.4 — high-volatility altcoin (non-tier-1) gets wider stop than fixed', () => {
+  /* SHIB-shaped: price 0.00002, ATR 0.0000008 (4% of price). SHIB
+     is NOT in TIER1_SYMBOLS so the non-tier-1 DEFAULT_MULTS apply
+     (stop=1.5, tp1=3.0, tp2=5.0).
+       stop = 0.00002 - 1.5 * 0.0000008 = 0.0000188 (-6%)
+       fixed-3% would be 0.0000194 — knocked out by normal noise.
+     The wider non-tier-1 stop is the whole point. */
+  const r = scoreSymbol('SHIB', {
+    ticker: { price: 0.00002, change: 0.5, volume: 5e7, high: 0.000021, low: 0.0000195 },
+    indicator: { atr: 0.0000008 },
   });
   assert.ok(r);
   assert.ok(r.tags.includes('📐ATR_ZONES'));
-  assert.ok(Math.abs(r.sl - 0.094) < 1e-9);
-  /* Wider than the legacy -3% stop (0.097) — explicitly. */
-  assert.ok(r.sl < 0.1 * 0.97, 'ATR stop must be lower than legacy -3% for high-vol coins');
+  assert.ok(Math.abs(r.sl - 0.0000188) < 1e-12);
+  /* Wider than the legacy -3% stop — explicitly. */
+  assert.ok(
+    r.sl < 0.00002 * 0.97,
+    'ATR stop must be lower than legacy -3% for high-vol non-tier-1 coins'
+  );
+});
+
+test('Phase 2.A.4.b — non-tier-1 symbol keeps DEFAULT_MULTS (regression guard)', () => {
+  /* If a future change accidentally promotes everything to tier-1
+     multipliers, this test fails. SHIB at 0.00002, ATR 0.0000008:
+       tp1 (non-tier-1) = 0.00002 + 3.0 * 0.0000008 = 0.0000224 (+12%)
+       tp1 (tier-1)     = 0.00002 + 1.8 * 0.0000008 = 0.0000214 (+7.2%)
+     Assert the wider non-tier-1 TP1. */
+  const r = scoreSymbol('SHIB', {
+    ticker: { price: 0.00002, change: 0.5, volume: 5e7, high: 0.000021, low: 0.0000195 },
+    indicator: { atr: 0.0000008 },
+  });
+  assert.ok(r);
+  assert.ok(Math.abs(r.tp1 - 0.0000224) < 1e-12, 'non-tier-1 must use 3.0× ATR for TP1');
+  assert.equal(r.rr, 2, 'non-tier-1 R:R = 2.0');
+  /* Observability invariant: non-tier-1 must NOT carry the ATR_T1
+     tag — pairs with the SHIB tier-aware test above to lock that
+     the tag only fires for tier-1 symbols. */
+  assert.ok(
+    !r.tags.includes('📐ATR_T1'),
+    'non-tier-1 symbol must NOT carry the ATR_T1 observability tag'
+  );
 });

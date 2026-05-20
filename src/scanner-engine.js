@@ -315,10 +315,24 @@ function scoreSymbol(sym, ctx) {
      tags so any drift fails CI. Future PRs migrate the rest of the
      rule bag here in small batches (per docs/SCANNER_UNIFIED_RULES_REGISTRY_DESIGN.md
      §4 "parity ratchet"). */
+  /* PR D additions: frRate, lsRatio, coinalyzeFRRate let the
+     registry run FR_VERY_NEG / FR_MILDLY_NEG / FR_OVEREXTENDED /
+     LS_SHORTS / COINALYZE_FR_NEG. Each is a strict typeof-number
+     check so a missing data source (e.g. ctx.fr === null when
+     futures data hasn't loaded) cleanly skips its rules. The
+     inline replacements that USED to live below this block (FR
+     chain, SHORTS, coinalyzeFR neg) have been deleted now that
+     the registry owns them. */
   const registryResult = scoringRules.applyRules({
     isTier1: isTier1,
     volume: d.volume,
     change: d.change,
+    frRate: ctx.fr && typeof ctx.fr.rate === 'number' ? ctx.fr.rate : undefined,
+    lsRatio: ctx.ls && typeof ctx.ls.ratio === 'number' ? ctx.ls.ratio : undefined,
+    coinalyzeFRRate:
+      ctx.coinalyzeFR && typeof ctx.coinalyzeFR.rate === 'number'
+        ? ctx.coinalyzeFR.rate
+        : undefined,
   });
   score += registryResult.scoreDelta;
   for (const t of registryResult.tagsDelta) tags.push(t);
@@ -371,25 +385,10 @@ function scoreSymbol(sym, ctx) {
     tags.push('📉BOTTOM');
   }
 
-  /* Funding rate */
-  if (ctx.fr) {
-    if (ctx.fr.rate < -0.01) {
-      score += 12;
-      tags.push('FR⬇️');
-    } else if (ctx.fr.rate < 0) {
-      score += 5;
-      tags.push('FR-');
-    } else if (ctx.fr.rate > 0.08) {
-      score -= 8;
-      tags.push('FR⚠️');
-    }
-  }
-
-  /* Long/Short ratio — heavy shorts mean a squeeze setup */
-  if (ctx.ls && ctx.ls.ratio < 0.8) {
-    score += 10;
-    tags.push('🩳SHORTS');
-  }
+  /* Funding rate, LS ratio — migrated to the unified registry in
+     PR D (FR_VERY_NEG, FR_MILDLY_NEG, FR_OVEREXTENDED, LS_SHORTS).
+     See src/scoring-rules.js for the precedence chain and the
+     comment block on the FR* rules. */
 
   /* Taker buy/sell skew */
   if (ctx.taker && ctx.taker.avg > 0 && ctx.taker.ratio > ctx.taker.avg * 1.3) {
@@ -420,11 +419,8 @@ function scoreSymbol(sym, ctx) {
     tags.push('🌐OI');
   }
 
-  /* Multi-exchange FR negative */
-  if (ctx.coinalyzeFR && ctx.coinalyzeFR.rate < -0.01) {
-    score += 8;
-    tags.push('🌐FR_NEG');
-  }
+  /* Multi-exchange FR negative — migrated to the unified registry
+     in PR D (COINALYZE_FR_NEG). See src/scoring-rules.js. */
 
   /* Hyperliquid funding < 0 (DEX confirmation) */
   if (ctx.hyperliquid && ctx.hyperliquid.funding < 0) {

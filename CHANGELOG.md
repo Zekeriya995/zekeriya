@@ -86,6 +86,85 @@ All four landed in the BLOCKER fix amend on this branch.
 ### Rollback
 
 `git revert <merge-commit>`. No behaviour change.
+## [Scanner Phase 2.A.1 PR E — MTF / RSI / MACD migration] — 2026-05-20
+
+**Server-side: NO BEHAVIOUR CHANGE. Client-side: NO BEHAVIOUR
+CHANGE (these rules were ALWAYS server-only).** Eight more rules
+join the unified registry, migrating the MTF agreement chain
+plus the RSI and MACD cross diagnostics.
+
+### Rules added (8)
+
+| Rule | Weight | Tag | Condition |
+|---|---|---|---|
+| `MTF_BULL_FULL` | +15 | `🎯MTF_BULL` | `mtfStrength === 'full' && mtfBias === 'bullish'` |
+| `MTF_BULL_PARTIAL` | +8 | `🎯MTF_BULL_2` | `mtfStrength === 'partial' && mtfBias === 'bullish'` |
+| `MTF_BEAR_FULL` | −10 | `🎯MTF_BEAR` | `mtfStrength === 'full' && mtfBias === 'bearish'` |
+| `MTF_BEAR_PARTIAL` | −5 | `🎯MTF_BEAR_2` | `mtfStrength === 'partial' && mtfBias === 'bearish'` |
+| `RSI_OS` | +10 | `📉RSI_OS` | `rsi < 30` |
+| `RSI_OB` | −8 | `📈RSI_OB` | `rsi > 70` |
+| `MACD_BULL_CROSS` | +12 | `📊MACD_BULL` | `macdCross === 'bull'` |
+| `MACD_BEAR_CROSS` | −8 | `📊MACD_BEAR` | `macdCross === 'bear'` |
+
+### Mutual exclusion (MTF chain)
+
+The four `MTF_*` rules are mutually exclusive by construction:
+`mtfStrength` is exactly one of `'full'`/`'partial'`/undefined
+and `mtfBias` is exactly one of `'bullish'`/`'bearish'`/undefined.
+So at most ONE of the four can fire per ctx — matching the
+inline if/else if/else if/else if behaviour. Pinned by the
+exhaustive `MTF — at most ONE of the 4 rules fires per ctx`
+test.
+
+### Server-only data, client no-op (Option-C)
+
+These rules read `mtfStrength`/`mtfBias`/`rsi`/`macdCross` —
+all derived from kline data the server's indicator engine
+computes for INDICATOR_SYMBOLS. The client's `quickScan` has
+NO inline equivalent — these are purely server-side
+diagnostics today. Same strict-equality + `typeof === 'number'`
+pattern PR D used for `coinalyzeFRRate`: the client passes none
+of these fields → all 8 rules cleanly no-op → client scoring
+unchanged.
+
+### MACD histogram tie-breaker stays inline
+
+The pre-PR-E MACD block had a third branch when `cross` was
+neither 'bull' nor 'bear': add +3 (h > signal) or -3 (h <
+signal) with NO tag. This is a tagless score-only adjustment
+that doesn't fit the registry rule shape cleanly (would need
+either a `tag: null` rule with positive AND negative weight or
+two separate rules). Left inline below the registry call,
+gated by `_m.cross !== 'bull' && _m.cross !== 'bear'` to
+preserve the exact same if/else-if semantics. Tests cover the
+registry rules; the inline tie-breaker is unchanged from
+pre-PR-E behaviour.
+
+### Files changed
+
+- `src/scoring-rules.js` — adds 8 rules AFTER `FALLING_KNIFE` to
+  avoid line-conflict with PR D's FR/LS additions. JSDoc ctx
+  shape extended.
+- `src/scanner-engine.js` — applyRules ctx extends with
+  `mtfStrength / mtfBias / rsi / macdCross`; inline MTF and
+  RSI/MACD blocks DELETED; histogram tiebreaker kept (gated
+  on no-cross).
+- `tests/scoring-rules.test.js` — **+13 tests** for the 8
+  rules: per-rule contract, mutual-exclusion exhaustion (7
+  ctx shapes), missing-data no-op for both client side and
+  bad-data inputs, applyRules end-to-end for a fully-equipped
+  server ctx and a bare client ctx.
+
+### Verification
+
+- `npm run check` — 735/735 tests pass (+13 over PR D's 722).
+- `tests/scanner-engine.test.js` still passes — the inline
+  MTF/RSI/MACD deletions are compensated by the registry rules
+  running on the same ctx.
+
+### Rollback
+
+No behaviour change. To revert: `git revert <merge-commit>`.
 
 ### Parity ratchet status
 
@@ -94,10 +173,9 @@ All four landed in the BLOCKER fix amend on this branch.
 | PR A (server) | SILENT_ACC + EARLY + STEALTH + TIER1 + NEW | merged |
 | PR B (client narrow) | SILENT_ACC + EARLY + STEALTH | merged |
 | PR C (client tier chain) | TIER1 + TIER2 + NEW | merged |
-| **PR D (FR / LS / coinalyzeFR)** | **5 rules above** | **this PR** |
-| PR E | MTF / indicator rules | pending |
+| **PR D (FR / LS / coinalyzeFR)** | **5 rules above** | **merged** |
+| PR E (MTF / RSI / MACD) | 8 rules — see entry above | this rebase |
 | PR FINAL | cleanup + dead-code purge | pending |
-
 
 ## [Scanner Phase 2.A.2.3 — Client merges selected server tags] — 2026-05-20
 

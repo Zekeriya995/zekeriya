@@ -317,12 +317,21 @@ function scoreSymbol(sym, ctx) {
      §4 "parity ratchet"). */
   /* PR D additions: frRate, lsRatio, coinalyzeFRRate let the
      registry run FR_VERY_NEG / FR_MILDLY_NEG / FR_OVEREXTENDED /
-     LS_SHORTS / COINALYZE_FR_NEG. Each is a strict typeof-number
-     check so a missing data source (e.g. ctx.fr === null when
-     futures data hasn't loaded) cleanly skips its rules. The
-     inline replacements that USED to live below this block (FR
-     chain, SHORTS, coinalyzeFR neg) have been deleted now that
-     the registry owns them. */
+     LS_SHORTS / COINALYZE_FR_NEG.
+
+     PR E additions: mtfStrength, mtfBias, rsi, macdCross let
+     the registry run MTF_*_FULL / MTF_*_PARTIAL / RSI_OS /
+     RSI_OB / MACD_BULL_CROSS / MACD_BEAR_CROSS.
+
+     Each strict-checks its ctx field so missing data (e.g.
+     ctx.fr === null when futures data hasn't loaded, or
+     ctx.indicator === null when no kline fetch covers this
+     symbol) cleanly no-ops the corresponding rules. All inline
+     replacements have been deleted from this file now that the
+     registry owns them. */
+  const _ind = ctx.indicator || null;
+  const _mtf = ctx.mtfAgreement || null;
+  const _macd = _ind && _ind.macd ? _ind.macd : null;
   const registryResult = scoringRules.applyRules({
     isTier1: isTier1,
     volume: d.volume,
@@ -333,6 +342,10 @@ function scoreSymbol(sym, ctx) {
       ctx.coinalyzeFR && typeof ctx.coinalyzeFR.rate === 'number'
         ? ctx.coinalyzeFR.rate
         : undefined,
+    mtfStrength: _mtf ? _mtf.strength : undefined,
+    mtfBias: _mtf ? _mtf.agreement : undefined,
+    rsi: _ind && typeof _ind.rsi === 'number' ? _ind.rsi : undefined,
+    macdCross: _macd && typeof _macd.cross === 'string' ? _macd.cross : undefined,
   });
   score += registryResult.scoreDelta;
   for (const t of registryResult.tagsDelta) tags.push(t);
@@ -464,66 +477,28 @@ function scoreSymbol(sym, ctx) {
     }
   }
 
-  /* Multi-timeframe agreement. When 15m / 1h / 4h indicators all
-     point the same way, the trade has both intraday momentum and
-     swing-trend backing — the highest-conviction setup. Only the 10
-     INDICATOR_SYMBOLS get this in practice (others have no MTF
-     fetch budget), which is exactly where we want strongest
-     confirmation. Bullish full agreement (+15) is louder than a
-     bearish one (-10) because the scanner is biased toward long
-     setups — the ULTRA push fires on score ≥ 100, never on a
-     short signal. */
-  if (ctx.mtfAgreement) {
-    const a = ctx.mtfAgreement;
-    if (a.strength === 'full' && a.agreement === 'bullish') {
-      score += 15;
-      tags.push('🎯MTF_BULL');
-    } else if (a.strength === 'partial' && a.agreement === 'bullish') {
-      score += 8;
-      tags.push('🎯MTF_BULL_2');
-    } else if (a.strength === 'full' && a.agreement === 'bearish') {
-      score -= 10;
-      tags.push('🎯MTF_BEAR');
-    } else if (a.strength === 'partial' && a.agreement === 'bearish') {
-      score -= 5;
-      tags.push('🎯MTF_BEAR_2');
-    }
-  }
+  /* Multi-timeframe agreement, RSI bands, MACD cross — migrated
+     to the unified registry in PR E (MTF_BULL_FULL / MTF_BULL_PARTIAL
+     / MTF_BEAR_FULL / MTF_BEAR_PARTIAL / RSI_OS / RSI_OB /
+     MACD_BULL_CROSS / MACD_BEAR_CROSS). See src/scoring-rules.js.
 
-  /* Technical indicator confirmation. The indicator engine already
-     computes RSI / MACD on 15m klines for the 10 majors every 60s,
-     but the scanner had been ignoring them until now. Reading the
-     same numbers feeds intraday momentum into the score so a BTC
-     setup with RSI 28 and a fresh MACD bull cross outranks a flat
-     one. Same nine-stack pattern as the existing tags: a bonus +
-     a tag the UI can render. */
-  if (ctx.indicator) {
-    const ind = ctx.indicator;
-    /* RSI oversold = bounce setup. Overbought = late entry trap. */
-    if (typeof ind.rsi === 'number') {
-      if (ind.rsi < 30) {
-        score += 10;
-        tags.push('📉RSI_OS');
-      } else if (ind.rsi > 70) {
-        score -= 8;
-        tags.push('📈RSI_OB');
-      }
-    }
-    /* MACD cross is the strongest single momentum signal we have on
-       any individual indicator. A fresh bull / bear cross moves the
-       histogram across the signal line — bigger weight than just
-       "histogram on the bull side", which we also reward but
-       lightly. */
-    if (ind.macd && ind.macd.cross === 'bull') {
-      score += 12;
-      tags.push('📊MACD_BULL');
-    } else if (ind.macd && ind.macd.cross === 'bear') {
-      score -= 8;
-      tags.push('📊MACD_BEAR');
-    } else if (ind.macd && typeof ind.macd.h === 'number' && typeof ind.macd.signal === 'number') {
-      if (ind.macd.h > ind.macd.signal) {
+     The MACD-histogram-vs-signal-line tie-breaker (+3 / -3 with
+     NO tag) remains inline below — it's a tagless score-only
+     adjustment that doesn't fit the current registry rule shape
+     (would need a `tag: null` rule with the existing weight
+     model, which is supported but felt out of scope for this
+     batch). Future PR may migrate it. */
+  if (ctx.indicator && ctx.indicator.macd) {
+    const _m = ctx.indicator.macd;
+    if (
+      typeof _m.h === 'number' &&
+      typeof _m.signal === 'number' &&
+      _m.cross !== 'bull' &&
+      _m.cross !== 'bear'
+    ) {
+      if (_m.h > _m.signal) {
         score += 3;
-      } else if (ind.macd.h < ind.macd.signal) {
+      } else if (_m.h < _m.signal) {
         score -= 3;
       }
     }

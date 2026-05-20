@@ -1,5 +1,88 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.2.3 — Client merges selected server tags] — 2026-05-20
+
+**Client-side change. Adds visibility — does NOT change scoring
+or tier.** Third ratchet of "PWA reads server signals". Same
+overlay block in `getScanResults()`, same freshness/flag gates,
+same rollback. The new piece: after the bounds and tier
+overlays, promote specific server-only tags onto the client's
+visible card so the user sees WHY a signal was bound by ATR
+tier-1 multipliers (`📐ATR_T1`), suppressed (`🔪FALLING`),
+capped (`🚫MANIP_CAP` / `🚨MANIP_HIGH` / `⚠️MANIP_MED`), or
+flagged on negative-FR (`🌐FR_NEG`).
+
+### Why this matters
+
+Before this PR the user could see that a BTC card had `📡SRV`
+(bounds overlaid) and possibly `🛑SRV_DEMOTE` (tier demoted)
+— but not WHY the server demoted it. With this PR, the
+demoting cause (e.g. `🚫MANIP_CAP`) is visible right next to
+`🛑SRV_DEMOTE` on the same card, so the user can audit and
+trust the demotion at a glance.
+
+### The allowlist
+
+Server-only tags promoted (exact match, no prefix):
+
+| Tag | Origin (server) | Meaning |
+|---|---|---|
+| `📐ATR_T1` | `src/scanner-engine.js:644` (Phase 2.A.4.b) | tier-1 ATR multipliers applied |
+| `📐ATR_ZONES` | `src/scanner-engine.js:633` (Phase 2.A.4) | ATR-aware bounds applied (vs fixed -3/+5/+10) |
+| `🔪FALLING` | `src/scoring-rules.js:145` (PR #108) | FALLING_KNIFE rule fired (-50 score) |
+| `🚫MANIP_CAP` | `src/scanner-engine.js:667` (Phase 1.2) | tier capped at STRONG due to MANIP HIGH |
+| `🚨MANIP_HIGH` | `src/scanner-engine.js:567` (Phase 1.x) | manipulation HIGH verdict |
+| `⚠️MANIP_MED` | `src/scanner-engine.js:570` | manipulation MEDIUM verdict |
+| `🌐FR_NEG` | `src/scanner-engine.js:426` | server-side negative-FR aggregate flag |
+
+### Why exact match and NOT prefix
+
+The client already emits its own `🚨P&D_RISK:N/5` /
+`⚠️P&D_WARN:N/5` (different N from the server — the two sides
+count slightly different P&D flags). A naive prefix-merge would
+surface BOTH the client's and server's variants on the same
+card and confuse the user. Same for FR-related tags
+(`FR⬇️`/`FR-`/`FR⚠️`) — the client computes those from its own
+FR cache. So we promote only tags the client provably can't
+emit.
+
+### Files changed
+
+- `app.js` line ~1030 (inside the same overlay block as PR
+  #112 / #113): new merge loop runs AFTER the demotion check
+  and BEFORE the bounds overlay. Iterates `_srv.tags`, promotes
+  any allowlisted server tag not already present. Idempotent.
+- `CHANGELOG.md` — this entry.
+
+### Safety + rollback
+
+- Same `nxScannerFix_server_signals` flag controls the entire
+  overlay (bounds + tier + tag merge). One flip reverts all
+  three ratchets.
+- Same try/catch as PR #113 — tag merge failure cannot break
+  the scanner; falls back to client's own tags.
+- Each promoted tag must satisfy `typeof === 'string'` AND
+  exact-match the allowlist. Anything else is silently dropped.
+- Idempotent on repeated overlays (the `indexOf === -1` check).
+
+### Verification
+
+- `npm run check` — 722/722 tests pass.
+- **Manual browser verification** post-deploy:
+  1. Pull on VPS, restart pm2
+  2. Open `shamcyrpto.com` → Scanner tab
+  3. BTC / ETH card (with ATR data) should now carry `📐ATR_T1`
+     AND `📐ATR_ZONES` tag chips
+  4. Any card with `🛑SRV_DEMOTE` should also carry the
+     specific demote reason — e.g. `🔪FALLING` (suppressed
+     because the coin is down >10%) or `🚫MANIP_CAP`
+     (manipulation capped tier).
+  5. Rollback test (same as PR #113):
+     `localStorage.setItem('nxScannerFix_server_signals','off')` +
+     reload → all `📐ATR_T1` / `🔪FALLING` / `🚫MANIP_CAP` /
+     etc. tags disappear from the cards, reverting to
+     client-only computed tags.
+
 ## [Scanner Phase 2.A.1 PR C — TIER1 / TIER2 / NEW bonus migration] — 2026-05-20
 
 **Server-side: NO BEHAVIOUR CHANGE.** **Client-side: NO BEHAVIOUR CHANGE.**

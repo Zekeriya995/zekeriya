@@ -81,9 +81,13 @@ const STABLE_SET = new Set([
    $1.18B spot volume but $0 open interest — a textbook fingerprint
    of bots wash-trading the spot book while no professional trades
    the perp. We reject any symbol whose spot volume crosses this
-   floor without a matching futures market. */
-const WASH_VOLUME_FLOOR = 500_000_000;
-const WASH_OI_FLOOR = 100_000;
+   floor without a matching futures market.
+
+   Constants sourced from the unified registry (Phase 2.A.3 wiring).
+   Re-exported as module-local consts so existing references don't
+   need to change. */
+const WASH_VOLUME_FLOOR = scoringRules.THRESHOLDS.WASH_VOLUME_FLOOR;
+const WASH_OI_FLOOR = scoringRules.THRESHOLDS.WASH_OI_FLOOR;
 
 /* Tier 1 — the same WL constant the PWA seeds at boot. Keeping it
    in sync with src/constants.js's WL is important: tiering changes
@@ -150,11 +154,14 @@ const TIER1_SYMBOLS = new Set([
 
 /* Score → human-readable tier the PWA renders. The ULTRA cutoff
    is what the push trigger watches — match the client's threshold
-   in app.js so the two views agree on what counts as "ULTRA". */
+   in app.js so the two views agree on what counts as "ULTRA".
+   Thresholds sourced from the unified registry (Phase 2.A.3
+   wiring); a future PR migrates app.js's _tierFromScore to import
+   the same constants. */
 function _tierFromScore(score) {
-  if (score >= 100) return 'ULTRA';
-  if (score >= 70) return 'STRONG';
-  if (score >= 50) return 'MEDIUM';
+  if (score >= scoringRules.THRESHOLDS.ULTRA) return 'ULTRA';
+  if (score >= scoringRules.THRESHOLDS.STRONG) return 'STRONG';
+  if (score >= scoringRules.THRESHOLDS.MEDIUM) return 'MEDIUM';
   return 'WEAK';
 }
 
@@ -714,7 +721,7 @@ function runScannerPass(cache) {
       newsSentiment: newsSentiment,
     });
     if (!r) continue; /* already counted in rejections by scoreSymbol */
-    if (r.score < 30) {
+    if (r.score < scoringRules.THRESHOLDS.WEAK_MIN) {
       rejections.lowScore++;
       continue;
     }

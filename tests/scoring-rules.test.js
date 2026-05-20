@@ -49,6 +49,11 @@ test('THRESHOLDS — frozen with the expected tier cutoffs', () => {
   assert.equal(THRESHOLDS.STRONG, 70);
   assert.equal(THRESHOLDS.MEDIUM, 50);
   assert.equal(THRESHOLDS.WEAK_MIN, 30);
+  /* Wash-trade floors are part of THRESHOLDS so scanner-engine
+     can import a single constants object. Locks the values that
+     scoreSymbol's wash-reject reads via the registry (Phase 2.A.3). */
+  assert.equal(THRESHOLDS.WASH_VOLUME_FLOOR, 500_000_000);
+  assert.equal(THRESHOLDS.WASH_OI_FLOOR, 100_000);
 });
 
 /* ─── Individual rule behavior — pinned by the contract ──────── */

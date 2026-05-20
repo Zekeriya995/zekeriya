@@ -2358,10 +2358,28 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   if(isTier1){sc+=10;tags.push('🏆TOP100')}
   else if(isTier2){sc+=5;tags.push('🥈T2')}
   else{sc+=2;tags.push('🔍NEW')}
-  /* ═══ CORE: Silent Accumulation — volume + flat price ═══ */
-  if(d.v>5e7&&Math.abs(d.c)<2){sc+=25;tags.push('🐋ACC')}
-  if(d.v>3e7&&d.c>=0.3&&d.c<2){sc+=20;tags.push('🔍EARLY')}
-  if(d.v>8e7&&d.c>=0.5&&d.c<3){sc+=15;tags.push('🔍STEALTH')}
+  /* ═══ CORE: Silent Accumulation — volume + flat price ═══
+     Phase 2.A.1 PR B — these 3 rules now read from the shared
+     src/scoring-rules.js registry instead of inline literals.
+     The server's scoreSymbol() consumes the same RULES array, so
+     any future weight/condition change happens in exactly one place.
+     TIER1_BONUS / NEW_BONUS / FALLING_KNIFE NOT migrated here:
+     the client has a TIER2_BONUS branch that the server doesn't,
+     and FALLING_KNIFE is a server-only suppression for now. Both
+     decisions are deferred to PR C. */
+  if (window.SCORING_RULES) {
+    var _ruleCtx = { isTier1: isTier1, volume: d.v, change: d.c };
+    ['SILENT_ACCUMULATION','EARLY_ENTRY','STEALTH'].forEach(function(_id){
+      var _r = window.SCORING_RULES.RULES.find(function(x){return x.id===_id});
+      if (_r && _r.condition(_ruleCtx)) { sc += _r.weight; if (_r.tag) tags.push(_r.tag); }
+    });
+  } else {
+    /* Defensive fallback — if scoring-rules.js failed to load, run
+       the same logic inline so the scanner keeps working at parity. */
+    if(d.v>5e7&&Math.abs(d.c)<2){sc+=25;tags.push('🐋ACC')}
+    if(d.v>3e7&&d.c>=0.3&&d.c<2){sc+=20;tags.push('🔍EARLY')}
+    if(d.v>8e7&&d.c>=0.5&&d.c<3){sc+=15;tags.push('🔍STEALTH')}
+  }
   /* Already moving — penalise lateness */
   if(d.c>=3&&d.c<5){sc+=8;tags.push('📈RISING')}
   if(d.c>=5&&d.c<8){sc-=5;tags.push('⚠️LATE')}

@@ -1,5 +1,97 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.1 PR B — Client-side registry consumption (narrow)] — 2026-05-20
+
+**Client-side refactor. NO BEHAVIOUR CHANGE — bit-for-bit equivalent.**
+Migrates 3 of the 6 registry rules from inline `if` blocks in
+`app.js quickScan` to a small dispatcher reading
+`window.SCORING_RULES.RULES`. Closes part of the parity ratchet for
+Phase 2.A.1.
+
+### Why only 3 of 6 rules
+
+During implementation I found a divergence the design doc missed:
+the client has a **TIER2_BONUS** branch (`isTier2 → +5, '🥈T2'`) that
+the server does NOT. Migrating `TIER1_BONUS`/`NEW_BONUS` blindly
+would lose the tier-2 logic. The 3 rules in this PR
+(`SILENT_ACCUMULATION`, `EARLY_ENTRY`, `STEALTH`) have **no
+divergence** — they were already identical bit-for-bit. Migrating
+them is provably safe.
+
+`FALLING_KNIFE` also not migrated to client here — it's a new
+server-side suppression, and adding it to the client without the
+matching tag-stats data to validate would be a meaningful UX
+change. Deferred to a follow-up PR after Ziko verifies the server
+rule works for a few days.
+
+### Architectural divergence to resolve (PR C decision)
+
+Three options for the tier-2 question:
+
+| Option | Implication |
+|---|---|
+| Drop `isTier2` from client (loses tier-2 medium tier) | Smallest diff, but loses signal granularity |
+| Add `isTier2` to server + `TIER2_BONUS` rule in registry | Best convergence; needs `tier2Coins` data on server |
+| Add `TIER2_BONUS` rule with `condition: (ctx) => ctx.isTier2 === true` and let server pass `false` always | Cheapest; effectively no-op on server but client keeps behaviour |
+
+Recommend the third for the next PR — minimum diff, future-proof.
+
+### Files changed
+
+- `index.html` — `<script defer src="src/scoring-rules.js">` added,
+  loaded BEFORE `app.js` so `window.SCORING_RULES` is ready.
+- `app.js` `quickScan` — the 3 inline rules replaced by:
+  ```js
+  ['SILENT_ACCUMULATION','EARLY_ENTRY','STEALTH'].forEach(function(_id){
+    var _r = window.SCORING_RULES.RULES.find(function(x){return x.id===_id});
+    if (_r && _r.condition(_ruleCtx)) { sc += _r.weight; if (_r.tag) tags.push(_r.tag); }
+  });
+  ```
+  Plus a defensive fallback to the inline logic if
+  `window.SCORING_RULES` failed to load (CDN issue, ad-blocker,
+  whatever). The fallback is bit-for-bit identical to what was
+  there before this PR — so even total registry failure means no
+  regression.
+
+### Verification
+
+- `npm run check` → lint clean, format clean, 700 / 700 tests pass.
+- **Manual browser verification required before merge** — `app.js`
+  has no CI integration test. Ziko opens `shamcyrpto.com` with
+  this branch deployed, confirms scanner still produces signals
+  with `🐋ACC` / `🔍EARLY` / `🔍STEALTH` tags as before.
+
+### Manual test plan (Ziko)
+
+```bash
+# On VPS after merge + pull:
+sudo -u nexus pm2 restart nexus-proxy --update-env
+
+# Open https://shamcyrpto.com in browser, then in DevTools console:
+window.SCORING_RULES   # should be the registry object
+window.SCORING_RULES.RULES.length   # should be 6
+
+# Scanner tab should still show signals with 🐋ACC / 🔍EARLY / 🔍STEALTH tags
+# Score values should be identical to before (within ~1 second of
+# the same /api/all snapshot).
+```
+
+### Rollback
+
+Revert this PR. `window.SCORING_RULES` global stays loaded (harmless),
+`quickScan` reverts to fully-inline. No data migration.
+
+### Test results
+
+- `npm run check` → 700 / 700 pass.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P2.A.1
+- `docs/SCANNER_UNIFIED_RULES_REGISTRY_DESIGN.md` §4 (parity ratchet)
+
+---
+
 ## [Scanner — FALLING_KNIFE suppression rule] — 2026-05-20
 
 **Defensive new scoring rule.** Triggered by the SAGA finding —

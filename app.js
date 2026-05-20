@@ -945,6 +945,46 @@ function getScanResults(forceFresh){
     try{
       var c=quickScan();
       var r=await deepAnalyze(c);
+      /* Phase 2.A.2.1 — overlay server-computed SL/TP/RR for any
+         symbol the server scanner has a fresh signal for. The
+         server uses full data (ATR(14) on 15m klines, tier-aware
+         multipliers, manipulation/P&D detection) so its bounds
+         are strictly more accurate than the client's quickScan
+         approximations. Score / tier / tags stay client-side for
+         now — those migrations are Phase 2.A.2.2 / .3.
+
+         Rollback: localStorage.setItem('nxScannerFix_server_signals','off')
+         in the browser console, then reload. No redeploy needed. */
+      try{
+        if(localStorage.getItem('nxScannerFix_server_signals')!=='off'
+           && window.__serverSignals
+           && window.__serverSignalsTs
+           && Date.now()-window.__serverSignalsTs<5*60*1000){
+          for(var _ri=0;_ri<r.length;_ri++){
+            var _row=r[_ri];
+            var _srv=window.__serverSignals[_row.s];
+            if(_srv && Number.isFinite(+_srv.sl) && Number.isFinite(+_srv.tp1)
+               && +_srv.sl>0 && +_srv.tp1>+_srv.sl){
+              _row.sl=+_srv.sl;
+              _row.tp1=+_srv.tp1;
+              _row.tp2=+_srv.tp2;
+              _row.rr=+_srv.rr;
+              /* Observability tag so the user (and tag-stats) can
+                 see which signals had the server overlay applied.
+                 Pushed only if not already present (idempotent on
+                 repeated overlays of the same row). */
+              if(Array.isArray(_row.tags) && _row.tags.indexOf('📡SRV')===-1){
+                _row.tags.push('📡SRV');
+              }
+            }
+          }
+        }
+      }catch(_overlayErr){
+        /* Never let an overlay failure break the scanner. The
+           local results are correct (if cruder); we just lose the
+           server-bound improvement for this pass. */
+        _scanWarn('overlay','server overlay failed: '+_overlayErr.message);
+      }
       cache.scan=r;cache.scanTime=Date.now();
       return r;
     }finally{
@@ -1973,6 +2013,22 @@ async function loadTk(){
   var all=await fj(PROXY+'/api/all');
   if(all){
     _proxyAlive=true;
+    /* Phase 2.A.2.1 — capture server-computed signals for the
+       client-side overlay. The server runs scoreSymbol() with full
+       data (ATR, manipulation, P&D, tier-aware bounds) every 30 s
+       and exposes the top 50 here. We index by symbol so the
+       getScanResults() overlay can match in O(1). Falsy when the
+       server hasn't run a pass yet (cold start) — overlay then
+       no-ops and the client renders pure-local results. */
+    if(Array.isArray(all.signals)){
+      var _srv=Object.create(null);
+      for(var _si=0;_si<all.signals.length;_si++){
+        var _sig=all.signals[_si];
+        if(_sig&&_sig.s)_srv[_sig.s]=_sig;
+      }
+      window.__serverSignals=_srv;
+      window.__serverSignalsTs=+all.scannerTs||Date.now();
+    }
     /* — tickers — */
     if(all.tickers){Object.keys(all.tickers).forEach(function(s){var d=all.tickers[s];if(!d)return;var chg=d.change!==undefined?+d.change:(d.c!==undefined?+d.c:0);var price=+d.price||+d.p||0;if(!(price>0))return;/* Skip zero/negative prices — better to omit than to render $0 as live data. */ T[s]={p:price,c:isNaN(chg)?0:chg,v:+d.volume||+d.v||0,h:+d.high||+d.h||0,l:+d.low||+d.l||0,src:d.src||'PROXY',loaded:true,t:Date.now()};if(d.by)T[s].by=+d.by})}
     /* — funding rates — `loaded` distinguishes a real 0% (rare but

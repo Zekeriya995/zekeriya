@@ -89,6 +89,23 @@ const RULES = Object.freeze([
     condition: (ctx) => ctx.isTier1 === true,
   }),
   Object.freeze({
+    id: 'TIER2_BONUS',
+    weight: 5,
+    tag: '🥈T2',
+    /* Phase 2.A.1 PR C — Option C from the CHANGELOG #109
+       architectural-divergence table. The client (`app.js
+       quickScan`) has a tier-2 list (`tier2Coins`) the server
+       doesn't, so the historical `if(isTier1){...} else if(isTier2)
+       {...} else {...}` chain split three ways. Modeling tier-2 as
+       its own rule with `ctx.isTier2 === true` lets both sides
+       converge on the registry without dragging the tier-2 list
+       data into the server: the server passes no `isTier2` field
+       (its applyRules ctx omits it), so the strict `=== true`
+       check cleanly no-ops on the server side. Net behaviour:
+       server unchanged, client now reads tier-2 from the registry. */
+    condition: (ctx) => ctx.isTier2 === true,
+  }),
+  Object.freeze({
     id: 'NEW_BONUS',
     weight: 2,
     tag: '🔍NEW',
@@ -97,8 +114,18 @@ const RULES = Object.freeze([
        check is INTENTIONAL — both sides must pass a real boolean.
        If undefined isTier1 ever reaches the registry, NEITHER
        TIER1_BONUS nor NEW_BONUS fires, which is safer than silently
-       firing NEW_BONUS for what might actually be a tier-1 symbol. */
-    condition: (ctx) => ctx.isTier1 === false,
+       firing NEW_BONUS for what might actually be a tier-1 symbol.
+
+       Phase 2.A.1 PR C: also gate on `isTier2 !== true` so the
+       three rules (TIER1, TIER2, NEW) stay mutually exclusive
+       under the same combined ctx. `!== true` (not `=== false`)
+       is intentional — the server side passes NO `isTier2` field,
+       so `undefined !== true` is truthy and NEW_BONUS still fires
+       for non-tier-1 server coins exactly as before (preserves
+       the pre-PR-C server behaviour bit-for-bit). On the client,
+       `isTier2: true/false` is always supplied, so the gate
+       correctly excludes tier-2 coins from the NEW branch. */
+    condition: (ctx) => ctx.isTier1 === false && ctx.isTier2 !== true,
   }),
   Object.freeze({
     id: 'SILENT_ACCUMULATION',

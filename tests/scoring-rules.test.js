@@ -60,6 +60,11 @@ test('THRESHOLDS — frozen with the expected tier cutoffs', () => {
 
 const TIER1_CTX = { isTier1: true, volume: 1e8, change: 1 };
 const NEW_CTX = { isTier1: false, volume: 1e8, change: 1 };
+/* Phase 2.A.1 PR C — tier-2 ctx is client-only territory. The
+   server passes no `isTier2` field so its ctx looks like NEW_CTX
+   (the historical shape, validated by SERVER_CTX_PRE_PRC below). */
+const TIER2_CTX = { isTier1: false, isTier2: true, volume: 1e8, change: 1 };
+const SERVER_CTX_PRE_PRC = { isTier1: false, volume: 1e8, change: 1 };
 
 function fire(id, ctx) {
   /* Run one rule by id, return true if it fired. Helper for the
@@ -102,6 +107,78 @@ test('TIER1_BONUS and NEW_BONUS — mutually exclusive', () => {
     assert.equal(t1 && newB, false, 'both must not fire for the same ctx');
     assert.equal(t1 || newB, true, 'exactly one must fire for any valid ctx');
   }
+});
+
+/* ─── Phase 2.A.1 PR C — TIER2_BONUS + 3-way mutual exclusion ── */
+
+test('TIER2_BONUS — fires when isTier2=true', () => {
+  assert.equal(fire('TIER2_BONUS', TIER2_CTX), true);
+  const r = RULES.find((r) => r.id === 'TIER2_BONUS');
+  assert.equal(r.weight, 5);
+  assert.equal(r.tag, '🥈T2');
+});
+
+test('TIER2_BONUS — does NOT fire when isTier2 is absent (server ctx)', () => {
+  /* The server's applyRules ctx omits isTier2 entirely. Strict
+     `=== true` cleanly rejects undefined. This is the safety
+     property that lets the server keep its pre-PR-C behaviour. */
+  assert.equal(fire('TIER2_BONUS', SERVER_CTX_PRE_PRC), false);
+  assert.equal(fire('TIER2_BONUS', TIER1_CTX), false);
+  assert.equal(fire('TIER2_BONUS', NEW_CTX), false);
+});
+
+test('TIER2_BONUS — does NOT fire when isTier2=false (client tier-1 or new coin)', () => {
+  assert.equal(fire('TIER2_BONUS', { ...TIER1_CTX, isTier2: false }), false);
+  assert.equal(fire('TIER2_BONUS', { ...NEW_CTX, isTier2: false }), false);
+});
+
+test('NEW_BONUS — does NOT fire when isTier2=true (excludes tier-2 from NEW)', () => {
+  /* PR C: the tier-2 gate on NEW_BONUS prevents both TIER2_BONUS
+     and NEW_BONUS firing for a tier-2 coin. Without this, a
+     tier-2 client signal would get +2 + +5 = +7 instead of +5,
+     diverging from the inline if/else if/else the client used to
+     run. */
+  assert.equal(fire('NEW_BONUS', TIER2_CTX), false);
+});
+
+test('NEW_BONUS — fires for server-side ctx that omits isTier2 (preserves pre-PR-C server behaviour)', () => {
+  /* `isTier2 !== true` is intentional (not `=== false`) so that an
+     undefined isTier2 still passes the gate. This is exactly the
+     pre-PR-C contract — server code passes no isTier2 and expects
+     NEW_BONUS to fire for any non-tier-1 coin. */
+  assert.equal(fire('NEW_BONUS', SERVER_CTX_PRE_PRC), true);
+});
+
+test('TIER1 / TIER2 / NEW — three-way mutual exclusion (client ctx)', () => {
+  /* With both isTier1 and isTier2 supplied (client-shaped ctx),
+     exactly ONE of the three tier-bonus rules must fire. This is
+     the invariant the inline if/else if/else expressed; the
+     registry now expresses it via three independent conditions
+     plus the !== true gate on NEW_BONUS. */
+  const ctxs = [
+    { isTier1: true, isTier2: false, volume: 1e8, change: 1 } /* tier-1 */,
+    { isTier1: false, isTier2: true, volume: 1e8, change: 1 } /* tier-2 */,
+    { isTier1: false, isTier2: false, volume: 1e8, change: 1 } /* new */,
+  ];
+  for (const ctx of ctxs) {
+    const fired = ['TIER1_BONUS', 'TIER2_BONUS', 'NEW_BONUS'].filter((id) => fire(id, ctx));
+    assert.equal(
+      fired.length,
+      1,
+      `exactly one tier rule must fire for ctx ${JSON.stringify(ctx)}; fired: ${fired.join(',')}`
+    );
+  }
+});
+
+test('applyRules — tier-2 client coin scores +5 (not +5+2)', () => {
+  /* End-to-end check via applyRules: a tier-2 coin at $80M and
+     +0.5% should fire TIER2_BONUS (+5), SILENT_ACC (+25),
+     EARLY_ENTRY (+20). Total +50. Without the !== true gate on
+     NEW_BONUS, it would also +2 to +52 — that's the regression
+     this PR guards against. */
+  const out = applyRules({ isTier1: false, isTier2: true, volume: 8e7, change: 0.5 });
+  assert.equal(out.scoreDelta, 50);
+  assert.deepEqual(out.tagsDelta.sort(), ['🥈T2', '🐋ACC', '🔍EARLY'].sort());
 });
 
 test('SILENT_ACCUMULATION — fires on high volume + small change', () => {

@@ -36,6 +36,22 @@ const PD_DETECTOR_ENABLED = process.env.SCANNER_SERVER_PD_ENABLED !== 'false';
    ladder. Default ON. */
 const ATR_ZONES_ENABLED = process.env.SCANNER_SERVER_ATR_ZONES !== 'false';
 
+/* Phase 2.A.4.b — Tier-aware ATR multipliers kill switch. When ON,
+   passes isTier1 through to atrZones so tier-1 majors (BTC/ETH/etc.)
+   get the tighter TIER1_MULTS (stop=1.2, tp1=1.8, tp2=3.0) and the
+   rest keep the existing DEFAULT_MULTS (stop=1.5, tp1=3.0, tp2=5.0).
+   When OFF, atrZones falls back to its non-tier-1 defaults for every
+   symbol — bit-for-bit identical to the pre-2.A.4.b behaviour, so
+   flipping the flag is a clean rollback. Default ON.
+
+   Motivation: a 2026-05-20 BTC signal showed TP1 at +6.5% over a
+   stated 1-4h window, which is unrealistic for BTC's typical hourly
+   range (BTC ATR(14) ~$1,680 means 3 × ATR is roughly a half-day
+   move). Tier-1 multipliers tighten this to ~+3.9% — actually
+   reachable in the displayed window. Non-tier-1 alts can still run
+   +5% in an hour so they keep the original multipliers. */
+const TIER_AWARE_ATR_ENABLED = process.env.SCANNER_TIER_AWARE_ATR_ZONES !== 'false';
+
 /* Manipulation HIGH → tier hard-cap kill-switch (Phase 1.2).
    When ON, any signal whose manipulation verdict is HIGH cannot
    tier above STRONG, even if its raw score would otherwise reach
@@ -597,7 +613,14 @@ function scoreSymbol(sym, ctx) {
     ATR_ZONES_ENABLED && ctx.indicator && typeof ctx.indicator.atr === 'number'
       ? ctx.indicator.atr
       : null;
-  const zones = atrInput ? atrZonesModule.atrZones(d.price, atrInput) : null;
+  /* Phase 2.A.4.b: pass isTier1 through when the tier-aware flag is
+     ON. Otherwise force the option off so atrZones uses its non-tier-1
+     defaults regardless of the symbol — keeps rollback bit-exact. */
+  const zones = atrInput
+    ? atrZonesModule.atrZones(d.price, atrInput, {
+        isTier1: TIER_AWARE_ATR_ENABLED && isTier1,
+      })
+    : null;
   let sl;
   let tp1;
   let tp2;

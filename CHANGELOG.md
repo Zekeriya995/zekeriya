@@ -1,5 +1,76 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.4.b — Tier-aware ATR multipliers] — 2026-05-20
+
+**Server-side behavior change. Tighter TP/SL bounds for tier-1 majors.**
+Adds `TIER1_MULTS = { stop: 1.2, tp1: 1.8, tp2: 3.0 }` alongside the
+existing `DEFAULT_MULTS = { stop: 1.5, tp1: 3.0, tp2: 5.0 }` in
+`src/scanner-atr-zones.js`. The engine passes `isTier1` through to
+`atrZones(price, atr, opts)` so tier-1 coins get the tighter
+multipliers; non-tier-1 alts are unchanged.
+
+### Motivation (the screenshot)
+
+On 2026-05-20 Ziko shared a BTC signal showing entry $77,160 with
+TP1 at +6.5% over a displayed "1-4 hour" window. The number was
+mathematically consistent with the engine (BTC ATR(14) ~$1,680;
+TP1 = price + 3.0 × ATR = $82,200 = +6.5%) but unrealistic in
+practice: a +6.5% BTC move typically takes a half-day to a day,
+not 1-4 hours. The same multipliers work fine for non-tier-1 alts
+where +5% in an hour is routine.
+
+### The new math (worked on the screenshot fixture)
+
+| Bound | Non-tier-1 (old)          | Tier-1 (new)              |
+|-------|---------------------------|---------------------------|
+| stop  | $77,160 − 1.5×$1,680 = $74,640 (−3.27%) | $77,160 − 1.2×$1,680 = $75,144 (−2.61%) |
+| tp1   | $77,160 + 3.0×$1,680 = $82,200 (+6.53%) | $77,160 + 1.8×$1,680 = $80,184 (+3.92%) |
+| tp2   | $77,160 + 5.0×$1,680 = $85,560 (+10.88%) | $77,160 + 3.0×$1,680 = $82,200 (+6.53%) |
+| R:R   | 2.00                       | 1.50                       |
+
+The R:R drop from 2.0 → 1.5 is the explicit trade-off: less reward
+per trade, but the target is actually reachable in the displayed
+window. The audit's stated profitability floor is R:R ≥ 1.3, and
+the new tier-1 R:R = 1.5 stays clear of it. A future tune below
+1.3 would be caught by `tests/scanner-atr-zones.test.js`.
+
+### Files changed
+
+- `src/scanner-atr-zones.js` — adds `TIER1_MULTS`; `atrZones()` now
+  accepts `opts.isTier1` and uses it to pick the baseline. Numeric
+  overrides in `opts` still win over the tier baseline. Strict
+  `=== true` check on `isTier1` (consistent with the registry
+  rules) — anything else falls through to non-tier-1 defaults.
+- `src/scanner-engine.js` — adds `SCANNER_TIER_AWARE_ATR_ZONES`
+  env flag (default ON); when ON, passes
+  `{ isTier1: TIER_AWARE_ATR_ENABLED && isTier1 }` to `atrZones`;
+  when OFF, atrZones falls back to its non-tier-1 defaults for
+  every symbol (bit-for-bit identical to pre-2.A.4.b behaviour).
+- `tests/scanner-atr-zones.test.js` — +10 tests covering
+  `TIER1_MULTS` shape, `isTier1=true/false/invalid` baseline
+  selection, BTC fixture (locks the exact $80,184 TP1 number),
+  DOGE non-tier-1 regression, override cascade interaction with
+  tier-1.
+- `.env.example` — documents `SCANNER_TIER_AWARE_ATR_ZONES=true`.
+- `CHANGELOG.md` — this entry.
+
+### Rollback
+
+`SCANNER_TIER_AWARE_ATR_ZONES=false` in `.env`, then
+`sudo -u nexus pm2 restart nexus-proxy --update-env`. Engine
+stops passing `isTier1=true` and tier-1 symbols revert to the
+non-tier-1 multipliers (the only call-site is line 600-ish in
+`src/scanner-engine.js`). The flag is read once at module load
+so a restart is required.
+
+### Verification
+
+- `npm run check` → 710 / 710 tests pass (10 new).
+- **Manual verification post-deploy** — pull the branch on VPS,
+  restart pm2, watch for a BTC/ETH ULTRA signal. The TP1
+  percentage in the signal card should be ~3-4% (not 6-7% as
+  before). XRP/SOL too. DOGE/SHIB/small-caps should be unchanged.
+
 ## [Scanner Phase 2.A.1 PR B — Client-side registry consumption (narrow)] — 2026-05-20
 
 **Client-side refactor. NO BEHAVIOUR CHANGE — bit-for-bit equivalent.**

@@ -983,7 +983,7 @@ function getScanResults(forceFresh){
         /* Never let an overlay failure break the scanner. The
            local results are correct (if cruder); we just lose the
            server-bound improvement for this pass. */
-        _scanWarn('overlay','server overlay failed: '+_overlayErr.message);
+        _scWarn('overlay',_overlayErr);
       }
       cache.scan=r;cache.scanTime=Date.now();
       return r;

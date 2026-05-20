@@ -18,9 +18,19 @@ the BTC card in the PWA still showed the wider non-tier-1 TP1
 knew about `TIER1_MULTS`. After this PR, the card shows the
 server's tier-1 bounds directly (+3.92% TP1 on a typical BTC
 setup). The `📡SRV` observability tag marks any signal whose
-SL/TP/RR was overlaid from the server, so the Phase 3.1
-tag-stats endpoint can later answer "did server-bound signals
-win more often than purely-local ones?"
+SL/TP/RR was overlaid from the server.
+
+Note on tag-stats scope: `📡SRV` is added on the CLIENT after
+the overlay step, so the server's `/api/scanner/tag-stats`
+endpoint (which aggregates `pass.signals` produced by
+`scoreSymbol` server-side) does NOT see this tag — it only sees
+its own server tags (`📐ATR_ZONES`, `📐ATR_T1`, `🪙ULTRA`, ...).
+The client's local `tagPerf` map (`app.js:1504`) DOES capture
+`📡SRV` and persists per-tag outcomes to localStorage for that
+individual user. A future server-side complement (emit `📡SRV`
+on server signals whose bounds came from full-data scoring)
+would let the cross-user tag-stats endpoint slice by this tag
+too. Deferred.
 
 ### Files changed
 
@@ -68,6 +78,13 @@ reverts to pure-local quickScan + deepAnalyze.
   5. The card's tag chips should include `📡SRV`
   6. DevTools console: `window.__serverSignals` is a non-empty
      object keyed by symbol
+  7. **Rollback test:** in DevTools console run
+     `localStorage.setItem('nxScannerFix_server_signals','off')`
+     then wait one scanner tick (~60s) OR `location.reload()`,
+     and confirm: TP1 reverts to the local +6-7% value AND the
+     `📡SRV` tag chip is gone. Then re-enable with
+     `localStorage.removeItem('nxScannerFix_server_signals')`
+     and verify the overlay returns.
 
 ## [Scanner Phase 2.A.4.b — Tier-aware ATR multipliers] — 2026-05-20
 

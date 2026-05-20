@@ -1381,7 +1381,12 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
      trade plan on each card matches the timeframe they're hunting on. */
   var _tfCfgRender=TF_CONFIG[scannerTimeframe]||TF_CONFIG['1h'];
   var _tfHold=lang==='ar'?_tfCfgRender.holdAr:_tfCfgRender.holdEn;
-  for(var i=0;i<Math.min(r.length,7);i++){var x=r[i];var d=T[x.s];if(!d)continue;
+  /* Pre-render loop respects the user's nxScannerLimit (audit §2.7).
+     The earlier qualityFilter pass already enforces the same cap, but
+     reapplying it here keeps the contract local — if the cap changes
+     mid-pipeline (e.g. "Show more" raises it after qualityFilter
+     ran), this loop still iterates the right count. */
+  for(var i=0;i<Math.min(r.length,_scannerLimit());i++){var x=r[i];var d=T[x.s];if(!d)continue;
     var type=(d.c>=-3&&d.c<=0&&d.v>1e8)?'fast':'daily';var entry,target,stop,dur;
     if(x.smartEntry&&type!=='fast'){entry=x.smartEntry.entry;target=x.smartEntry.target1;stop=x.smartEntry.stop;dur=_tfHold}
     else if(type==='fast'){entry=d.p;target=d.p*1.015;stop=d.p*0.995;dur=scannerTimeframe==='15m'?_tfHold:(lang==='ar'?'10-30 دقيقة':'10-30 min')}else{entry=d.p*0.995;target=x.ultra?d.p*1.08:d.p*1.06;stop=d.p*0.97;dur=_tfHold}
@@ -1449,6 +1454,43 @@ var SCAN_MIN_SCORE_KEY='nx.scannerMinScore';
 function getScanMinScore(){var v=parseInt(localStorage.getItem(SCAN_MIN_SCORE_KEY),10);return isFinite(v)&&v>=30&&v<=100?v:50}
 function _scanTierLabel(s){if(s>=100)return'ULTRA';if(s>=70)return'STRONG';if(s>=50)return'MEDIUM';return'WEAK'}
 function setScanMinScore(v){var n=parseInt(v,10);if(!isFinite(n))n=50;if(n<30)n=30;if(n>100)n=100;localStorage.setItem(SCAN_MIN_SCORE_KEY,n);var lbl=document.getElementById('scanMinScoreLabel');if(lbl)lbl.innerHTML=n+'<span style="font-size:10px;color:var(--t2)"> · '+_scanTierLabel(n)+'</span>';loadTrading();var sc=cache&&cache.scan;if(sc)renderScanResults(sc)}
+/* ─── Scanner result-count limit (audit §2.7) ──────────────────────
+   The original implementation hard-coded slice(0,7) at three points
+   in the scanner pipeline — qualityFilter, loadTrading's per-card
+   loop, and renderTrading's render slice — which hid 43+ of every 50
+   scored signals from the user. The audit's fix: a single
+   configurable limit (default 20) that all three slices respect,
+   plus a "Show more" affordance that bumps the persisted value by
+   10 per click. Clamped 5..100 so a typo can't render zero or
+   thousands of cards. */
+var SCAN_LIMIT_KEY='nxScannerLimit';
+var SCAN_LIMIT_DEFAULT=20;
+var SCAN_LIMIT_MIN=5;
+var SCAN_LIMIT_MAX=100;
+/* Tracks how many signals survived qualityFilter's seven gates
+   BEFORE the per-render slice was applied. renderTrading uses it to
+   compute the "Show more (N more)" label exactly — without it, the
+   downstream sigs[] is always capped at _scannerLimit() and there's
+   no way to tell whether the slice hid any survivors. */
+var _lastQualityFilterPassed=0;
+function _scannerLimit(){
+  var raw;
+  try{raw=localStorage.getItem(SCAN_LIMIT_KEY)}catch(e){raw=null}
+  return clampScannerLimit(raw,SCAN_LIMIT_DEFAULT,SCAN_LIMIT_MIN,SCAN_LIMIT_MAX);
+}
+function setScannerLimit(v){
+  var n=clampScannerLimit(v,SCAN_LIMIT_DEFAULT,SCAN_LIMIT_MIN,SCAN_LIMIT_MAX);
+  try{localStorage.setItem(SCAN_LIMIT_KEY,String(n))}catch(e){/* private mode — best effort */}
+  return n;
+}
+function showMoreSignals(){
+  /* Bump the persisted limit by 10 (capped at SCAN_LIMIT_MAX) and
+     re-render the trade list. forceFresh=false because the cached
+     scan already has more signals than the previous slice exposed
+     — we just need a wider slice, no extra network work. */
+  setScannerLimit(_scannerLimit()+10);
+  try{loadTrading()}catch(e){_scWarn('showMoreSignals',e)}
+}
 /* Apply the slider's threshold to a list of scanned signals.
    Pure function — used by both loadTrading and renderScanResults
    so the user's preference flows through every code path that
@@ -1608,7 +1650,10 @@ function renderTagPerfChips(){
 
 function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter(function(x){return x.type==='fast'});else if(curTradeFilter==='daily')f=sigs.filter(function(x){return x.type==='daily'});else if(curTradeFilter!=='all'){f=sigs.filter(function(x){return x.sec===curTradeFilter})}
   if(scannerSetup!=='all'){f=f.filter(function(x){return x.setup===scannerSetup})}
-  /* Part B: Quality filter — min 40% confidence, max 7 — adaptive */
+  /* Part B: Quality filter — min 40% confidence (adaptive via
+     monitorState.minConf). Per-card render count is governed by
+     _scannerLimit() (see audit §2.7 pagination fix), not by this
+     filter — this filter only enforces the confidence floor. */
   var minConf=monitorState&&monitorState.minConf?Math.max(35,monitorState.minConf-10):40;
   f=f.filter(function(s){return s.conf>=minConf});
   /* User-configurable minimum score from the slider in the scanner
@@ -1628,7 +1673,12 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
     _secCounts[_sk]=(_secCounts[_sk]||0)+1;
     _deduped.push(_sig);
   }
-  f=_deduped.slice(0,7);
+  /* Final cap respects the user's nxScannerLimit (audit §2.7).
+     `_dedupedTotal` is preserved so the "Show more" affordance below
+     can tell whether more cards would be visible at a higher limit. */
+  var _dedupedTotal=_deduped.length;
+  var _scnLimit=_scannerLimit();
+  f=_deduped.slice(0,_scnLimit);
   var scanIEl=document.getElementById('scanI');
   var tkCount=Object.keys(T).length;
   var srcLabel=_proxyAlive?(lang==='ar'?'🟢 PROXY':'🟢 PROXY'):(lang==='ar'?'⚡ مباشر':'⚡ Direct');
@@ -1733,6 +1783,23 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
     +'<div class="sc-actions"><button class="sc-btn" onclick="chartSignal={entry:'+s.entry+',target:'+s.target+',stop:'+s.stop+',s:\''+s.s+'\'};openCoin(\''+s.s+'\')">'+t('scan_chart')+'</button><button class="sc-btn sc-btn-enter" style="flex:1" onclick="if(T[\''+s.s+'\'])openTrade(\''+s.s+'\',T[\''+s.s+'\'].p,\''+s.type+'\','+s.conf+')">'+t('scan_enter')+'</button></div>'
     +'<div style="font-size:9px;color:var(--t3);text-align:center;margin-top:6px">⏱ '+t('scan_duration')+': '+s.dur+'</div>'
     +'</div></div>'});
+  /* "Show more" affordance — appears when qualityFilter held back
+     more signals than the current limit is exposing. The pre-cap
+     count was captured into _lastQualityFilterPassed by the most
+     recent qualityFilter call; we subtract the current visible
+     count to get the exact hidden tally for the button label.
+     Hidden when the limit is already at SCAN_LIMIT_MAX or when
+     there's genuinely nothing more to show. (Audit §2.7) */
+  var _visibleCount=f.length;
+  var _moreCount=Math.max(0,(_lastQualityFilterPassed||_dedupedTotal)-_visibleCount);
+  if(_moreCount>0&&_scnLimit<SCAN_LIMIT_MAX){
+    var _moreLbl=lang==='ar'
+      ?('عرض المزيد ('+_moreCount+' إشارة إضافية)')
+      :('Show more ('+_moreCount+' more)');
+    h+='<div style="display:flex;justify-content:center;margin:12px 0">'
+      +'<button class="sc-btn sc-btn-enter" style="min-width:180px" onclick="showMoreSignals()">📂 '+_moreLbl+'</button>'
+      +'</div>';
+  }
   var tradeListEl=document.getElementById('tradeList');if(tradeListEl)tradeListEl.innerHTML=h}
 /* ═══ SCANNER SUMMARY BAR UPDATE ═══ */
 function updateScanSummary(sigCount,tkCount){
@@ -2858,7 +2925,14 @@ function qualityFilter(results){
   if(passed.length===0&&_qfDiag.total>0){
     try{dbg('[qualityFilter] 🎯 0/'+_qfDiag.total+' passed — rejections:',_qfDiag.byReason)}catch(_e){}
   }
-  return passed.slice(0,7);
+  /* Phase pagination fix (audit §2.7) — the original hard-coded
+     slice(0,7) hid ~85% of scored signals from the user. The limit
+     is now configurable via localStorage.nxScannerLimit (default 20,
+     clamped 5..100) so "Show more" can expose the rest of the list.
+     Stash the pre-cap count so renderTrading can label the button
+     with the exact number of additional signals waiting. */
+  _lastQualityFilterPassed=passed.length;
+  return passed.slice(0,_scannerLimit());
 }
 /* MARKET HEALTH */
 function calcHealth(){var sc=0,f=[];sc+=fgValue<25?5:fgValue<40?10:fgValue<60?15:fgValue<75?18:12;f.push({l:'Fear/Greed',v:fgValue,c:fgValue<30?'dn':fgValue>70?'up':'warn'});sc+=btcDom>60?8:btcDom>50?12:btcDom>40?15:10;f.push({l:'BTC Dom',v:btcDom.toFixed(1)+'%',c:btcDom>55?'warn':'neon'});var bk=Object.values(T).filter(function(x){return x.c>=8}).length;sc+=bk>20?15:bk>10?12:bk>5?10:5;f.push({l:lang==='ar'?'انفجارات':'Breakouts',v:bk,c:bk>15?'up':bk>5?'warn':'dn'});var rs=Object.values(T).filter(function(x){return x.c>0}).length,tt=Object.keys(T).length,bp=tt>0?Math.round(rs/tt*100):50;sc+=bp>60?15:bp>45?10:5;f.push({l:lang==='ar'?'صاعدة':'Bullish',v:bp+'%',c:bp>60?'up':bp>40?'warn':'dn'});var af=Object.values(FR).reduce(function(s,x){return s+x.rate},0)/Math.max(1,Object.keys(FR).length);sc+=af>0.05?5:af>0.02?10:af<-0.01?18:15;f.push({l:'Avg FR',v:(af>=0?'+':'')+af.toFixed(4)+'%',c:af>0.05?'dn':af<-0.01?'up':'warn'});var vc=Object.values(T).filter(function(x){return x.v>1e8}).length;sc+=vc>15?15:vc>8?10:5;f.push({l:'Vol>$100M',v:vc,c:vc>10?'up':'warn'});return{score:Math.min(100,sc),factors:f}}

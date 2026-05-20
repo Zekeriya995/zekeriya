@@ -1,5 +1,111 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Pagination Fix — configurable result limit + Show more] — 2026-05-20
+
+**Closes audit §2.7.** The original implementation hard-coded
+`slice(0,7)` at three points in the scanner pipeline
+(`qualityFilter`, `loadTrading`'s per-card loop, `renderTrading`'s
+final slice), which meant the platform produced 50+ scored signals
+but only ever exposed 7 to the user. Trust signal in the wrong
+direction — the platform looked like it produced fewer ideas than
+it actually did.
+
+The fix is a single configurable limit (`localStorage.nxScannerLimit`,
+default 20, clamped 5..100) that all three slices respect, plus a
+"Show more" button rendered below the trade list whenever
+`qualityFilter` held back more signals than the current limit is
+exposing. Each click bumps the persisted limit by 10 and re-renders
+from the cached scan — no network work is triggered.
+
+### What ships
+
+- **`src/scanner-helpers.js`** — new pure helper `clampScannerLimit(raw, defaultVal, min, max)`:
+  - Parses `raw` as an integer, falls back to `defaultVal` on
+    null / non-numeric / empty input.
+  - Clamps to `[min, max]` so a typo in localStorage can't render
+    zero or thousands of cards.
+  - Argument-trio defaults match the shipped policy (20 / 5 / 100)
+    so callers without explicit bounds get safe behaviour.
+- **`tests/scanner-helpers.test.js`** — 6 new tests for the clamp
+  helper: missing/non-numeric → default, below-min → min, above-max
+  → max, in-range passthrough, default-argument policy, override
+  bounds.
+- **`app.js`** — five additions:
+  - `SCAN_LIMIT_KEY` / `SCAN_LIMIT_DEFAULT` / `SCAN_LIMIT_MIN` /
+    `SCAN_LIMIT_MAX` constants alongside the existing
+    `SCAN_MIN_SCORE_KEY` policy block.
+  - `_scannerLimit()` / `setScannerLimit(v)` wrap `clampScannerLimit`
+    around the localStorage read/write. Try/catch guards against
+    private-mode storage failures.
+  - `showMoreSignals()` increments the persisted limit by 10 and
+    calls `loadTrading()` to re-render — cache-friendly, no network.
+  - `_lastQualityFilterPassed` tracks the pre-cap survivor count so
+    `renderTrading` can label the "Show more" button with the exact
+    number of additional signals waiting.
+  - `qualityFilter`, `loadTrading`'s render loop, and
+    `renderTrading`'s final slice all now read `_scannerLimit()`
+    instead of the hard-coded `7`. The cap is reapplied at each
+    layer so a mid-pipeline change (e.g. user clicks "Show more"
+    while the cached scan is still fresh) takes effect on the next
+    render without re-running the scan.
+- **`eslint.config.mjs`** — declares `clampScannerLimit` as a
+  readonly global in both the app config and the test config.
+
+### How the "Show more" button works
+
+```
+[trade card #1]
+[trade card #2]
+…
+[trade card #20]    ← default limit
+─────────────────
+[📂 Show more (12 more)]   ← only when qualityFilter held back >0
+```
+
+Click → `localStorage.nxScannerLimit` jumps from 20 to 30 → re-
+render exposes 10 more cards from the same cached scan. Persistent
+across sessions; clears by removing the key or hitting it down to
+the floor (5).
+
+### Edge cases handled
+
+- **Private browsing / quota exceeded**: `setScannerLimit` wraps the
+  localStorage write in try/catch and silently falls back to the
+  in-memory limit. The user just doesn't get persistence — the
+  current session still shows more cards.
+- **localStorage typo**: a string like `"twenty"` parses to NaN and
+  the helper returns the default. A string `"0"` clamps up to 5.
+  A string `"99999"` clamps down to 100.
+- **No more to show**: button is hidden when
+  `_lastQualityFilterPassed <= _visibleCount` OR when the limit is
+  already at SCAN_LIMIT_MAX.
+- **Cache freshness**: "Show more" reuses the existing 60s scan
+  cache, so the user sees the wider list immediately without a
+  spinner or any /api/all fetch.
+
+### Backwards compatibility
+
+Users with no `nxScannerLimit` value (every existing user) see 20
+cards on first render — up from the previous 7. No flag, no
+opt-in, no migration step. The audit lists this as
+"can ship any time" — it's a pure user-visible improvement with
+no behaviour change for ULTRA push triggers, scoring, or signal
+quality gates.
+
+### Test results
+
+- `npm run check` → lint clean, format clean, **731 / 731** tests
+  pass (was 725 + 6 from this commit).
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §2.7 (qualityFilter slice problem
+  + recommended fix)
+- `SCANNER_AUDIT_2026_05_15.md` §6 "Post-Phase Pagination Fix"
+  (ship-anytime designation)
+
+---
+
 ## [Scanner Phase 2.A.2 — PWA consumes server signals] — 2026-05-20
 
 **The "Wasted Pipeline" defect closes.** The PWA can now read

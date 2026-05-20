@@ -90,6 +90,7 @@ export default [
         qualityFilterRejectReason: 'readonly',
         coinbasePremiumPct: 'readonly',
         topTraderLatestLong: 'readonly',
+        clampScannerLimit: 'readonly',
         /* Declared in src/scanner-server-adapter.js */
         adaptServerSignalToClient: 'readonly',
         SRC_SERVER_TAG: 'readonly',
@@ -362,6 +363,7 @@ export default [
         qualityFilterRejectReason: 'readonly',
         coinbasePremiumPct: 'readonly',
         topTraderLatestLong: 'readonly',
+        clampScannerLimit: 'readonly',
         /* From src/scanner-server-adapter.js */
         adaptServerSignalToClient: 'readonly',
         SRC_SERVER_TAG: 'readonly',

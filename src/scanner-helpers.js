@@ -976,3 +976,26 @@ function topTraderLatestLong(topTradersEntry, field) {
   if (!latest || typeof latest.long !== 'number') return null;
   return latest.long;
 }
+
+/* Clamp a raw localStorage value to the scanner-limit range. Pure
+   helper so app.js's _scannerLimit() / setScannerLimit() can hand
+   off all the parsing + bounds logic to a unit-tested function.
+
+   Behaviour:
+     - null / undefined / empty / non-numeric → defaultVal
+     - number below min                       → min
+     - number above max                       → max
+     - otherwise                              → parseInt(raw, 10)
+
+   The localStorage key (audit §2.7) is `nxScannerLimit`; the values
+   shipped at the time of writing are default=20, min=5, max=100. */
+function clampScannerLimit(raw, defaultVal, min, max) {
+  if (defaultVal == null) defaultVal = 20;
+  if (min == null) min = 5;
+  if (max == null) max = 100;
+  var n = parseInt(raw, 10);
+  if (!isFinite(n)) return defaultVal;
+  if (n < min) return min;
+  if (n > max) return max;
+  return n;
+}

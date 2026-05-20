@@ -1507,3 +1507,48 @@ test('topTraderLatestLong — boundary at the 0.55 / 0.58 thresholds both formul
      loadTrading tier — that's a runtime concern, not a helper one,
      but worth documenting here so tests catch any boundary drift. */
 });
+
+/* ─── clampScannerLimit (audit §2.7 pagination fix) ───────────────── */
+
+test('clampScannerLimit — missing / non-numeric input returns the default', () => {
+  assert.equal(clampScannerLimit(null, 20, 5, 100), 20);
+  assert.equal(clampScannerLimit(undefined, 20, 5, 100), 20);
+  assert.equal(clampScannerLimit('', 20, 5, 100), 20);
+  assert.equal(clampScannerLimit('NaN', 20, 5, 100), 20);
+  assert.equal(clampScannerLimit('hello', 20, 5, 100), 20);
+});
+
+test('clampScannerLimit — below-min input clamps up to min', () => {
+  assert.equal(clampScannerLimit(0, 20, 5, 100), 5);
+  assert.equal(clampScannerLimit(-50, 20, 5, 100), 5);
+  assert.equal(clampScannerLimit('3', 20, 5, 100), 5);
+});
+
+test('clampScannerLimit — above-max input clamps down to max', () => {
+  assert.equal(clampScannerLimit(1000, 20, 5, 100), 100);
+  assert.equal(clampScannerLimit('99999', 20, 5, 100), 100);
+});
+
+test('clampScannerLimit — in-range input passes through unchanged', () => {
+  assert.equal(clampScannerLimit(20, 20, 5, 100), 20);
+  assert.equal(clampScannerLimit('30', 20, 5, 100), 30);
+  assert.equal(clampScannerLimit(5, 20, 5, 100), 5);
+  assert.equal(clampScannerLimit(100, 20, 5, 100), 100);
+});
+
+test('clampScannerLimit — defaults match the shipped policy (20 / 5 / 100)', () => {
+  /* No argument trio = shipped defaults. The shipped values are
+     locked here because flipping any of them silently changes the
+     UX for every user — the assertion ensures the change is loud. */
+  assert.equal(clampScannerLimit(null), 20);
+  assert.equal(clampScannerLimit(2), 5);
+  assert.equal(clampScannerLimit(999), 100);
+});
+
+test('clampScannerLimit — bounds args override the defaults', () => {
+  /* Allows future callers to ship a different range (e.g., a power-
+     user view that goes up to 500) without forking the helper. */
+  assert.equal(clampScannerLimit(50, 10, 1, 25), 25);
+  assert.equal(clampScannerLimit(0, 10, 1, 25), 1);
+  assert.equal(clampScannerLimit(null, 10, 1, 25), 10);
+});

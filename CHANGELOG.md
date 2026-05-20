@@ -1,5 +1,91 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.1 PR C — TIER1 / TIER2 / NEW bonus migration] — 2026-05-20
+
+**Server-side: NO BEHAVIOUR CHANGE.** **Client-side: NO BEHAVIOUR CHANGE.**
+Bit-for-bit equivalent. Closes the architectural divergence noted
+in CHANGELOG #109 by following Option C from the divergence table.
+
+### What changed
+
+- `src/scoring-rules.js`:
+  - Adds `TIER2_BONUS` rule (`weight: 5`, `tag: '🥈T2'`,
+    `condition: (ctx) => ctx.isTier2 === true`)
+  - Tightens `NEW_BONUS` condition to
+    `ctx.isTier1 === false && ctx.isTier2 !== true` so tier-2
+    coins don't fire both TIER2_BONUS (+5) AND NEW_BONUS (+2)
+- `app.js quickScan`:
+  - The inline `if(isTier1){...} else if(isTier2){...} else
+    {...}` chain is replaced by the registry-driven forEach,
+    now including `TIER1_BONUS`, `TIER2_BONUS`, `NEW_BONUS`
+    alongside the 3 migrated in PR B (SILENT_ACCUMULATION,
+    EARLY_ENTRY, STEALTH).
+  - The defensive `else` fallback (when `window.SCORING_RULES`
+    didn't load) is extended to also run the tier chain inline
+    — so a registry-load failure still produces bit-for-bit
+    identical scoring (the original fallback only ran the
+    accumulation rules).
+- `tests/scoring-rules.test.js`:
+  - +7 tests covering TIER2_BONUS shape/firing/exclusion,
+    NEW_BONUS tier-2 gate, server-ctx (no isTier2) behaviour
+    preservation, three-way mutual exclusion, applyRules
+    end-to-end on a tier-2 client coin.
+
+### Why Option C (vs A/B from #109)
+
+| Option | Cost | Risk |
+|---|---|---|
+| A: drop isTier2 from client | smallest client diff | loses the +5 tier-2 medium tier on PWA — UX regression |
+| B: add tier-2 list to server | best convergence | requires tier-2 coin list as data the server doesn't have today; another data source to keep in sync |
+| C: TIER2_BONUS rule with isTier2 strict-check; server passes none | minimum diff, zero data migration | none |
+
+Option C is provably no-op on the server: the strict `=== true`
+check on `isTier2` rejects undefined cleanly, and the new
+`!== true` gate on `NEW_BONUS` evaluates `undefined !== true`
+truthy — so server scoring is bit-for-bit unchanged. Three
+test cases pin this property as a contract.
+
+### Verification
+
+- `npm run check` — 720 / 720 tests pass (+7 from PR B's 713).
+  Lint clean, format clean.
+- Server-side regression: tests under `tests/scanner-engine.test.js`
+  still pass — they pass server-style ctxs (no `isTier2`) and
+  the test expectations rely on NEW_BONUS firing for non-tier-1
+  coins, which still holds.
+
+### Rollback
+
+This PR has no behaviour change so no rollback flag is strictly
+needed. To revert: `git revert <merge-commit>` on the server.
+
+The Phase 0 namespace at `app.js:14` reserves
+`nxScannerFix_unified_rules` for per-page localStorage rollback
+of Phase 2.A.1 work, but the reservation is currently a
+no-op — **no code reads it yet**. If a future PR needs to wire
+real per-page rollback, it would gate the `if (window.SCORING_RULES)`
+branch on that flag and fall back to the inline `else` path
+when the flag is set to 'off'. Out of scope for PR C since
+there's no behaviour to roll back.
+
+The defensive `else` fallback in `quickScan` (which mirrors the
+inline pre-PR-B/C path) only fires when `window.SCORING_RULES`
+itself failed to load (CDN issue, ad-blocker stripping the
+`<script>` tag, …). It is NOT a flag-driven rollback path —
+flagging that distinction here so a future on-call doesn't
+expect setting the flag to do anything.
+
+### Parity ratchet status
+
+| Phase 2.A.1 PR | Migrated rules | Status |
+|---|---|---|
+| PR A (server) | SILENT_ACC, EARLY, STEALTH + TIER1, NEW | merged |
+| PR B (client, narrow) | SILENT_ACC, EARLY, STEALTH | merged |
+| **PR C (client, tier-bonus chain)** | **TIER1, TIER2, NEW** | **this PR** |
+| PR D (next) | FR / OBI / Whale rules | pending |
+| PR E (next) | MTF / indicator rules | pending |
+| PR FINAL | cleanup + dead-code purge | pending |
+
 ## [Scanner Phase 2.A.2.2 — Client demotes tier on server protective flags] — 2026-05-20
 
 **Client-side change. ASYMMETRIC overlay: server can DEMOTE,

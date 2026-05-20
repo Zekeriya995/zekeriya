@@ -10,7 +10,11 @@
  * later PRs — surfaced by pre-merge SRE review):
  *   - Mutually-exclusive `else if` chains (MEGA_VOL/HIGH_VOL/VOL):
  *     workable as N rules with disjoint conditions, but loses the
- *     "exactly one fires" guarantee. PR C will address.
+ *     "exactly one fires" guarantee. PR C addresses the TIER
+ *     chain by encoding precedence in the conditions themselves
+ *     (TIER1 > TIER2 > NEW); the same pattern will work for the
+ *     VOL chain in PR D. The 3-way mutual exclusion contract is
+ *     pinned by tests/scoring-rules.test.js.
  *   - Multi-tag tier rules (whaleWave A/B/C/D, mtfAgreement):
  *     could be N rows or a `tagFn(ctx)` field. Decide in PR D.
  *   - Non-additive scoring (P&D KILL → score floor at -100):
@@ -44,6 +48,10 @@
  * Expected `ctx` shape (built by the consumer before iterating rules):
  *   {
  *     isTier1:  boolean
+ *     isTier2:  boolean (CLIENT-only — server omits this field;
+ *                        TIER2_BONUS strict-checks `=== true` so
+ *                        an absent isTier2 cleanly no-ops on the
+ *                        server side. Added in PR C.)
  *     volume:   number  — 24h quote volume in USD
  *     change:   number  — 24h percentage change
  *   }
@@ -89,6 +97,34 @@ const RULES = Object.freeze([
     condition: (ctx) => ctx.isTier1 === true,
   }),
   Object.freeze({
+    id: 'TIER2_BONUS',
+    weight: 5,
+    tag: '🥈T2',
+    /* Phase 2.A.1 PR C — Option C from the CHANGELOG #109
+       architectural-divergence table. The client (`app.js
+       quickScan`) has a tier-2 list (`tier2Coins`) the server
+       doesn't, so the historical `if(isTier1){...} else if(isTier2)
+       {...} else {...}` chain split three ways. Modeling tier-2 as
+       its own rule with `ctx.isTier2 === true` lets both sides
+       converge on the registry without dragging the tier-2 list
+       data into the server: the server passes no `isTier2` field
+       (its applyRules ctx omits it), so the strict `=== true`
+       check cleanly no-ops on the server side. Net behaviour:
+       server unchanged, client now reads tier-2 from the registry.
+
+       The `isTier1 !== true` half of the gate is REQUIRED to
+       preserve the inline if/else if/else mutual exclusion. The
+       client's `tier2Coins` list (populated from a ranked-by-vol
+       slice at app.js:79-81) is NOT enforced disjoint from the
+       hardcoded `TIER1` set, so a hot major (BTC, ETH, SOL …)
+       can appear in BOTH. Without the tier-1 exclusion, BTC
+       would silently start scoring +15 (TIER1 +10 + TIER2 +5)
+       instead of +10 — a drift the SRE review of PR #114
+       caught. Symmetric with the `isTier2 !== true` gate on
+       NEW_BONUS: precedence is TIER1 > TIER2 > NEW. */
+    condition: (ctx) => ctx.isTier2 === true && ctx.isTier1 !== true,
+  }),
+  Object.freeze({
     id: 'NEW_BONUS',
     weight: 2,
     tag: '🔍NEW',
@@ -97,8 +133,18 @@ const RULES = Object.freeze([
        check is INTENTIONAL — both sides must pass a real boolean.
        If undefined isTier1 ever reaches the registry, NEITHER
        TIER1_BONUS nor NEW_BONUS fires, which is safer than silently
-       firing NEW_BONUS for what might actually be a tier-1 symbol. */
-    condition: (ctx) => ctx.isTier1 === false,
+       firing NEW_BONUS for what might actually be a tier-1 symbol.
+
+       Phase 2.A.1 PR C: also gate on `isTier2 !== true` so the
+       three rules (TIER1, TIER2, NEW) stay mutually exclusive
+       under the same combined ctx. `!== true` (not `=== false`)
+       is intentional — the server side passes NO `isTier2` field,
+       so `undefined !== true` is truthy and NEW_BONUS still fires
+       for non-tier-1 server coins exactly as before (preserves
+       the pre-PR-C server behaviour bit-for-bit). On the client,
+       `isTier2: true/false` is always supplied, so the gate
+       correctly excludes tier-2 coins from the NEW branch. */
+    condition: (ctx) => ctx.isTier1 === false && ctx.isTier2 !== true,
   }),
   Object.freeze({
     id: 'SILENT_ACCUMULATION',

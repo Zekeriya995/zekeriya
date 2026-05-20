@@ -2502,28 +2502,44 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   /* ═══ BLOCK: too late or overheated ═══ */
   if(d.c>=8)return;
   var sc=0,tags=[];
-  /* Tier bonus */
-  if(isTier1){sc+=10;tags.push('🏆TOP100')}
-  else if(isTier2){sc+=5;tags.push('🥈T2')}
-  else{sc+=2;tags.push('🔍NEW')}
-  /* ═══ CORE: Silent Accumulation — volume + flat price ═══
-     Phase 2.A.1 PR B — these 3 rules now read from the shared
-     src/scoring-rules.js registry instead of inline literals.
-     The server's scoreSymbol() consumes the same RULES array, so
-     any future weight/condition change happens in exactly one place.
-     TIER1_BONUS / NEW_BONUS / FALLING_KNIFE NOT migrated here:
-     the client has a TIER2_BONUS branch that the server doesn't,
-     and FALLING_KNIFE is a server-only suppression for now. Both
-     decisions are deferred to PR C. */
+  /* Phase 2.A.1 PR B + PR C — six rules now read from the shared
+     src/scoring-rules.js registry instead of inline literals. The
+     server's scoreSymbol() consumes the same RULES array (minus
+     TIER2_BONUS, which strict-checks `isTier2 === true` and the
+     server passes no isTier2 — so it cleanly no-ops server-side).
+     Future weight/condition changes happen in exactly one place.
+
+     PR C migration notes:
+       - TIER1_BONUS / TIER2_BONUS / NEW_BONUS are mutually
+         exclusive via the registry's `isTier1 === false &&
+         isTier2 !== true` gate on NEW_BONUS (tier-2 gate added
+         in PR C). Tests pin this 3-way exclusion contract.
+       - FALLING_KNIFE still NOT migrated to the client — it's a
+         server-only suppression rule and the client doesn't track
+         per-symbol 24h pct change with the same precision the
+         server does (client's d.c is whatever the upstream
+         /api/all ticker reports). Deferred to a future PR after
+         tag-stats data validates the rule.
+       - Falsy-path fallback below is the SAME as pre-PR-B/C: if
+         window.SCORING_RULES failed to load (CDN issue, blocker,
+         …), we run the original inline if/else chain so the
+         scanner stays functional and bit-for-bit identical. */
   if (window.SCORING_RULES) {
-    var _ruleCtx = { isTier1: isTier1, volume: d.v, change: d.c };
-    ['SILENT_ACCUMULATION','EARLY_ENTRY','STEALTH'].forEach(function(_id){
+    var _ruleCtx = { isTier1: isTier1, isTier2: isTier2, volume: d.v, change: d.c };
+    ['TIER1_BONUS','TIER2_BONUS','NEW_BONUS','SILENT_ACCUMULATION','EARLY_ENTRY','STEALTH'].forEach(function(_id){
       var _r = window.SCORING_RULES.RULES.find(function(x){return x.id===_id});
       if (_r && _r.condition(_ruleCtx)) { sc += _r.weight; if (_r.tag) tags.push(_r.tag); }
     });
   } else {
     /* Defensive fallback — if scoring-rules.js failed to load, run
-       the same logic inline so the scanner keeps working at parity. */
+       the same logic inline so the scanner keeps working at parity.
+       Updated in PR C to include the tier-bonus chain too — the
+       fallback now mirrors the full pre-PR-B/C inline path so a
+       registry-load failure produces identical scoring (not a
+       skipped tier bonus on top of a skipped SILENT_ACC). */
+    if(isTier1){sc+=10;tags.push('🏆TOP100')}
+    else if(isTier2){sc+=5;tags.push('🥈T2')}
+    else{sc+=2;tags.push('🔍NEW')}
     if(d.v>5e7&&Math.abs(d.c)<2){sc+=25;tags.push('🐋ACC')}
     if(d.v>3e7&&d.c>=0.3&&d.c<2){sc+=20;tags.push('🔍EARLY')}
     if(d.v>8e7&&d.c>=0.5&&d.c<3){sc+=15;tags.push('🔍STEALTH')}

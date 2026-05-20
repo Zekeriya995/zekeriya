@@ -1,5 +1,67 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.3 — THRESHOLDS consumption (server wiring)] — 2026-05-20
+
+**Tiny follow-up PR. No behaviour change.** Addresses SRE NOTE 5
+from PR #106's pre-merge review: `_tierFromScore` and the
+wash-trade floors in `src/scanner-engine.js` still duplicated
+hard-coded numbers that already lived in `THRESHOLDS` from the
+new registry. This PR replaces those literals with registry
+references, effectively closing Phase 2.A.3 (unified tier
+thresholds) as a side effect.
+
+### Changed
+
+- `src/scanner-engine.js`:
+  - `WASH_VOLUME_FLOOR` / `WASH_OI_FLOOR` module-local consts
+    now derive from `scoringRules.THRESHOLDS.WASH_VOLUME_FLOOR` /
+    `.WASH_OI_FLOOR` instead of inline literals. Re-exporting them
+    as module-locals keeps every existing reference unchanged.
+  - `_tierFromScore` reads `scoringRules.THRESHOLDS.ULTRA` / `.STRONG`
+    / `.MEDIUM` instead of literals 100 / 70 / 50.
+  - `runScannerPass` lowScore gate reads `scoringRules.THRESHOLDS.WEAK_MIN`
+    instead of literal 30.
+
+### Test coverage
+
+- `tests/scoring-rules.test.js` — extended the `THRESHOLDS` shape
+  test to lock the wash-trade floor values (caught by the same
+  assertion that locks the tier cutoffs).
+- All 47 existing `scanner-engine.test.js` tests continue to pass
+  unmodified — proof the wiring is bit-for-bit equivalent.
+
+### Why this isn't bundled into PR #106
+
+Keeping the parity ratchet small. PR #106 (PR A) was the registry
+skeleton + 5 rules + server wiring + review fixes. This (PR B in
+the broader plan, but functionally closing Phase 2.A.3) is the
+threshold wiring. Each diff is reviewable in 2 minutes.
+
+### Rollback
+
+Single-commit revert. `WASH_VOLUME_FLOOR` / `WASH_OI_FLOOR` /
+tier cutoffs return to inline literals; the registry exports the
+values but nobody reads them. No data migration.
+
+### Test results
+
+- `npm run check` → lint clean, format clean, 695 / 695 tests pass.
+
+### Phase 2.A.3 status
+
+The audit's Phase 2.A.3 ("Unify tier thresholds — single import")
+is now effectively complete on the server. `app.js`'s
+`_tierFromScore` (and its inline cutoffs) still uses literals;
+PR B of the registry migration handles that.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P2.A.1, P2.A.3
+- `docs/SCANNER_UNIFIED_RULES_REGISTRY_DESIGN.md` §3
+- PR #106's SRE review NOTE 5 (now resolved)
+
+---
+
 ## [Scanner Phase 2.A.1 PR A — Unified Rules Registry skeleton] — 2026-05-20
 
 **Foundational refactor.** No behaviour change. Implements PR A of

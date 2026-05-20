@@ -6,29 +6,41 @@
  * here becomes structurally impossible to drift between the two
  * sides — the test runner imports this file and pins the contract.
  *
- * Known un-expressible patterns (will need shape extensions in
- * later PRs — surfaced by pre-merge SRE review):
- *   - Mutually-exclusive `else if` chains (MEGA_VOL/HIGH_VOL/VOL):
- *     workable as N rules with disjoint conditions, but loses the
- *     "exactly one fires" guarantee. PR C addresses the TIER
- *     chain by encoding precedence in the conditions themselves
- *     (TIER1 > TIER2 > NEW); the same pattern will work for the
- *     VOL chain in PR D. The 3-way mutual exclusion contract is
- *     pinned by tests/scoring-rules.test.js.
- *   - Multi-tag tier rules (whaleWave A/B/C/D, mtfAgreement):
- *     could be N rows or a `tagFn(ctx)` field. Decide in PR D.
+ * Migrated rules (20 total — Phase 2.A.1 PR A through PR E,
+ * all merged 2026-05-20):
+ *   PR A — TIER1_BONUS, NEW_BONUS, SILENT_ACCUMULATION,
+ *          EARLY_ENTRY, STEALTH (server first; client followed
+ *          in PR B for the accumulation rules)
+ *   PR C — TIER2_BONUS; NEW_BONUS gate extended for 3-way
+ *          mutual exclusion (precedence encoded in conditions)
+ *   PR D — FR_VERY_NEG, FR_MILDLY_NEG, FR_OVEREXTENDED,
+ *          LS_SHORTS, COINALYZE_FR_NEG
+ *   PR E — MTF_BULL_FULL/PARTIAL, MTF_BEAR_FULL/PARTIAL,
+ *          RSI_OS, RSI_OB, MACD_BULL_CROSS, MACD_BEAR_CROSS
+ *
+ * Plus FALLING_KNIFE (PR #108) — a defensive suppression rule
+ * native to the registry (not a migration).
+ *
+ * Known un-expressible patterns remaining inline (out of scope
+ * for the current registry shape):
+ *   - Multi-tag tier rules (whaleWave A/B/C/D): would need a
+ *     `tagFn(ctx)` field. Stays inline in app.js for now.
  *   - Non-additive scoring (P&D KILL → score floor at -100):
  *     `scoreFn(score, ctx)` field or a separate kind: 'modifier'.
- *     Stays inline for now.
+ *     Stays inline.
  *   - Dynamic tag strings ('📗BID:Nx'): need `tagFn(ctx)` field.
  *   - Compound rules reading earlier rule outputs: no inter-rule
  *     state today; would need a two-pass evaluator.
+ *   - MACD histogram tie-breaker (+3 / -3 with NO tag, fires
+ *     when cross is neither 'bull' nor 'bear'): tagless score
+ *     adjustment doesn't fit the current rule shape. Stays
+ *     inline in src/scanner-engine.js gated on no-cross.
  *
- * Phase 2.A.1 PR A (this file's first incarnation) ships 5
+ * Phase 2.A.1 PR A (this file's first incarnation) shipped 5
  * representative simple rules to prove the loader pattern + the
- * server-side wiring. Subsequent PRs migrate the remaining ~40
- * rules in small batches (per docs/SCANNER_UNIFIED_RULES_REGISTRY_DESIGN.md
- * §4 "parity ratchet").
+ * server-side wiring. Subsequent PRs (B/C/D/E) migrated the
+ * full parity-ratchet sequence per
+ * docs/SCANNER_UNIFIED_RULES_REGISTRY_DESIGN.md §4.
  *
  * Loader pattern (UMD-lite, matches src/utils.js) at file bottom:
  * works as CommonJS on Node AND as a window global in the browser.

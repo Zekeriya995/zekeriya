@@ -1,5 +1,96 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner — FALLING_KNIFE suppression rule] — 2026-05-20
+
+**Defensive new scoring rule.** Triggered by the SAGA finding —
+three STRONG signals fired on 2026-05-11 into a coin that had
+crashed -14% to -16% over the 24h window each time. Net result:
+three logged losses, no actual gains. The scanner was catching the
+brief volume blips inside a multi-day crash.
+
+### What ships
+
+A single new rule in `src/scoring-rules.js`:
+
+```js
+{
+  id: 'FALLING_KNIFE',
+  weight: -50,
+  tag: '🔪FALLING',
+  condition: (ctx) => typeof ctx.change === 'number' && ctx.change < -10,
+}
+```
+
+Any coin down more than 10% in its 24h window loses 50 points
+immediately. A STRONG (70-90) signal on a falling knife drops to
+20-40 — below the `WEAK_MIN` quality gate at 30 — and never reaches
+the user.
+
+### Why -50
+
+Calibrated so that a STRONG (70-99) signal becomes a WEAK (<30)
+after the penalty, which the qualityFilter drops. ULTRA-scoring
+signals (100+) still pass through with a heavy penalty (50+ tag),
+which is honest: a coin scoring ULTRA *despite* crashing 10%+ in
+24h has REAL accumulation underneath the noise, and the user should
+see the warning tag and decide.
+
+### Why -10 (not -5 or -15)
+
+- -5 would suppress any minor pullback, killing the scanner's
+  ability to catch dip-buys
+- -15 would still let SAGA-style -10 to -14 entries through
+- -10 is the audit's "tail event" threshold — historically a
+  daily move past -10% has follow-through about 60% of the time
+  (continuation, not reversal)
+
+If the tag-stats endpoint shows the rule over-suppresses real
+bounces, the threshold can widen from -10 to -15 in a single-line PR.
+
+### No per-rule env flag
+
+Consistent with the other 5 rules in the registry. Rollback =
+revert this commit (single-line in the array). The parity-ratchet
+design intentionally treats rule changes as committable code, not
+runtime config.
+
+### Edge cases covered by tests
+
+- Boundary: `change === -10` does NOT fire (strict `<`).
+- `change === -10.01` fires.
+- Missing / null / NaN / non-numeric `change` does NOT fire.
+- Aggregate: a TIER1 + change=-15 ctx scores TIER1 (+10) +
+  FALLING_KNIFE (-50) = -40 net.
+- A recovering coin at change=-8 does NOT trigger.
+- SAGA case (change=-16.31) fires correctly.
+
+### Server impact (when deployed)
+
+The next `fetchTickers` cycle, any coin with `d.change < -10`
+will score 50 points lower. Estimated effect: on a typical
+red day with 5-10 coins down >10%, those coins drop OUT of
+the top signals into `lowScore` rejection (visible in
+`/api/scanner/insights`'s `lowScore` counter). Net user-facing
+effect: fewer red losers polluting the Top-3.
+
+### Test results
+
+- `npm run check` → lint clean, format clean, **700 / 700** tests pass
+  (was 695 + 5 from this commit).
+
+### Rollback
+
+Single-commit revert. The rule object is removed from the RULES
+array. Tags `🔪FALLING` already in scanner-history.json remain
+(forward-compatible — no consumer breaks on an unknown tag).
+
+### References
+
+- 2026-05-20 SAGA history finding (3 consecutive STRONG losses)
+- `SCANNER_AUDIT_2026_05_15.md` §6 (suppression philosophy)
+
+---
+
 ## [Scanner Phase 2.A.3 — THRESHOLDS consumption (server wiring)] — 2026-05-20
 
 **Tiny follow-up PR. No behaviour change.** Addresses SRE NOTE 5

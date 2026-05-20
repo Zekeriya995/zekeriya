@@ -243,3 +243,60 @@ test('RULES — mutating a rule throws (strict mode)', () => {
   /* And verify the value did not change. */
   assert.equal(RULES[0].weight, 10);
 });
+
+/* ─── FALLING_KNIFE rule (defensive suppression) ──────────────── */
+
+test('FALLING_KNIFE — fires when change < -10', () => {
+  const fam = RULES.find((r) => r.id === 'FALLING_KNIFE');
+  assert.ok(fam, 'FALLING_KNIFE rule must exist in registry');
+  assert.equal(fam.weight, -50);
+  assert.equal(fam.tag, '🔪FALLING');
+  /* Boundary: exactly -10 does NOT fire (strict <). */
+  assert.equal(fam.condition({ change: -10 }), false);
+  /* Anything below -10 fires. */
+  assert.equal(fam.condition({ change: -10.01 }), true);
+  assert.equal(fam.condition({ change: -16.31 }), true); /* SAGA case */
+});
+
+test('FALLING_KNIFE — does NOT fire on neutral / positive change', () => {
+  const fam = RULES.find((r) => r.id === 'FALLING_KNIFE');
+  assert.equal(fam.condition({ change: 0 }), false);
+  assert.equal(fam.condition({ change: 5 }), false);
+  assert.equal(fam.condition({ change: -5 }), false);
+  assert.equal(fam.condition({ change: -9.99 }), false);
+});
+
+test('FALLING_KNIFE — does NOT fire when change is missing or non-numeric', () => {
+  const fam = RULES.find((r) => r.id === 'FALLING_KNIFE');
+  assert.equal(fam.condition({}), false);
+  assert.equal(fam.condition({ change: undefined }), false);
+  assert.equal(fam.condition({ change: null }), false);
+  assert.equal(fam.condition({ change: 'string' }), false);
+  assert.equal(fam.condition({ change: NaN }), false);
+});
+
+test('FALLING_KNIFE — penalty drops a STRONG-scoring coin below the gate', () => {
+  /* SAGA-shaped: tier-1ish high volume, change = -15. Net score
+     before this rule: TIER1 (10) + SILENT_ACC (would fire on |change|<2
+     → no, change=-15 is far from flat → does NOT fire) + VOL bonuses
+     in other rules... but FALLING_KNIFE adds -50. Walk the applyRules
+     output explicitly. */
+  const ctx = { isTier1: true, volume: 1e8, change: -15 };
+  const out = applyRules(ctx);
+  /* TIER1_BONUS (+10) and FALLING_KNIFE (-50) → net -40.
+     SILENT_ACC needs |change|<2 → does NOT fire on -15.
+     EARLY_ENTRY needs change in [0.3, 2) → does NOT fire on -15.
+     STEALTH needs change in [0.5, 3) → does NOT fire on -15. */
+  assert.equal(out.scoreDelta, -40);
+  assert.ok(out.tagsDelta.includes('🏆TOP100'));
+  assert.ok(out.tagsDelta.includes('🔪FALLING'));
+});
+
+test('FALLING_KNIFE — does not interfere with a recovering coin at -8%', () => {
+  /* A coin down 8% should NOT trigger the rule. Tests the explicit
+     boundary the audit calls out (false negatives preferred over
+     false positives — but only for actual crashes). */
+  const ctx = { isTier1: false, volume: 1e8, change: -8 };
+  const out = applyRules(ctx);
+  assert.ok(!out.tagsDelta.includes('🔪FALLING'));
+});

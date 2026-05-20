@@ -1015,6 +1015,47 @@ function getScanResults(forceFresh){
               if(Array.isArray(_row.tags) && _row.tags.indexOf('📡SRV')===-1){
                 _row.tags.push('📡SRV');
               }
+              /* Phase 2.A.2.2 — tier overlay. ASYMMETRIC by design:
+                 we only DEMOTE the client's ULTRA/CONFIRMED flag
+                 when the server emits a protective tag for the
+                 same symbol. Never promote — the client has richer
+                 scoring rules (TIER2_BONUS, WHALE_TARGET, CVD_BUY,
+                 TAKER, depth, BID_PRESS, OI_BUILD, …) that the
+                 server doesn't compute, so a client ULTRA based on
+                 those signals shouldn't get capped by a quieter
+                 server view. But if the server has caught a
+                 manipulation-cap, P&D risk, or FALLING_KNIFE that
+                 the client doesn't track, we surface that as a
+                 visual demotion so the user sees the safer tier.
+                 Demotion principle:
+                   client ULTRA  → demoted to CONFIRMED
+                   client CONF   → demoted to neither (cleared)
+                 The 🛑SRV_DEMOTE tag marks the row so users (and
+                 tag-stats) can audit which signals got demoted by
+                 which server flag. */
+              var _srvTags = Array.isArray(_srv.tags) ? _srv.tags : [];
+              var _hasDemoteFlag = false;
+              for(var _ti=0;_ti<_srvTags.length;_ti++){
+                var _t = _srvTags[_ti];
+                if(typeof _t !== 'string') continue;
+                if(_t.indexOf('🚫MANIP_CAP')===0
+                   || _t.indexOf('🚨MANIP_HIGH')===0
+                   || _t.indexOf('🔪FALLING')===0
+                   || _t.indexOf('🚨P&D_RISK')===0){
+                  _hasDemoteFlag = true; break;
+                }
+              }
+              if(_hasDemoteFlag){
+                var _wasUltra = _row.ultra === true;
+                var _wasConf  = _row.confirmed === true;
+                if(_wasUltra){ _row.ultra = false; _row.confirmed = true; }
+                else if(_wasConf){ _row.confirmed = false; }
+                if(_wasUltra || _wasConf){
+                  if(Array.isArray(_row.tags) && _row.tags.indexOf('🛑SRV_DEMOTE')===-1){
+                    _row.tags.push('🛑SRV_DEMOTE');
+                  }
+                }
+              }
             }
           }
         }

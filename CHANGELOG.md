@@ -1,5 +1,91 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.2.2 — Client demotes tier on server protective flags] — 2026-05-20
+
+**Client-side change. ASYMMETRIC overlay: server can DEMOTE,
+never PROMOTE.** Second ratchet of "PWA reads server signals".
+Builds on Phase 2.A.2.1 — same overlay block in
+`getScanResults()`, same freshness/flag gates, same rollback
+path. The new piece: when the server's signal for a symbol
+carries a protective tag (`🚫MANIP_CAP`, `🚨MANIP_HIGH`,
+`🔪FALLING`, `🚨P&D_RISK:N/5`), the client demotes its own
+`r.ultra` / `r.confirmed` booleans so the visible card reflects
+the safer tier.
+
+### Why asymmetric (DEMOTE-only)
+
+The client's `deepAnalyze` has scoring rules the server doesn't
+compute: `TIER2_BONUS`, `🐋✨WHALE_TARGET`, `📊CVD_BUY`,
+`💹TAKER`, depth `📗WALL:Nx`, `📘BID_PRESS`, `📈OI_BUILD`,
+`🧠SMART`, `🔄REVERSAL`, plus the kline-derived checks. A
+symbol can be a legitimate client-ULTRA on the strength of
+those signals even when the server's coarser view doesn't reach
+ULTRA. Letting the server PROMOTE would either lose those rules
+or require dragging them into the server registry first (which
+is the rest of Phase 2.A.1 — out of scope here).
+
+DEMOTE is safe regardless: the protective flags are themselves
+asymmetric. `MANIP_CAP` only fires on manipulation HIGH;
+`FALLING_KNIFE` only fires on coins down >10% / 24h;
+`P&D_RISK` only fires when 3+ pump-and-dump indicators stack.
+Each is a strong "avoid" signal that survives independently of
+the client's richer scoring.
+
+### Demotion ladder
+
+| Client tier before | Server protective tag present | Client tier after |
+|---|---|---|
+| ULTRA (`r.ultra=true`)  | yes | CONFIRMED (`r.ultra=false`, `r.confirmed=true`) |
+| CONFIRMED (`r.confirmed=true`) | yes | neither (both false) |
+| neither | yes | neither (no-op) |
+| any | no | unchanged |
+
+When any demotion fires, `🛑SRV_DEMOTE` is added to the row's
+tags so the user (and the client-side `tagPerf` map) can audit
+which signals got demoted by which server flag (`📡SRV` for the
+bounds overlay is added separately by Phase 2.A.2.1).
+
+### Files changed
+
+- `app.js` line ~1018 (inside the existing 2.A.2.1 overlay
+  block): adds the tier demotion check after the bounds and tag
+  overlay. Reads `_srv.tags` (already in the captured server
+  signal), scans for any of the four protective prefixes, and
+  applies the ULTRA→CONFIRMED→none cascade. Idempotent —
+  re-running the overlay never additionally demotes a row.
+- `CHANGELOG.md` — this entry.
+
+### Safety + rollback
+
+- Same `nxScannerFix_server_signals` flag controls the entire
+  overlay (bounds + tier). `localStorage.setItem(...,'off')` +
+  reload reverts both Phase 2.A.2.1 and .2.2 in one step.
+- Same try/catch wraps the whole block; tier demotion failure
+  cannot break the scanner.
+- Tag-prefix matching uses `.indexOf(prefix)===0` to handle
+  variable-suffix tags (`🚨P&D_RISK:3/5`, `🚫MANIP_CAP`, …)
+  without depending on exact string equality.
+- The demote-flag set is HARDCODED to the four protective tag
+  prefixes — generic risk tags (`⚠️P&D_WARN`, `FR⚠️`,
+  `⚠️LATE`) intentionally do NOT trigger demotion because the
+  server already factored those into its own score, and the
+  client's score also penalises them.
+
+### Verification
+
+- `npm run check` — 713/713 tests pass.
+- **Manual browser verification** post-deploy:
+  1. Pull on VPS, restart pm2
+  2. Open `shamcyrpto.com` in browser → Scanner tab
+  3. If any visible signal carries `🚫MANIP_CAP` / `🔪FALLING`
+     / `🚨P&D_RISK` / `🚨MANIP_HIGH` tag → the card should
+     also carry `🛑SRV_DEMOTE` AND the ⭐ ULTRA badge should
+     be downgraded to 🟢 CONFIRMED (or neither if it was only
+     CONFIRMED before).
+  4. Rollback test: `localStorage.setItem('nxScannerFix_server_signals','off')`
+     + reload → demotions should disappear, ULTRA/CONFIRMED
+     restored to client's own determination.
+
 ## [Scanner Phase 2.A.2.1 — Client overlays server-computed SL/TP/RR] — 2026-05-20
 
 **Client-side change. PARTIAL convergence to Phase 2.A.2.**

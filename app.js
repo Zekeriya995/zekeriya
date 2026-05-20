@@ -2563,25 +2563,61 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
          window.SCORING_RULES failed to load (CDN issue, blocker,
          …), we run the original inline if/else chain so the
          scanner stays functional and bit-for-bit identical. */
+  /* PR D extends the ctx with frRate + lsRatio + coinalyzeFRRate
+     so the registry can run FR_VERY_NEG / FR_MILDLY_NEG /
+     FR_OVEREXTENDED / LS_SHORTS / COINALYZE_FR_NEG. The inline
+     versions of all four (FR chain at the bottom of quickScan,
+     LS_SHORTS, AND coinalyzeFR — the latter caught by pre-merge
+     SRE review) have been deleted in this same PR. The client
+     DOES populate coinalyzeFR[s] from /api/all multi-exchange
+     data (app.js:2205), so passing the field through here is
+     necessary for client/server parity. The first iteration of
+     this PR incorrectly claimed "client has no coinalyzeFR" —
+     it does, and the rule must fire for it to truly migrate. */
+  var _frClientNow = FR[s];
+  var _lsClientNow = LS[s];
+  var _czFrClientNow = coinalyzeFR[s];
   if (window.SCORING_RULES) {
-    var _ruleCtx = { isTier1: isTier1, isTier2: isTier2, volume: d.v, change: d.c };
-    ['TIER1_BONUS','TIER2_BONUS','NEW_BONUS','SILENT_ACCUMULATION','EARLY_ENTRY','STEALTH'].forEach(function(_id){
+    var _ruleCtx = {
+      isTier1: isTier1,
+      isTier2: isTier2,
+      volume: d.v,
+      change: d.c,
+      frRate: _frClientNow && typeof _frClientNow.rate === 'number' ? _frClientNow.rate : undefined,
+      lsRatio: _lsClientNow && typeof _lsClientNow.ratio === 'number' ? _lsClientNow.ratio : undefined,
+      coinalyzeFRRate:
+        _czFrClientNow && typeof _czFrClientNow.rate === 'number'
+          ? _czFrClientNow.rate
+          : undefined,
+    };
+    [
+      'TIER1_BONUS','TIER2_BONUS','NEW_BONUS',
+      'SILENT_ACCUMULATION','EARLY_ENTRY','STEALTH',
+      'FR_VERY_NEG','FR_MILDLY_NEG','FR_OVEREXTENDED','LS_SHORTS',
+      'COINALYZE_FR_NEG'
+    ].forEach(function(_id){
       var _r = window.SCORING_RULES.RULES.find(function(x){return x.id===_id});
       if (_r && _r.condition(_ruleCtx)) { sc += _r.weight; if (_r.tag) tags.push(_r.tag); }
     });
   } else {
     /* Defensive fallback — if scoring-rules.js failed to load, run
        the same logic inline so the scanner keeps working at parity.
-       Updated in PR C to include the tier-bonus chain too — the
-       fallback now mirrors the full pre-PR-B/C inline path so a
-       registry-load failure produces identical scoring (not a
-       skipped tier bonus on top of a skipped SILENT_ACC). */
+       Updated in PR C+D to include the tier-bonus chain AND the
+       FR / LS rules — so a registry-load failure produces identical
+       scoring across all migrated rules. */
     if(isTier1){sc+=10;tags.push('🏆TOP100')}
     else if(isTier2){sc+=5;tags.push('🥈T2')}
     else{sc+=2;tags.push('🔍NEW')}
     if(d.v>5e7&&Math.abs(d.c)<2){sc+=25;tags.push('🐋ACC')}
     if(d.v>3e7&&d.c>=0.3&&d.c<2){sc+=20;tags.push('🔍EARLY')}
     if(d.v>8e7&&d.c>=0.5&&d.c<3){sc+=15;tags.push('🔍STEALTH')}
+    if(_frClientNow){
+      if(_frClientNow.rate<-0.01){sc+=12;tags.push('FR⬇️')}
+      else if(_frClientNow.rate<0){sc+=5;tags.push('FR-')}
+      else if(_frClientNow.rate>0.08){sc-=8;tags.push('FR⚠️')}
+    }
+    if(_lsClientNow&&_lsClientNow.ratio<0.8){sc+=10;tags.push('🩳SHORTS')}
+    if(_czFrClientNow&&_czFrClientNow.rate<-0.01){sc+=8;tags.push('🌐FR_NEG')}
   }
   /* Already moving — penalise lateness */
   if(d.c>=3&&d.c<5){sc+=8;tags.push('📈RISING')}
@@ -2620,15 +2656,12 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   if(bookTickers[s]&&bookTickers[s].bidQty>0&&bookTickers[s].askQty>0){
     if(bookTickers[s].bidQty>bookTickers[s].askQty*2&&bookTickers[s].spread<0.15){sc+=12;tags.push('📘BID_PRESS')}
   }
-  /* ═══ DATA SOURCE 5: FR — funding rate ═══ */
+  /* ═══ DATA SOURCE 5+6: FR + LS — migrated to the unified
+     registry in PR D (FR_VERY_NEG / FR_MILDLY_NEG / FR_OVEREXTENDED
+     / LS_SHORTS). The `fr` variable is still needed below for the
+     P&D detector (FR_EXTREME) and the final cands.push payload, so
+     declare it here without scoring. */
   var fr=FR[s];
-  if(fr){
-    if(fr.rate<-0.01){sc+=12;tags.push('FR⬇️')}
-    else if(fr.rate<0){sc+=5;tags.push('FR-')}
-    else if(fr.rate>0.08){sc-=8;tags.push('FR⚠️')}
-  }
-  /* ═══ DATA SOURCE 6: LS — long/short ratio ═══ */
-  if(LS[s]&&LS[s].ratio<0.8){sc+=10;tags.push('🩳SHORTS')}
   /* ═══ DATA SOURCE 7: OI + oiHistory — open interest ═══ */
   if(OI[s]&&oiHistory[s]&&oiHistory[s].length>=2){
     var _oiLast=oiHistory[s][oiHistory[s].length-1];
@@ -2643,8 +2676,8 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
     var _topLatest=topTradersLS[s].positions[topTradersLS[s].positions.length-1];
     if(_topLatest&&_topLatest.long>0.55&&LS[s]&&LS[s].short>55){sc+=10;tags.push('🧠SMART')}
   }
-  /* ═══ DATA SOURCE 9: coinalyzeFR — multi-exchange FR ═══ */
-  if(coinalyzeFR[s]&&coinalyzeFR[s].rate<-0.01){sc+=8;tags.push('🌐FR_NEG')}
+  /* ═══ DATA SOURCE 9: coinalyzeFR — migrated to registry in PR D
+     (COINALYZE_FR_NEG rule). See src/scoring-rules.js. */
   /* ═══ DATA SOURCE 10: liquidationData — recent liquidations ═══ */
   if(liquidationData[s]&&liquidationData[s].length>0){
     var _liqShortVal=0;var _oneHourAgo=Date.now()-3600000;

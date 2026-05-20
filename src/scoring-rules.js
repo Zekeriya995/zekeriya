@@ -47,13 +47,26 @@
  *
  * Expected `ctx` shape (built by the consumer before iterating rules):
  *   {
- *     isTier1:  boolean
- *     isTier2:  boolean (CLIENT-only — server omits this field;
- *                        TIER2_BONUS strict-checks `=== true` so
- *                        an absent isTier2 cleanly no-ops on the
- *                        server side. Added in PR C.)
- *     volume:   number  — 24h quote volume in USD
- *     change:   number  — 24h percentage change
+ *     isTier1:        boolean
+ *     isTier2:        boolean (CLIENT-only — server omits this field;
+ *                              TIER2_BONUS strict-checks `=== true` so
+ *                              an absent isTier2 cleanly no-ops on the
+ *                              server side. Added in PR C.)
+ *     volume:         number — 24h quote volume in USD
+ *     change:         number — 24h percentage change
+ *     frRate:         number — futures funding rate as a decimal (e.g.
+ *                              0.0001 = 0.01%). Both sides populate when
+ *                              fr data is available; rules strict-check
+ *                              typeof === 'number' so missing data
+ *                              cleanly no-ops. (Added in PR D.)
+ *     lsRatio:        number — long/short ratio (server: ctx.ls.ratio;
+ *                              client: LS[s].ratio). Strict-checked too.
+ *                              (Added in PR D.)
+ *     coinalyzeFRRate:number — multi-exchange aggregated FR rate
+ *                              (server-only — client has no
+ *                              coinalyzeFR feed). Strict-check
+ *                              makes COINALYZE_FR_NEG no-op on the
+ *                              client. (Added in PR D.)
  *   }
  *
  * Adding a new rule: append to RULES. Adding a new field to ctx:
@@ -163,6 +176,56 @@ const RULES = Object.freeze([
     weight: 15,
     tag: '🔍STEALTH',
     condition: (ctx) => ctx.volume > 8e7 && ctx.change >= 0.5 && ctx.change < 3,
+  }),
+  /* Phase 2.A.1 PR D — FR / LS / coinalyzeFR rules.
+     All 5 rules below were inline on BOTH sides pre-PR-D (server's
+     scoreSymbol and client's quickScan computed identical conditions).
+     This migration is bit-for-bit equivalent on the server AND client.
+
+     The three FR_* rules form a mutually-exclusive precedence chain
+     (very-negative beats mildly-negative; positive-overextended is
+     a separate range). Encoded directly in conditions so the
+     order-independence invariant of the registry holds:
+
+       (-∞, -0.01):  FR_VERY_NEG fires (+12)
+       [-0.01, 0):   FR_MILDLY_NEG fires (+5)
+       [0, 0.08]:    none fire (matches the inline else if drop-through)
+       (0.08, ∞):    FR_OVEREXTENDED fires (-8)
+
+     COINALYZE_FR_NEG is server-only data (the client has no
+     coinalyzeFR feed). The strict `typeof === 'number'` gate
+     ensures the rule cleanly no-ops on the client where
+     `ctx.coinalyzeFRRate` is undefined — same Option-C pattern
+     PR C used for TIER2_BONUS. */
+  Object.freeze({
+    id: 'FR_VERY_NEG',
+    weight: 12,
+    tag: 'FR⬇️',
+    condition: (ctx) => typeof ctx.frRate === 'number' && ctx.frRate < -0.01,
+  }),
+  Object.freeze({
+    id: 'FR_MILDLY_NEG',
+    weight: 5,
+    tag: 'FR-',
+    condition: (ctx) => typeof ctx.frRate === 'number' && ctx.frRate < 0 && ctx.frRate >= -0.01,
+  }),
+  Object.freeze({
+    id: 'FR_OVEREXTENDED',
+    weight: -8,
+    tag: 'FR⚠️',
+    condition: (ctx) => typeof ctx.frRate === 'number' && ctx.frRate > 0.08,
+  }),
+  Object.freeze({
+    id: 'LS_SHORTS',
+    weight: 10,
+    tag: '🩳SHORTS',
+    condition: (ctx) => typeof ctx.lsRatio === 'number' && ctx.lsRatio < 0.8,
+  }),
+  Object.freeze({
+    id: 'COINALYZE_FR_NEG',
+    weight: 8,
+    tag: '🌐FR_NEG',
+    condition: (ctx) => typeof ctx.coinalyzeFRRate === 'number' && ctx.coinalyzeFRRate < -0.01,
   }),
   Object.freeze({
     /* FALLING_KNIFE — defensive suppression rule (NOT a migration).

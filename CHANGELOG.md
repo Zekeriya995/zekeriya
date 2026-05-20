@@ -1,5 +1,104 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.1 PR D — FR / LS / coinalyzeFR migration] — 2026-05-20
+
+**Server-side AND client-side: NO BEHAVIOUR CHANGE.** Bit-for-bit
+equivalent. Five more rules join the unified registry, finishing
+the migration of every FR/LS-related scoring rule.
+
+### Rules added (5)
+
+| Rule | Weight | Tag | Condition |
+|---|---|---|---|
+| `FR_VERY_NEG` | +12 | `FR⬇️` | `frRate < -0.01` |
+| `FR_MILDLY_NEG` | +5 | `FR-` | `frRate < 0 && frRate >= -0.01` |
+| `FR_OVEREXTENDED` | −8 | `FR⚠️` | `frRate > 0.08` |
+| `LS_SHORTS` | +10 | `🩳SHORTS` | `lsRatio < 0.8` |
+| `COINALYZE_FR_NEG` | +8 | `🌐FR_NEG` | `coinalyzeFRRate < -0.01` |
+
+Each rule's condition starts with a strict `typeof === 'number'`
+gate, so missing data sources cleanly no-op the rule.
+
+### FR precedence — encoded in conditions, not control flow
+
+The three `FR_*` rules form a mutually-exclusive precedence chain
+(same Option-C pattern as TIER1 > TIER2 > NEW in PR C):
+
+| frRate range | Fires |
+|---|---|
+| (−∞, −0.01) | FR_VERY_NEG (+12) |
+| [−0.01, 0)  | FR_MILDLY_NEG (+5) |
+| [0, 0.08]   | none (matches the inline `else if` drop-through) |
+| (0.08, ∞)   | FR_OVEREXTENDED (−8) |
+
+The middle "neutral" range is intentional — the original inline
+chain on both sides had no `else { tag.push('FR=') }` branch.
+
+### Client-side `coinalyzeFR` was NOT server-only (BLOCKER fix)
+
+The first iteration of this PR claimed COINALYZE_FR_NEG was
+"server-only — client has no coinalyzeFR feed". Pre-merge SRE
+review caught this: the client DOES populate `coinalyzeFR[s]`
+from `/api/all` multi-exchange data (`app.js:2205`), and the
+inline rule at the bottom of `quickScan` (was line 2641) was
+actively scoring `+8 / '🌐FR_NEG'` on the client. Bit-for-bit
+client safety required:
+
+  1. Extending the client `_ruleCtx` with `coinalyzeFRRate`
+  2. Adding COINALYZE_FR_NEG to the client's forEach rule-id list
+  3. DELETING the inline `if(coinalyzeFR[s]...)` at line 2641
+  4. Adding the same coinalyzeFR check to the defensive fallback
+     so a registry-load failure preserves identical scoring
+
+All four landed in the BLOCKER fix amend on this branch.
+
+### Files changed
+
+- `src/scoring-rules.js` — adds 5 rules; doc updates the ctx
+  shape with `frRate`, `lsRatio`, `coinalyzeFRRate`.
+- `src/scanner-engine.js`:
+  - Extends `applyRules` ctx with `frRate`, `lsRatio`,
+    `coinalyzeFRRate` (sourced from `ctx.fr.rate`, `ctx.ls.ratio`,
+    `ctx.coinalyzeFR.rate` with strict-number guards).
+  - DELETES the inline FR chain, the inline LS_SHORTS block,
+    and the inline coinalyzeFR neg block.
+- `app.js quickScan`:
+  - Extends the registry ctx with `frRate`, `lsRatio`,
+    `coinalyzeFRRate`.
+  - Adds `FR_VERY_NEG / FR_MILDLY_NEG / FR_OVEREXTENDED /
+    LS_SHORTS / COINALYZE_FR_NEG` to the forEach rule-id list.
+  - DELETES the inline FR chain (was app.js:2587-2589), the
+    inline LS_SHORTS line (was 2592), AND the inline
+    coinalyzeFR neg (was 2641, caught by BLOCKER fix).
+  - The `var fr = FR[s]` declaration stays — it's still used by
+    the P&D detector (`FR_EXTREME`) and the final
+    `cands.push({...fr})` payload.
+  - Defensive fallback path extended to also run the FR chain,
+    LS_SHORTS, AND coinalyzeFR neg inline — so a registry-load
+    failure produces identical scoring across all migrated rules.
+- `tests/scoring-rules.test.js` — **+11 tests**.
+
+### Verification
+
+- `npm run check` — 733/733 tests pass (+11 over PR C's 722).
+- Server-side: existing `tests/scanner-engine.test.js` still passes.
+
+### Rollback
+
+`git revert <merge-commit>`. No behaviour change.
+
+### Parity ratchet status
+
+| Phase 2.A.1 PR | Migrated | Status |
+|---|---|---|
+| PR A (server) | SILENT_ACC + EARLY + STEALTH + TIER1 + NEW | merged |
+| PR B (client narrow) | SILENT_ACC + EARLY + STEALTH | merged |
+| PR C (client tier chain) | TIER1 + TIER2 + NEW | merged |
+| **PR D (FR / LS / coinalyzeFR)** | **5 rules above** | **this PR** |
+| PR E | MTF / indicator rules | pending |
+| PR FINAL | cleanup + dead-code purge | pending |
+
+
 ## [Scanner Phase 2.A.2.3 — Client merges selected server tags] — 2026-05-20
 
 **Client-side change. Adds visibility — does NOT change scoring

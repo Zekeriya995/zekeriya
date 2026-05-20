@@ -245,6 +245,163 @@ test('STEALTH — fires on big volume + early upward momentum', () => {
   assert.equal(fire('STEALTH', { isTier1: false, volume: 7.9e7, change: 1 }), false);
 });
 
+/* ─── Phase 2.A.1 PR D — FR / LS / coinalyzeFR rules ──────────── */
+
+test('FR_VERY_NEG — fires on funding < -0.01', () => {
+  assert.equal(fire('FR_VERY_NEG', { frRate: -0.02 }), true);
+  assert.equal(fire('FR_VERY_NEG', { frRate: -0.011 }), true);
+  /* Boundary: exactly -0.01 does NOT fire (strict <). */
+  assert.equal(fire('FR_VERY_NEG', { frRate: -0.01 }), false);
+  /* Positive rate does not fire. */
+  assert.equal(fire('FR_VERY_NEG', { frRate: 0.005 }), false);
+  const r = RULES.find((r) => r.id === 'FR_VERY_NEG');
+  assert.equal(r.weight, 12);
+  assert.equal(r.tag, 'FR⬇️');
+});
+
+test('FR_MILDLY_NEG — fires on -0.01 <= funding < 0', () => {
+  assert.equal(fire('FR_MILDLY_NEG', { frRate: -0.005 }), true);
+  assert.equal(fire('FR_MILDLY_NEG', { frRate: -0.01 }), true);
+  /* Boundary: exactly 0 does NOT fire (strict <). */
+  assert.equal(fire('FR_MILDLY_NEG', { frRate: 0 }), false);
+  /* Below -0.01 falls into FR_VERY_NEG's range — must NOT also fire here. */
+  assert.equal(fire('FR_MILDLY_NEG', { frRate: -0.015 }), false);
+  const r = RULES.find((r) => r.id === 'FR_MILDLY_NEG');
+  assert.equal(r.weight, 5);
+  assert.equal(r.tag, 'FR-');
+});
+
+test('FR_OVEREXTENDED — fires on funding > 0.08', () => {
+  assert.equal(fire('FR_OVEREXTENDED', { frRate: 0.1 }), true);
+  /* Boundary: exactly 0.08 does NOT fire (strict >). */
+  assert.equal(fire('FR_OVEREXTENDED', { frRate: 0.08 }), false);
+  /* Below 0.08 does not fire even though it's still positive. */
+  assert.equal(fire('FR_OVEREXTENDED', { frRate: 0.05 }), false);
+  /* Negative rate doesn't fire. */
+  assert.equal(fire('FR_OVEREXTENDED', { frRate: -0.5 }), false);
+  const r = RULES.find((r) => r.id === 'FR_OVEREXTENDED');
+  assert.equal(r.weight, -8);
+  assert.equal(r.tag, 'FR⚠️');
+});
+
+test('FR chain — mutually exclusive across the rate spectrum', () => {
+  /* PR D: the three FR_* rules must be mutually exclusive — exactly
+     one (or none, in the [0, 0.08] neutral range) fires per ctx.
+     This invariant is critical because the inline pre-PR-D code used
+     if/else if/else, fire-at-most-once by syntax. */
+  const samples = [
+    { frRate: -0.5, expected: ['FR_VERY_NEG'] },
+    { frRate: -0.011, expected: ['FR_VERY_NEG'] },
+    { frRate: -0.01, expected: ['FR_MILDLY_NEG'] },
+    { frRate: -0.005, expected: ['FR_MILDLY_NEG'] },
+    { frRate: 0, expected: [] } /* neutral range start */,
+    { frRate: 0.05, expected: [] } /* neutral range */,
+    { frRate: 0.08, expected: [] } /* neutral range end */,
+    { frRate: 0.1, expected: ['FR_OVEREXTENDED'] },
+  ];
+  for (const { frRate, expected } of samples) {
+    const fired = ['FR_VERY_NEG', 'FR_MILDLY_NEG', 'FR_OVEREXTENDED'].filter((id) =>
+      fire(id, { frRate })
+    );
+    assert.deepEqual(
+      fired,
+      expected,
+      `frRate=${frRate}: expected ${JSON.stringify(expected)}, got ${JSON.stringify(fired)}`
+    );
+  }
+});
+
+test('FR rules — missing frRate (typeof !== number) does NOT fire any', () => {
+  /* Same Option-C pattern as TIER2_BONUS: strict typeof check so
+     missing data cleanly no-ops. Important when either side passes
+     no FR data (server: ctx.fr === null; client: FR[s] === undefined). */
+  for (const bad of [undefined, null, NaN, '0.05', {}, [], true]) {
+    /* NaN is typeof 'number' but isNaN — but our rules don't guard NaN.
+       However, NaN comparisons (< / >=) always return false, so NO
+       FR rule fires for NaN. Verify. */
+    const fired = ['FR_VERY_NEG', 'FR_MILDLY_NEG', 'FR_OVEREXTENDED'].filter((id) =>
+      fire(id, { frRate: bad })
+    );
+    assert.deepEqual(fired, [], `frRate=${String(bad)} should fire no rule`);
+  }
+});
+
+test('LS_SHORTS — fires on long/short ratio < 0.8', () => {
+  assert.equal(fire('LS_SHORTS', { lsRatio: 0.5 }), true);
+  /* Boundary: exactly 0.8 does NOT fire (strict <). */
+  assert.equal(fire('LS_SHORTS', { lsRatio: 0.8 }), false);
+  assert.equal(fire('LS_SHORTS', { lsRatio: 1.2 }), false);
+  const r = RULES.find((r) => r.id === 'LS_SHORTS');
+  assert.equal(r.weight, 10);
+  assert.equal(r.tag, '🩳SHORTS');
+});
+
+test('LS_SHORTS — missing lsRatio does NOT fire', () => {
+  for (const bad of [undefined, null, NaN, '0.5', {}, []]) {
+    assert.equal(fire('LS_SHORTS', { lsRatio: bad }), false);
+  }
+});
+
+test('COINALYZE_FR_NEG — fires on multi-exchange FR < -0.01 (server-only)', () => {
+  assert.equal(fire('COINALYZE_FR_NEG', { coinalyzeFRRate: -0.02 }), true);
+  /* Boundary: exactly -0.01 does NOT fire (strict <). */
+  assert.equal(fire('COINALYZE_FR_NEG', { coinalyzeFRRate: -0.01 }), false);
+  assert.equal(fire('COINALYZE_FR_NEG', { coinalyzeFRRate: 0 }), false);
+  const r = RULES.find((r) => r.id === 'COINALYZE_FR_NEG');
+  assert.equal(r.weight, 8);
+  assert.equal(r.tag, '🌐FR_NEG');
+});
+
+test('COINALYZE_FR_NEG — does NOT fire when coinalyzeFRRate is absent (client ctx)', () => {
+  /* The client has no coinalyzeFR data source. Strict typeof-number
+     check ensures the rule no-ops on the client cleanly — same
+     Option-C pattern as TIER2_BONUS. Critical: this is what makes
+     PR D bit-for-bit safe on the client (the client never had a
+     '🌐FR_NEG' inline rule, so this rule firing on the client
+     would be a regression). */
+  const clientCtx = { isTier1: false, volume: 1e8, change: 1, frRate: -0.05, lsRatio: 0.5 };
+  /* clientCtx has no coinalyzeFRRate at all. */
+  assert.equal(fire('COINALYZE_FR_NEG', clientCtx), false);
+});
+
+test('applyRules — server full FR/LS coin sums all 4 FR/LS rules', () => {
+  /* Server-style ctx with FR very-negative + low LS + coinalyze negative:
+     FR_VERY_NEG (+12) + LS_SHORTS (+10) + COINALYZE_FR_NEG (+8) = +30 */
+  const out = applyRules({
+    isTier1: true,
+    volume: 8e7,
+    change: 1,
+    frRate: -0.05,
+    lsRatio: 0.5,
+    coinalyzeFRRate: -0.03,
+  });
+  /* TIER1 (10) + SILENT_ACC (25, 8e7>5e7, abs(1)<2) + EARLY_ENTRY (20,
+     8e7>3e7, 1 in [0.3,2)) + FR_VERY_NEG (12) + LS_SHORTS (10) +
+     COINALYZE_FR_NEG (8) = 85. STEALTH does NOT fire (8e7 not > 8e7). */
+  assert.equal(out.scoreDelta, 85);
+  assert.ok(out.tagsDelta.includes('FR⬇️'));
+  assert.ok(out.tagsDelta.includes('🩳SHORTS'));
+  assert.ok(out.tagsDelta.includes('🌐FR_NEG'));
+});
+
+test('applyRules — client ctx (no coinalyzeFR) skips COINALYZE_FR_NEG cleanly', () => {
+  /* Client-shaped ctx (no coinalyzeFRRate). FR_VERY_NEG + LS_SHORTS fire
+     but COINALYZE_FR_NEG does not. Proves the Option-C strict-check
+     keeps server-only data from polluting client scoring. */
+  const out = applyRules({
+    isTier1: false,
+    isTier2: false,
+    volume: 8e7,
+    change: 1,
+    frRate: -0.05,
+    lsRatio: 0.5,
+    /* no coinalyzeFRRate */
+  });
+  /* NEW (2) + SILENT_ACC (25) + EARLY (20) + FR_VERY_NEG (12) + LS_SHORTS (10) = 69 */
+  assert.equal(out.scoreDelta, 69);
+  assert.ok(!out.tagsDelta.includes('🌐FR_NEG'), 'client must NOT see server-only tag');
+});
+
 /* ─── applyRules — aggregate behavior ─────────────────────────── */
 
 test('applyRules — TIER1 coin with high vol + flat change fires multiple rules', () => {

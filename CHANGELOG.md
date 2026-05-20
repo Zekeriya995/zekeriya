@@ -1,5 +1,121 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.1 PR A — Unified Rules Registry skeleton] — 2026-05-20
+
+**Foundational refactor.** No behaviour change. Implements PR A of
+the Phase 2.A.1 migration per `docs/SCANNER_UNIFIED_RULES_REGISTRY_DESIGN.md`
+(which Ziko approved by defaults via `A1 B3 C2+C3`).
+
+### What ships
+
+A new file `src/scoring-rules.js` exporting `RULES`, `THRESHOLDS`, and
+`applyRules(ctx)` — the **single source of truth** for scanner scoring
+rules. Loaded via UMD-lite (same pattern as `src/utils.js`) so it
+works as CommonJS on the server AND as a `window.SCORING_RULES`
+global in the browser. Zero build step.
+
+Five "simple" rules migrated in this PR (the rest follow in PR B+):
+
+| ID                   | Weight | Tag      | Condition                                       |
+| -------------------- | ------ | -------- | ----------------------------------------------- |
+| TIER1_BONUS          | +10    | 🏆TOP100 | `isTier1 === true`                              |
+| NEW_BONUS            | +2     | 🔍NEW    | `isTier1 === false`                             |
+| SILENT_ACCUMULATION  | +25    | 🐋ACC    | `volume > 5e7 && Math.abs(change) < 2`          |
+| EARLY_ENTRY          | +20    | 🔍EARLY  | `volume > 3e7 && change >= 0.3 && change < 2`   |
+| STEALTH              | +15    | 🔍STEALTH| `volume > 8e7 && change >= 0.5 && change < 3`   |
+
+### Why these five
+
+Picked per the design doc's recommendation (C2 — 5 simplest rules):
+each is a single-condition rule with a constant weight, easy to
+express as `{condition, weight, tag}`. They have ALREADY been
+verified identical between client and server during Phase 1's
+hand-alignment, so migrating them produces zero behavioral change.
+
+`MEGA_VOL` / `HIGH_VOL` / `VOL` are intentionally NOT in this PR
+because they live in an `else if` chain (only one can fire). They
+need a different rule shape (or 3 mutually-exclusive registry
+rules). Deferred to PR B.
+
+`LS_RETAIL_LONG` drift fix is also deferred — the design doc
+included it in C3, but on closer reading the threshold lives
+inside the P&D detector (`scanner-pd-detector.js`), not in
+`scoreSymbol`'s top-level tag bag. Migrating the detector is meta
+work; PR B will tackle threshold-bearing rules.
+
+### Server wiring
+
+`src/scanner-engine.js scoreSymbol` now does:
+
+```js
+const registryResult = scoringRules.applyRules({
+  isTier1, volume: d.volume, change: d.change,
+});
+score += registryResult.scoreDelta;
+for (const t of registryResult.tagsDelta) tags.push(t);
+```
+
+Replacing the 5 inline if-blocks. Net effect: identical math, same
+tags, same order. The 690+ existing tests still pass — confirms the
+refactor preserves behavior.
+
+### Client wiring
+
+**Not in this PR.** Client (`app.js`) still has its inline rules.
+That's intentional — keeping the parity ratchet to one side per PR
+makes the diff reviewable. PR B (next) wires the client to the
+registry; CI's existing manual-verification gap on app.js means Ziko
+should verify in his browser before that lands.
+
+### Test coverage
+
+`tests/scoring-rules.test.js` — 18 tests covering:
+- Shape integrity (RULES frozen, every rule has id/weight/condition,
+  ids unique).
+- Per-rule contract (each of the 5 rules: fires when conditions met,
+  doesn't fire at boundaries, doesn't fire on absent fields).
+- Mutual exclusivity of TIER1_BONUS and NEW_BONUS.
+- Aggregate `applyRules()` correctness (a BTC-shaped fixture and a
+  thin-ticker fixture).
+- Pure-function contract (returned `tagsDelta` is a fresh array).
+- UMD loader contract (CommonJS path works).
+- Defensive: empty / malformed ctx returns zeroed result.
+
+Server-side integration: all 47 existing `scanner-engine.test.js`
+tests still pass. The refactor is bit-for-bit equivalent.
+
+### Rollback
+
+Revert this PR — the inline blocks come back, the registry file
+remains but unused (no consumer). No data migration, no flag.
+
+### Next PRs in the migration
+
+| PR | Scope                                                              | Risk     |
+| -- | ------------------------------------------------------------------ | -------- |
+| B  | Client (`app.js`) wires to the registry for the same 5 rules       | Medium (browser code) |
+| C  | Migrate `MEGA_VOL`/`HIGH_VOL`/`VOL` else-if chain (3 mutually-exclusive rules) | Low |
+| D  | Migrate FR / OBI / Whale rules (10 rules)                          | Low |
+| E  | Migrate MTF / indicator rules (10 rules)                           | Medium (depends on ctx fields) |
+| FINAL | Remove inline rule blocks once registry coverage is complete    | Low |
+
+Each will follow the same pattern: tiny diff, parity preserved at
+every commit.
+
+### Test results
+
+- `npm run check` → lint clean, format clean, 692 / 692 tests pass.
+- `node --check src/scoring-rules.js` → clean.
+- `node --check src/scanner-engine.js` → clean.
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 P2.A.1
+- `docs/SCANNER_UNIFIED_RULES_REGISTRY_DESIGN.md` §3 (proposal),
+  §4 (parity ratchet), §5 (decisions: A1 B3 C2+C3 approved)
+
+---
+
 ## [Scanner — P&D threshold validator CLI] — 2026-05-20
 
 **Pure tool. No runtime behaviour change.** Delivers the validator

@@ -82,7 +82,17 @@ bounds overlay is added separately by Phase 2.A.2.1).
      also carry `🛑SRV_DEMOTE` AND the ⭐ ULTRA badge should
      be downgraded to 🟢 CONFIRMED (or neither if it was only
      CONFIRMED before).
-  4. Rollback test: `localStorage.setItem('nxScannerFix_server_signals','off')`
+  4. If no live signal carries a protective tag at the moment
+     (common on calm days), force the case via DevTools:
+     ```js
+     window.__serverSignals['BTC'].tags.push('🚫MANIP_CAP');
+     // wait one scanner tick (~60s) or force-refresh the
+     // Scanner tab. BTC card should now carry 🛑SRV_DEMOTE.
+     ```
+     Remove the manual tag from the live signal after the
+     check (or reload — `loadTk` rebuilds `__serverSignals`
+     from the live `/api/all` payload).
+  5. Rollback test: `localStorage.setItem('nxScannerFix_server_signals','off')`
      + reload → demotions should disappear, ULTRA/CONFIRMED
      restored to client's own determination.
 

@@ -1,5 +1,142 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.2 — PWA consumes server signals] — 2026-05-20
+
+**The "Wasted Pipeline" defect closes.** The PWA can now read
+`all.signals` from `/api/all` as the primary scanner source instead
+of recomputing every coin's score locally. When the server pass is
+fresh (< 60 s) and the user has opted in, `getScanResults` short-
+circuits `quickScan + deepAnalyze` entirely and adapts the server's
+already-scored payload to the client signal shape. When the server
+is stale, missing, or the flag is off, the existing local pipeline
+runs unchanged.
+
+This is the Option A architectural promise from
+`SCANNER_AUDIT_2026_05_15.md` §3: server is the single source of
+truth for scoring, and Push ↔ in-app parity is enforced by
+construction rather than by best-effort.
+
+### Decisions recorded
+
+Per the design doc (`docs/SCANNER_PWA_SERVER_SIGNALS_DESIGN.md` §3):
+
+| Decision | Choice | Why |
+|----------|--------|-----|
+| A — Replacement scope | **A2** — server primary, deepAnalyze becomes the stale-only fallback | Matches the audit's literal wording. Defers the MTF / VPIN / iceberg enrichment question to a follow-up; ATR zones already moved server-side in Phase 2.A.4. |
+| B — Default state | **B2** — `nxScannerFix_server_signals` defaults OFF for the first deploy | This is a user-facing change touching the entire UX surface. Default OFF lets Ziko verify in his own browser for a week before flipping the default in a 5-line follow-up. |
+| C — Transition UX | **C1 + source tags** — hard switch every tick + `📡SRC_SERVER` / `🖥️SRC_LOCAL` tags | Simplest path. The two source labels are symmetric so a single grep finds every signal's origin. Hysteresis can come later if flicker is observed. |
+
+### What ships
+
+- **`src/scanner-server-adapter.js`** (new) — pure adapter
+  `adaptServerSignalToClient(serverSig, ctx)` that maps the server
+  signal shape (output of `scoreSymbol`) to the client signal shape
+  (output of `deepAnalyze`). The server is canonical for
+  `score / tags / tier / direction / change / price / volume /
+  manipulationRisk / sl / tp1 / tp2 / rr`; local cache fills in
+  `whaleConf / waveCount / fr / by / cb / freshness / proven`. Fields
+  the server can't compute (`tfAlign`, `confirmedBreakout`,
+  `kl15Available`, `atr15m`, VPIN/iceberg) return null/false/0 —
+  renderers already gate on these defensively.
+- **`tests/scanner-server-adapter.test.js`** (new, 25 tests) —
+  validates null-input handling, source-tag de-duplication, tier
+  → ultra mapping (including MANIP_HARD_CAP demotion), smartEntry
+  shape parity with Phase 2.A.4, checks{} inference from tag
+  patterns, pdFlags regex parsing of both `🚨P&D_RISK:N/5` and
+  `⚠️P&D_WARN:N/5` variants, freshness/age policy parity with
+  deepAnalyze, local-cache fillers (whale / fr / cb / proven),
+  ticker fallback when server omits price/change/volume, and
+  end-to-end compatibility with `qualityFilterRejectReason`.
+- **`app.js`** — three additions:
+  - Module-level `serverScanSignals[]`, `serverScanTs`,
+    `SERVER_SIGNALS_STALE_MS=60000`.
+  - `loadTk()` captures `all.signals` + `all.scannerTs` after the
+    existing `all.multi` block.
+  - `getScanResults()` adds a branch — when
+    `_serverSignalsEnabled() && _serverSignalsFresh() &&
+    serverScanSignals.length`, build the cache from the adapter
+    and short-circuit deepAnalyze. The branch wraps in try/catch
+    so any adapter failure falls through to the existing local
+    path without breaking the scan.
+  - Local-path deepAnalyze pushes `🖥️SRC_LOCAL` onto every result's
+    tag-bag so the source is visible alongside the server-path's
+    `📡SRC_SERVER`.
+- **`index.html`** — loads the new script after
+  `src/scanner-helpers.js`.
+- **`tests/_setup.js`** — loads the new script for unit tests.
+- **`eslint.config.mjs`** — declares `adaptServerSignalToClient` and
+  `SRC_SERVER_TAG` as readonly globals in both the app config and
+  the test config.
+- **`.env.example`** — the `SCANNER_PWA_USES_SERVER_SIGNALS` env var
+  reservation is reclassified as LIVE-no-op-server-side, with a
+  pointer to the client-side localStorage flag that actually drives
+  the rollout.
+
+### How to opt in
+
+```js
+// In DevTools, on any page hosting the PWA:
+localStorage.setItem('nxScannerFix_server_signals', 'on');
+location.reload();
+// Top-3 signals now carry the 📡SRC_SERVER tag and match
+// /api/all.signals identically. To revert:
+localStorage.setItem('nxScannerFix_server_signals', 'off');
+```
+
+The flag is re-read on every `getScanResults` call, so a stale-
+to-fresh recovery (e.g., proxy reconnected) flips the signal
+source on the next scan tick without a page reload.
+
+### Why deepAnalyze is the fallback only
+
+The audit's wording is "PWA `loadTk()` consumes `all.signals` as
+primary; falls back to local `quickScan` only when `all.scannerTs`
+is > 60 s stale." Two consequences:
+
+1. When the server is fresh, MTF / VPIN / iceberg / absorption
+   enrichment is **not** computed on the client. Phase 2.A.4 already
+   brought ATR-aware SL/TP server-side; the remaining client-only
+   enrichments are useful but not on the critical path of the Top-3
+   render. They can be re-added in a follow-up under a dedicated
+   "Deep Dive" affordance (decision A3 from the design doc) without
+   reverting this PR.
+2. When the server is stale (PROXY down, scanner backed up >60 s),
+   the local `quickScan + deepAnalyze` path runs and stamps
+   `🖥️SRC_LOCAL` on every signal so a debugger can tell at a glance
+   which side scored the row.
+
+### Bandwidth + CPU expectation
+
+Per the audit's §5 "Wasted Pipeline" telemetry: when the flag is on
+and the server is fresh, the PWA stops calling Binance directly for
+the top-30 kline batch in `deepAnalyze`, dropping roughly 30 kline
+fetches per scan tick × ~1 tick / 60 s × N browsers. The exact
+savings will be visible in the source-health UI once the flag flips
+default-ON in the follow-up PR.
+
+### Rollback
+
+| Scenario | Action | Time |
+|----------|--------|------|
+| Server payload missing / malformed tags | `localStorage.setItem('nxScannerFix_server_signals','off')` in any browser, reload | < 30 s per user |
+| Catastrophic regression on every browser | Revert this commit; service-worker cache TTL means worst-case 1 h staleness before fix lands | 2–30 min |
+| Want to test before flipping default | Default stays OFF; testers opt in individually | Always available |
+
+### Test results
+
+- `npm run check` → lint clean, format clean, **725 / 725** tests
+  pass (was 700 + 25 from this commit).
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §3 (architectural decision, Option A)
+- `SCANNER_AUDIT_2026_05_15.md` §6 P2.A.2 (this phase)
+- `docs/SCANNER_PWA_SERVER_SIGNALS_DESIGN.md` (decisions A2 / B2 / C1)
+- Phase 2.A.4 ATR-aware SL/TP (CHANGELOG entry below) — supplies
+  the server-side `sl/tp1/tp2/rr` the adapter forwards to `smartEntry`.
+
+---
+
 ## [Scanner — FALLING_KNIFE suppression rule] — 2026-05-20
 
 **Defensive new scoring rule.** Triggered by the SAGA finding —

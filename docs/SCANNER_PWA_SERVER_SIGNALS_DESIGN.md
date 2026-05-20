@@ -1,7 +1,8 @@
 # Phase 2.A.2 Design — PWA consumes server-side signals
 
-> **Status:** Design proposal — awaiting Ziko's call on the 3
-> decisions in §3 before implementation begins.
+> **Status:** **RESOLVED** — shipped 2026-05-20.
+> Decisions §3.1 / §3.2 / §3.3: **A2 / B2 / C1 + source tags.**
+> See the Phase 2.A.2 CHANGELOG entry for the as-shipped details.
 >
 > **Date:** 2026-05-20
 > **Phase:** 2.A.2 (per `SCANNER_AUDIT_2026_05_15.md` §6, Option A path)

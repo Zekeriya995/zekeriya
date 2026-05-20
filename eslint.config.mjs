@@ -90,6 +90,9 @@ export default [
         qualityFilterRejectReason: 'readonly',
         coinbasePremiumPct: 'readonly',
         topTraderLatestLong: 'readonly',
+        /* Declared in src/scanner-server-adapter.js */
+        adaptServerSignalToClient: 'readonly',
+        SRC_SERVER_TAG: 'readonly',
         /* Declared in src/monitor-step.js */
         monitorTradeDecision: 'readonly',
         /* Declared in src/visibility-pause.js */
@@ -359,6 +362,9 @@ export default [
         qualityFilterRejectReason: 'readonly',
         coinbasePremiumPct: 'readonly',
         topTraderLatestLong: 'readonly',
+        /* From src/scanner-server-adapter.js */
+        adaptServerSignalToClient: 'readonly',
+        SRC_SERVER_TAG: 'readonly',
         /* From src/monitor-step.js */
         monitorTradeDecision: 'readonly',
         /* From src/visibility-pause.js */

@@ -12,6 +12,13 @@
      nxScannerFix_manip_cap      — Phase 1.2 Manipulation hard cap
      nxScannerFix_unified_rules  — Phase 2.A.1 Unified scoring registry
      nxScannerFix_server_signals — Phase 2.A.2 PWA reads all.signals
+                                   *** LIVE *** — set to 'on' to switch
+                                   getScanResults to consume the server
+                                   pass; default OFF on the first deploy
+                                   so blast radius is opt-in (audit's
+                                   B2 recommendation). The flag is read
+                                   on every getScanResults call so users
+                                   can toggle without reloading.
      nxScannerFix_atr_zones      — Phase 2.A.4 ATR-aware SL/TP
 
    Flags are READ at module init in their respective phases; this Phase 0
@@ -906,6 +913,17 @@ function openAdminPanel(){try{openQA('monitor')}catch(e){}}
 /* CACHE */
 var cache={scan:null,scanTime:0,whale:null,whaleTime:0,fr:null,frTime:0};
 var CACHE_TTL=60000;
+/* ─── Phase 2.A.2 — server scanner pass (audit §6 P2.A.2) ──────────
+   serverScanSignals holds the latest scoreSymbol() output array from
+   /api/all.signals; serverScanTs is the server's scanner timestamp.
+   Both are written by loadTk() on every successful /api/all and read
+   by getScanResults() to decide between the server-primary path and
+   the local quickScan+deepAnalyze fallback. Default 60 s freshness
+   window matches the audit's "stale > 60s" gate; see
+   SERVER_SIGNALS_STALE_MS below. */
+var serverScanSignals=[];
+var serverScanTs=0;
+var SERVER_SIGNALS_STALE_MS=60000;
 /* ─── scan semaphore ───────────────────────────────────────────────
    Holds the in-flight quickScan+deepAnalyze promise. Concurrent callers
    (loadTrading, loadDash, runScan, loadWhales, loadWhaleSells) coalesce
@@ -941,6 +959,24 @@ function getScanResults(forceFresh){
   if(!forceFresh&&cache.scan&&Date.now()-cache.scanTime<CACHE_TTL){
     return Promise.resolve(cache.scan);
   }
+  /* ═══ Phase 2.A.2 — server-signals primary path ═══
+     When the user has opted in (localStorage flag = 'on') AND the
+     server's scoring pass is fresh (< 60s old) AND the pass contains
+     at least one signal, adapt the server payload to the client
+     shape and short-circuit deepAnalyze entirely. Re-evaluated every
+     getScanResults call so a stale-then-fresh recovery picks up the
+     server side immediately on the next tick (audit decision C1).
+     Falls through to the existing quickScan+deepAnalyze when any
+     of the three conditions is false. */
+  if(_serverSignalsEnabled()&&_serverSignalsFresh()&&serverScanSignals.length){
+    try{
+      var adapted=_adaptServerSignalsForScan(serverScanSignals);
+      if(adapted.length){
+        cache.scan=adapted;cache.scanTime=Date.now();
+        return Promise.resolve(adapted);
+      }
+    }catch(e){_scWarn('serverSignalsAdapt',e)/* fall through to local scan */}
+  }
   _scanInFlight=(async function(){
     try{
       var c=quickScan();
@@ -952,6 +988,43 @@ function getScanResults(forceFresh){
     }
   })();
   return _scanInFlight;
+}
+/* ─── Phase 2.A.2 gate predicates ──────────────────────────────────
+   Kept as standalone helpers so they're easy to flip in tests and
+   the getScanResults branch reads cleanly. _serverSignalsEnabled()
+   is re-read on every call (no module-init caching) so toggling
+   the flag in DevTools takes effect on the next scan tick — the
+   audit's C1 "hard switch every refresh" decision. */
+function _serverSignalsEnabled(){
+  try{return localStorage.getItem('nxScannerFix_server_signals')==='on'}
+  catch(e){return false}
+}
+function _serverSignalsFresh(){
+  return serverScanTs>0&&(Date.now()-serverScanTs)<SERVER_SIGNALS_STALE_MS;
+}
+/* Build the client-shape result list from the captured server pass.
+   Per-signal ctx is assembled from local state (sigHist for
+   freshness, monitorState.coinStats for proven, whaleWaves for the
+   wave count, FR/CBP for the badge readouts) — the same per-symbol
+   reads deepAnalyze does, just without the kline fetches. */
+function _adaptServerSignalsForScan(srvSigs){
+  var out=[];
+  for(var i=0;i<srvSigs.length;i++){
+    var srv=srvSigs[i];
+    if(!srv||!srv.s)continue;
+    var sym=srv.s;
+    var ctx={
+      ticker:T[sym]||null,
+      fr:FR[sym]||null,
+      cb:CBP[sym]||null,
+      whaleWave:whaleWaves[sym]||null,
+      sigInfo:sigHist[sym+'_trade']||null,
+      provenStatus:evaluateProvenStatus(monitorState&&monitorState.coinStats?monitorState.coinStats[sym]:null),
+    };
+    var adapted=adaptServerSignalToClient(srv,ctx);
+    if(adapted)out.push(adapted);
+  }
+  return out;
 }
 /* Rolling Order Flow Imbalance history — per-symbol bid/ask ratios sampled
    on every quickScan pass. Sustained imbalance (avg over 10 min) is far
@@ -2026,6 +2099,14 @@ async function loadTk(){
       if(m.bitfinex){Object.keys(m.bitfinex).forEach(function(s){bitfinexMargin[s]=m.bitfinex[s]})}
       if(m.cbPremium){Object.keys(m.cbPremium).forEach(function(s){var d=m.cbPremium[s];if(d){cbPremium[s]=d.diff||0;cbPremium[s+'_pct']=d.pct||0}});cbPremium.time=Date.now()}
     }
+    /* ═══ Phase 2.A.2 — capture server scanner pass ═══
+       Stash the latest server-scored signals + their timestamp so
+       getScanResults can consume them as the primary signal source
+       when the nxScannerFix_server_signals flag is on and the pass
+       is fresh. Server publishes both fields unconditionally
+       (server.js:629/636); we ignore them entirely when the flag
+       is off — capturing them costs ~25 KB of in-memory state. */
+    if(Array.isArray(all.signals)){serverScanSignals=all.signals;serverScanTs=+all.scannerTs||0}
     connMetrics.apiOk++;lastDataTime=Date.now();lastRestDataTime=lastDataTime;
   }else{
     connMetrics.apiFail++;_proxyAlive=false;
@@ -2730,6 +2811,12 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,100);
       ds+=10;
       dt.push('🏅PROVEN:'+_coinWinRate+'%');
     }
+    /* Phase 2.A.2 — source tag so renderers / tag-stats / debug
+       transcripts can distinguish a locally-scored signal from one
+       lifted from /api/all.signals (which carries 📡SRC_SERVER via
+       adaptServerSignalToClient). The two tags are symmetric so a
+       single grep finds every signal's origin. */
+    dt.push('🖥️SRC_LOCAL');
     /* Build result with new + old fields */
     var sigInfo=sigHist[c.s+'_trade'];
     var _priceAtDet=sigInfo&&sigInfo.priceAtDetection?sigInfo.priceAtDetection:c.p;

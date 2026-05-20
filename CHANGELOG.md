@@ -1,5 +1,90 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner — P&D threshold validator CLI] — 2026-05-20
+
+**Pure tool. No runtime behaviour change.** Delivers the validator
+script promised in Phase 1.0 (`SCANNER_AUDIT_2026_05_15.md` §6 P1.0
+decision C).
+
+### What it does
+
+`node vps/validate-pd-thresholds.js [--days N] [--json] [--history PATH]`
+
+Reads `data/scanner-history.json`, aggregates evaluated signals by
+P&D / MANIP / ATR tag family, and prints a delta-vs-baseline report
+so engineering can answer: **"is this suppression tag actually
+identifying losers, or just suppressing arbitrary signals?"**
+
+Example output (illustrative — real numbers fill in over 7+ days):
+
+```
+════════════════════════════════════════════════════════════
+  P&D / MANIP THRESHOLD VALIDATOR — last 30 days
+════════════════════════════════════════════════════════════
+
+Total tagged signals in window:  142
+Pre-1.0b entries excluded:       12
+
+──────────────  BASELINE  ──────────────
+  count=142  wins=58  losses=29  winRate=41%  avgGain=2.13%
+
+──────────────  BY TAG FAMILY  ─────────
+Family       Count  Wins  Losses  WinRate  AvgGain  vs Baseline
+P&D_RISK     0      —     —       —        —        (no firings yet)
+P&D_WARN     8      1     5       12%      -2.8%    -29pp
+MANIP_CAP    11     2     7       18%      -1.4%    -23pp
+ATR_ZONES    23     12    4       52%      +3.7%    +11pp
+```
+
+A **negative delta** on a suppression tag means the tag is correctly
+catching losers. A **positive delta** means the threshold may be
+suppressing legitimate signals — re-examine.
+
+### Interpretation modes
+
+- `P&D_WARN` / `P&D_RISK` / `MANIP_*` are SUPPRESSION tags. Negative
+  deltas confirm the threshold works.
+- `ATR_ZONES` is a BOOST tag (Phase 2.A.4 wider/tighter stops). Positive
+  delta confirms ATR bounds outperform the legacy fixed ladder.
+
+### Added
+
+- `vps/validate-pd-thresholds.js` — CLI tool (~200 lines including
+  the renderer). Loads history, computes per-family stats via the
+  shared `src/scanner-tag-stats` module, prints text or JSON.
+  Exit codes: 0 (success), 1 (file missing/unparseable), 2 (bad CLI arg).
+- `tests/validate-pd-thresholds.test.js` — 14 tests on the pure
+  helpers: aggregate math, window filter, tag-family regex behavior,
+  pre-extension entry exclusion, multi-tag-family entries, realistic
+  suppression-vs-baseline scenario.
+- `npm run validate-pd` — shorthand for the most common invocation.
+- `eslint.config.mjs` — `vps/*.js` added to the Node files block so
+  any future scripts in `vps/` get commonjs treatment by default.
+
+### Rollback
+
+N/A — pure tool, opt-in invocation. Delete the file to remove.
+
+### When to run
+
+On the VPS, after Phase 1.0b has accumulated ≥ 7 days of tagged
+history. Before then the tool prints "No tagged signals yet — nothing
+to validate." correctly.
+
+### Test results
+
+- `npm run check` → lint clean, format clean, 646 / 646 tests pass
+  (was 632 + 14 new).
+
+### References
+
+- `SCANNER_AUDIT_2026_05_15.md` §6 (Phase 1.0 P1.0)
+- `docs/SCANNER_PD_THRESHOLDS.md` §6 (schema extension proposal —
+  this tool consumes its output)
+- Re-uses `src/scanner-tag-stats.js` for the underlying aggregation
+
+---
+
 ## [Scanner pre-merge review fixes] — 2026-05-19
 
 **Two fixes surfaced by parallel reviewer agents before merging PR #101.**

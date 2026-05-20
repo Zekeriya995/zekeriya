@@ -288,6 +288,7 @@ export default [
       'src/indicator-engine.js',
       'src/whale-engine.js',
       'src/alerts-engine.js',
+      'vps/*.js',
       'ecosystem.config.cjs',
     ],
     languageOptions: {

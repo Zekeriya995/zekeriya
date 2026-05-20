@@ -47,13 +47,13 @@ the quantitative pass later.
 
 ## 2. Summary table
 
-| #   | Flag              | Threshold                                 | Confidence     | Verdict for Phase 1.1                                            |
-| --- | ----------------- | ----------------------------------------- | -------------- | ---------------------------------------------------------------- |
-| 1   | `VERTICAL`        | `d.c >= 15` (24h % change ≥ +15)          | **High**       | **PORT as-is**                                                   |
-| 2   | `FR_EXTREME`      | `fr.rate > 0.1` (per 8h, ≈ 0.1%)          | **Medium**     | **PORT as-is, add unit assertion in test**                       |
-| 3   | `LS_RETAIL_LONG`  | `LS[s].ratio > 3`                         | **Medium-Low** | **PORT-WITH-WIDER-BAND** (consider `> 2.5` to widen suppression) |
-| 4   | `SMART_VS_RETAIL` | `topTrader.long < 0.4` AND `LS.ratio > 2` | **Medium**     | **PORT as-is** (compound condition is self-validating)           |
-| 5   | `THIN_PUMP`       | `d.c >= 8` AND `d.v < 3e7` (USD)          | **Low**        | **DEFER until schema extension yields ≥ 7 days of flag data**    |
+| #   | Flag              | Threshold                                 | Confidence     | Verdict for Phase 1.1                                         |
+| --- | ----------------- | ----------------------------------------- | -------------- | ------------------------------------------------------------- |
+| 1   | `VERTICAL`        | `d.c >= 15` (24h % change ≥ +15)          | **High**       | **PORT as-is**                                                |
+| 2   | `FR_EXTREME`      | `fr.rate > 0.1` (per 8h, ≈ 0.1%)          | **Medium**     | **PORT as-is, add unit assertion in test**                    |
+| 3   | `LS_RETAIL_LONG`  | `LS[s].ratio > 2.5` (shipped Phase 1.1.c) | **Medium-Low** | **PORTED-WITH-WIDER-BAND** (was 3 → now 2.5, Ziko 2026-05-17) |
+| 4   | `SMART_VS_RETAIL` | `topTrader.long < 0.4` AND `LS.ratio > 2` | **Medium**     | **PORT as-is** (compound condition is self-validating)        |
+| 5   | `THIN_PUMP`       | `d.c >= 8` AND `d.v < 3e7` (USD)          | **Low**        | **DEFER until schema extension yields ≥ 7 days of flag data** |
 
 Aggregate verdict: **port 4 of 5 flags as-is or with a small widening,
 defer 1 until quantitative data is available.** This keeps the spirit
@@ -186,17 +186,36 @@ if (LS[s] && LS[s].ratio > 3) {
   yields earlier suppression on borderline retail-heavy coins.
   Confidence **Medium-Low** — happy to revert if the tag-stats
   endpoint (P3.1) shows the new threshold over-suppresses.
-- **As-shipped in Phase 1.1.** The server detector
-  (`src/scanner-pd-detector.js`) lands with the **unchanged client
-  threshold of `> 3`** to preserve strict parity with the client
-  pending Ziko's explicit reply to §8. If §8 returns "Approved §5
-  verdicts", a one-line follow-up PR flips
-  `FLAG_THRESHOLDS.LS_RETAIL_LONG_RATIO` to `2.5` and updates the
-  test boundary assertion.
+- **As-shipped in Phase 1.1.c (2026-05-17).** Ziko approved the §5
+  verdict on 2026-05-17. The server detector
+  (`src/scanner-pd-detector.js`) now uses
+  `FLAG_THRESHOLDS.LS_RETAIL_LONG_RATIO = 2.5`. The client at
+  `app.js:2459-2476` still uses `> 3`; Phase 2.A.1 (unified rules
+  registry) closes that gap. If the tag-stats endpoint shows the
+  new threshold over-suppresses, revert by flipping the constant
+  back to `3` — single-line change, no other code paths affected.
 
 ---
 
 ### 3.4 `SMART_VS_RETAIL` — Compound: top traders short AND retail long
+
+> **Post-Phase-1.1 discovery (2026-05-17).** The original implementation
+> on both client (`app.js:2469-2472`) and server's initial port
+> referenced **`LS[s].ratio > 2`** (top-trader POSITION ratio) for the
+> retail half AND `topTradersLS[s].positions[last].long < 0.4` (also
+> top-trader POSITION fraction) for the smart-money half. Both halves
+> read the same Binance endpoint (`topLongShortPositionRatio`), making
+> the AND condition **logically impossible to satisfy** on any single
+> snapshot — if `positions.long < 0.4` then `positions.ratio < 0.67`,
+> never `> 2`. The flag was effectively dead code on both sides.
+>
+> **Fix (Phase 1.1.b):** the server now also fetches Binance's
+> `globalLongShortAccountRatio` (TRUE retail signal — all accounts,
+> not just top traders) into `cache.globalLs`. The detector reads
+> this for the retail half of `SMART_VS_RETAIL`, restoring the
+> divergence the flag's name implies. The client still has the
+> contradiction; the planned Phase 2.A.2 (PWA consumes server signals)
+> will inherit the fix automatically.
 
 ```js
 // app.js:2469-2472

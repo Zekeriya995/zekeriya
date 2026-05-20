@@ -208,7 +208,19 @@ const cache = {
   tickers: {} /* { BTC: { price, change, volume, high, low, src } } */,
   fr: {} /* { BTC: { rate, mark } } */,
   oi: {} /* { BTC: number } */,
-  ls: {} /* { BTC: { long, short, ratio, hist } } */,
+  ls: {} /* { BTC: { long, short, ratio, hist } } — top-trader POSITION ratio
+       (source: topLongShortPositionRatio). Despite the name "ls", this is
+       NOT all-accounts long/short — see globalLs below for that. */,
+  globalLs: {} /* { BTC: { long, short, ratio } } — TRUE retail signal:
+       all-account long/short ratio from globalLongShortAccountRatio.
+       Wired in for Phase 1.x SMART_VS_RETAIL flag, which needs the
+       divergence between top-trader positions (ls) and global accounts
+       (globalLs). Populated by fetchGlobalLs(). */,
+  topTraders: {} /* { BTC: { positions: [{ long, short, ratio, time }, ...] } }
+       — top-trader POSITION fractions (raw from Binance, 0..1 not 0..100).
+       Reshaped view of cache.ls so the P&D detector's `topTraders.positions[].long
+       < 0.4` check matches the Binance unit. Populated alongside cache.ls
+       in fetchLongShort(). */,
   taker: {} /* { BTC: { ratio, buyVol, sellVol, trend } } */,
   liq: [] /* [ { sym, side, price, value, time } ] */,
   depth: {} /* { BTC: { bids, asks } } */,
@@ -616,6 +628,11 @@ async function runScannerOnServer() {
   }
   cache.signals = pass.signals;
   cache.top3 = pass.top3;
+  /* Phase 3.2 — overwrite with latest pass's rejection breakdown so
+     /api/scanner/insights serves a fresh per-pass picture instead of
+     a stale or cumulative one. */
+  cache.scannerRejections = pass.rejections;
+  cache.scannerRejectionsTs = pass.ts;
   cache.scannerTs = pass.ts;
   cache.lastUpdate.scanner = pass.ts;
 
@@ -1098,8 +1115,16 @@ async function fetchOpenInterest() {
 }
 
 /* 4. LONG/SHORT RATIO — Binance Futures.
-   Same /futures/data/ caveat as fetchTaker — /fapi/v1/topLongShortPositionRatio
-   returns 404 for every symbol. */
+   Fetches top-trader POSITION ratio (topLongShortPositionRatio) for the
+   top-30-volume symbols. Populates two cache slots from the same payload:
+     cache.ls[sym]         — { long, short, ratio, hist }; long/short are
+                             0..100 percentages (legacy shape, kept stable
+                             for downstream consumers).
+     cache.topTraders[sym] — { positions: [{ long, short, ratio, time }] };
+                             same data but long/short stay as 0..1 fractions,
+                             matching the Binance unit and the P&D detector's
+                             `topTraders.positions[].long < 0.4` check at
+                             src/scanner-pd-detector.js. */
 async function fetchLongShort() {
   try {
     const topSymbols = Object.keys(cache.tickers)
@@ -1126,15 +1151,75 @@ async function fetchLongShort() {
               time: d.timestamp,
             })),
           };
+          cache.topTraders[sym] = {
+            positions: data.map((d) => ({
+              long: parseFloat(d.longAccount),
+              short: parseFloat(d.shortAccount),
+              ratio: parseFloat(d.longShortRatio),
+              time: d.timestamp,
+            })),
+          };
         }
       })
     );
 
     await Promise.allSettled(promises);
     cache.lastUpdate.ls = Date.now();
-    console.log(`[LS] Updated: ${Object.keys(cache.ls).length} pairs`);
+    console.log(
+      `[LS] Updated: ${Object.keys(cache.ls).length} pairs (+topTraders: ${Object.keys(cache.topTraders).length})`
+    );
   } catch (err) {
     console.error('[LS] Error:', err.message);
+  }
+}
+
+/* 4b. GLOBAL LONG/SHORT ACCOUNT RATIO — Binance Futures.
+   Distinct from fetchLongShort above:
+     - fetchLongShort      → top traders (capital-weighted)  → cache.ls
+                             + cache.topTraders
+     - fetchGlobalLs (here) → ALL accounts (retail-heavy)    → cache.globalLs
+   The P&D detector's SMART_VS_RETAIL flag needs the divergence between
+   these two sources — top traders short while retail accounts long is the
+   canonical "smart money exits while retail enters" pattern. Without
+   globalLs the flag is logically impossible (both halves would reference
+   the same top-trader data) and was effectively dead before this fetcher.
+   Same /futures/data/ host as the others.
+
+   Gated by SCANNER_RETAIL_LS_ENABLED (default ON). When disabled, the
+   fetcher returns early and cache.globalLs stays empty; the P&D
+   detector then falls back to ctx.ls for LS_RETAIL_LONG (parity with
+   pre-Phase-1.1.b behavior) and SMART_VS_RETAIL stays silent. */
+const RETAIL_LS_ENABLED = process.env.SCANNER_RETAIL_LS_ENABLED !== 'false';
+async function fetchGlobalLs() {
+  if (!RETAIL_LS_ENABLED) return;
+  try {
+    const topSymbols = Object.keys(cache.tickers)
+      .filter((s) => cache.tickers[s].volume > 10000000 && !FUTURES_SYMBOL_DENYLIST.has(s))
+      .slice(0, 30);
+
+    const promises = topSymbols.map((sym) =>
+      safeFetch(
+        'https://fapi.binance.com/futures/data/globalLongShortAccountRatio?symbol=' +
+          sym +
+          'USDT&period=1h&limit=2',
+        'GLS-' + sym
+      ).then((data) => {
+        if (data && data.length) {
+          const latest = data[data.length - 1];
+          cache.globalLs[sym] = {
+            long: parseFloat(latest.longAccount) * 100,
+            short: parseFloat(latest.shortAccount) * 100,
+            ratio: parseFloat(latest.longShortRatio),
+          };
+        }
+      })
+    );
+
+    await Promise.allSettled(promises);
+    cache.lastUpdate.globalLs = Date.now();
+    console.log(`[GLS] Updated: ${Object.keys(cache.globalLs).length} pairs`);
+  } catch (err) {
+    console.error('[GLS] Error:', err.message);
   }
 }
 
@@ -1689,6 +1774,15 @@ const HEALTH_THRESHOLDS = {
   hyperliquid: { stale: 180000, down: 600000 },
   news: { stale: 900000, down: 3600000 },
 };
+/* globalLs threshold is registered only when SCANNER_RETAIL_LS_ENABLED
+   is on. Without this gate, an operator who rolls back via
+   SCANNER_RETAIL_LS_ENABLED=false would hit a permanent
+   "cache 'globalLs' has never been populated" critical alert from
+   evaluateAlerts() because cache.lastUpdate.globalLs never gets stamped
+   (fetchGlobalLs returns early). Surfaced by the pre-merge SRE review. */
+if (RETAIL_LS_ENABLED) {
+  HEALTH_THRESHOLDS.globalLs = { stale: 120000, down: 300000 };
+}
 function _classifyAge(last, thresholds, now) {
   if (!last) return { ageMs: null, status: 'down' };
   const age = now - last;
@@ -2066,6 +2160,35 @@ app.get('/api/alerts', (req, res) => {
    extension — entries recorded before that deploy have no tags
    and are counted in `totalWithoutTags` but contribute to no
    per-tag bucket. */
+/* Phase 3.2 — gate-rejection telemetry. Returns the most recent
+   scanner pass's breakdown of why each candidate was dropped.
+   Gated by SCANNER_INSIGHTS_ENABLED. Default ON. The payload reflects
+   only the LAST pass (refreshed every CONFIG.SCANNER_INTERVAL) so
+   the numbers are inherently fresh — no rolling-window state to
+   maintain. */
+const INSIGHTS_ENABLED = process.env.SCANNER_INSIGHTS_ENABLED !== 'false';
+app.get('/api/scanner/insights', (req, res) => {
+  if (!INSIGHTS_ENABLED) return res.status(503).json({ error: 'insights_disabled' });
+  if (!cache.scannerRejections) {
+    return res.json({
+      ready: false,
+      note: 'No scanner pass has completed yet since boot.',
+    });
+  }
+  const r = cache.scannerRejections;
+  const accepted = (cache.signals || []).length;
+  res.json({
+    ready: true,
+    passAt: cache.scannerRejectionsTs,
+    accepted: accepted,
+    rejections: r,
+    /* Convenience percentages — rounded ints, sum may not equal 100
+       due to rounding. Computed from r.total (all candidates) so
+       (acceptedPct + sum(rejectionPcts)) ≈ 100. */
+    rejectionRatePct: r.total > 0 ? Math.round(((r.total - accepted) / r.total) * 100) : 0,
+  });
+});
+
 const TAG_STATS_ENABLED = process.env.SCANNER_TAG_STATS_ENABLED !== 'false';
 app.get('/api/scanner/tag-stats', (req, res) => {
   if (!TAG_STATS_ENABLED) return res.status(503).json({ error: 'tag_stats_disabled' });
@@ -2214,8 +2337,11 @@ async function startDataLoops() {
   console.log('[INIT] Loading open interest...');
   await fetchOpenInterest();
 
-  console.log('[INIT] Loading long/short...');
+  console.log('[INIT] Loading long/short (top traders)...');
   await fetchLongShort();
+
+  console.log('[INIT] Loading global long/short (retail accounts)...');
+  await fetchGlobalLs();
 
   console.log('[INIT] Loading taker data...');
   await fetchTaker();
@@ -2251,6 +2377,7 @@ async function startDataLoops() {
     setInterval(fetchFundingRates, jitter(CONFIG.FR_INTERVAL)),
     setInterval(fetchOpenInterest, jitter(CONFIG.OI_INTERVAL)),
     setInterval(fetchLongShort, jitter(CONFIG.LS_INTERVAL)),
+    setInterval(fetchGlobalLs, jitter(CONFIG.LS_INTERVAL)),
     setInterval(fetchTaker, jitter(CONFIG.TAKER_INTERVAL)),
     setInterval(fetchDepth, jitter(CONFIG.DEPTH_INTERVAL)),
     setInterval(fetchLiquidations, jitter(CONFIG.LIQ_INTERVAL)),

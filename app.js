@@ -1028,6 +1028,45 @@ function getScanResults(forceFresh){
               }
             }
 
+            /* Phase 2.A.2.3 — selective server-tag merge. Promote
+               specific server-only tags into the visible card so
+               users see WHY the server applied a tier-aware bound
+               (📐ATR_T1), suppressed a signal (🔪FALLING), capped
+               a tier (🚫MANIP_CAP / 🚨MANIP_HIGH / ⚠️MANIP_MED),
+               or flagged it (🌐FR_NEG).
+
+               Why an EXACT allowlist (not prefix match): the
+               client already emits its own '🚨P&D_RISK:N/5' and
+               '🚨P&D_WARN:N/5' (different N from the server,
+               since the two sides count slightly different
+               flags). Naive prefix-merge would surface BOTH and
+               confuse the user. Same for FR-related tags. So we
+               only promote tags the client provably can't emit.
+
+               '📐ATR_ZONES' is also added here as a fallback —
+               PR #112's bounds overlay block adds '📡SRV' which
+               implicitly already means "server bounds applied",
+               but for users grep-ing tag-stats by tag, the
+               explicit '📐ATR_ZONES' parity makes server-history
+               and tag-stats correlate cleanly. */
+            var _SERVER_TAGS_TO_MERGE = [
+              '📐ATR_T1',
+              '📐ATR_ZONES',
+              '🔪FALLING',
+              '🚫MANIP_CAP',
+              '🚨MANIP_HIGH',
+              '⚠️MANIP_MED',
+              '🌐FR_NEG'
+            ];
+            for(var _mi=0; _mi<_srvTags.length; _mi++){
+              var _stag = _srvTags[_mi];
+              if(typeof _stag !== 'string') continue;
+              if(_SERVER_TAGS_TO_MERGE.indexOf(_stag) === -1) continue;
+              if(Array.isArray(_row.tags) && _row.tags.indexOf(_stag) === -1){
+                _row.tags.push(_stag);
+              }
+            }
+
             /* Phase 2.A.2.1 — bounds overlay. Validate every
                numeric field independently. The server constructs
                sl/tp1/tp2/rr together so partial corruption is

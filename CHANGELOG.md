@@ -71,10 +71,37 @@ On the VPS, after Phase 1.0b has accumulated ≥ 7 days of tagged
 history. Before then the tool prints "No tagged signals yet — nothing
 to validate." correctly.
 
+### Pre-merge review fixes applied
+
+Parallel reviewer agents (correctness + SRE) cleared with 0
+blockers. Applied 4 trivial fixes before merge:
+
+- **B1 (CLI UX):** `--history` with no value now exits 2 with
+  `--history requires a path` instead of the confusing
+  `history file not found: undefined`.
+- **B3 (regex precision):** `TAG_FAMILIES` anchored at `:` or
+  end-of-string. A future tag like `P&D_RISK_OVERRIDDEN` will
+  no longer auto-bucket into the existing `P&D_RISK` family.
+  Locked by a new test.
+- **SRE-1 (JSON schema versioning):** `--json` output now
+  starts with `"schema": 1`. Downstream jq pipelines should
+  gate on this; bumping the version signals a breaking change.
+- **SRE-2 (size cap):** `loadHistory` rejects files larger than
+  10 MB before reading them into RAM. MAX_HISTORY would never
+  produce that — 10 MB+ means corruption or hand-edit.
+
+Also documented in the rendered text report:
+
+- The family-count overlap caveat (a single signal carrying
+  multiple suppression tags contributes to multiple family rows).
+- The ATR_ZONES win-rate-bias caveat (the legacy outcome
+  evaluator uses fixed thresholds, not per-signal sl/tp1 — see
+  Phase 2.A.4 CHANGELOG for the proper-fix path in Phase 4).
+
 ### Test results
 
-- `npm run check` → lint clean, format clean, 646 / 646 tests pass
-  (was 632 + 14 new).
+- `npm run check` → lint clean, format clean, 647 / 647 tests pass
+  (was 632 + 14 + 1 review-fix test).
 
 ### References
 
@@ -82,6 +109,7 @@ to validate." correctly.
 - `docs/SCANNER_PD_THRESHOLDS.md` §6 (schema extension proposal —
   this tool consumes its output)
 - Re-uses `src/scanner-tag-stats.js` for the underlying aggregation
+- Pre-merge correctness + SRE review agents (2026-05-20)
 
 ---
 

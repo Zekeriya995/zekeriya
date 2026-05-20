@@ -76,6 +76,21 @@ test('TAG_FAMILIES — P&D_RISK matches the 3+ flags tag including count suffix'
   assert.ok(!fam.re.test('⚠️P&D_WARN:2/5'));
 });
 
+test('TAG_FAMILIES — anchored regex rejects future near-name tags (NIT B3)', () => {
+  /* The post-review tightening anchors each family's regex at either
+     `:` (for counted tags like P&D_RISK:3/5) or end-of-string (plain
+     suffix tags). A future addition like `P&D_RISK_OVERRIDDEN` or
+     `MANIP_CAP_PARTIAL` should NOT auto-bucket into the existing
+     families. Locks the new boundaries. */
+  const risk = TAG_FAMILIES.find((f) => f.name === 'P&D_RISK');
+  const cap = TAG_FAMILIES.find((f) => f.name === 'MANIP_CAP');
+  assert.ok(!risk.re.test('P&D_RISK_OVERRIDDEN'));
+  assert.ok(!cap.re.test('MANIP_CAP_PARTIAL'));
+  /* Sanity: the legitimate forms still match. */
+  assert.ok(risk.re.test('🚨P&D_RISK:3/5'));
+  assert.ok(cap.re.test('🚫MANIP_CAP'));
+});
+
 test('TAG_FAMILIES — MANIP_CAP matches the Phase 1.2 tier-cap tag', () => {
   const fam = TAG_FAMILIES.find((f) => f.name === 'MANIP_CAP');
   assert.ok(fam.re.test('🚫MANIP_CAP'));

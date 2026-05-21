@@ -35,6 +35,8 @@ const scannerHistory = require('./src/scanner-history');
 const scannerSectors = require('./src/scanner-sectors');
 const pushCooldown = require('./src/scanner-push-cooldown');
 const scannerTagStats = require('./src/scanner-tag-stats');
+const scannerBacktest = require('./src/scanner-backtest');
+const scoringRules = require('./src/scoring-rules');
 require('dotenv').config();
 
 const {
@@ -2202,6 +2204,33 @@ app.get('/api/scanner/tag-stats', (req, res) => {
     now: Date.now(),
   });
   res.json(stats);
+});
+
+/* Phase 4 — per-rule effectiveness backtest. Reads scanner-history,
+   partitions evaluated signals by whether each registry rule's tag
+   was present, computes the marginal-gain delta. Surfaces
+   "suspicious rules": positive-weight rules whose presence
+   correlates with WORSE outcomes — the highest-priority targets
+   for weight retuning. See src/scanner-backtest.js for the full
+   contract and docs/SESSION_2026_05_20_SUMMARY.md for the
+   motivation.
+
+   Read-only endpoint, no state mutation. Gated by env flag so it
+   can be disabled per environment. Days window capped at 90 to
+   bound CPU on histories that get large. */
+const BACKTEST_ENABLED = process.env.SCANNER_BACKTEST_ENABLED !== 'false';
+app.get('/api/scanner/backtest', (req, res) => {
+  if (!BACKTEST_ENABLED) return res.status(503).json({ error: 'backtest_disabled' });
+  const daysRaw = parseInt(req.query.days, 10);
+  const days = Number.isFinite(daysRaw) && daysRaw > 0 && daysRaw <= 90 ? daysRaw : 30;
+  const minRaw = parseInt(req.query.min, 10);
+  const minSamples = Number.isFinite(minRaw) && minRaw >= 1 && minRaw <= 100 ? minRaw : 5;
+  const summary = scannerBacktest.computeBacktestSummary(
+    cache.scannerHistory || [],
+    scoringRules.RULES,
+    { daysBack: days, minSamples, now: Date.now() }
+  );
+  res.json(summary);
 });
 
 app.post('/api/alerts/create', (req, res) => {

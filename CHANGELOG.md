@@ -1,5 +1,153 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 4 — Backtest harness (per-rule effectiveness)] — 2026-05-21
+
+**Server-side. NEW READ-ONLY ENDPOINT. No state mutation. No
+behaviour change to the scanner itself.**
+
+Closes the last phase of the original
+`SCANNER_AUDIT_2026_05_15.md` plan. Builds the per-rule
+effectiveness attribution module that consumes scanner-history
+and the unified registry to answer: **which rules actually
+predict wins, and which ones hurt?**
+
+### What it does
+
+For each rule in the registry, `computeRuleAttribution(history,
+rules, opts)`:
+
+1. Partitions evaluated history (>= 24h old, within the
+   look-back window) into two groups: signals where the rule's
+   tag was present (`fired`) vs absent (`absent`).
+2. Computes win rate + average pct-gain for each group.
+3. **Marginal-gain delta:** `firedAvgGain − absentAvgGain`. A
+   positive delta means "signals where this rule fired did
+   better"; a negative delta means the rule is actively
+   misleading the scorer.
+4. Surfaces a **`suspiciousRules`** list: positive-weight rules
+   whose presence correlates with WORSE outcomes. This is the
+   worst kind of bug — the scoring formula is pulled in the
+   wrong direction by its own weights. Surfacing these is the
+   highest-ROI target for weight retuning.
+
+### What it does NOT do (yet)
+
+This is **simple correlation analysis**, not causal A/B
+testing. Causality needs to replay `scoreSymbol` with the rule
+disabled and compare which signals would still have fired —
+that requires capturing the input `ctx` with each history entry
+(future PR). For tonight, correlation is enough to flag the
+obvious wins and losses.
+
+### Known limitation: tagless rules
+
+The 3 tagless rules introduced in PR F / PR H
+(`CHANGE_PENALTY_GT3`, `CHANGE_PENALTY_GT5`, `BTC_NOT_OK_PENALTY`)
+are **skipped** by the attribution helper — we can't tell from
+the persisted scanner-history whether they fired (they push no
+tag to the tag bag). They'll need ctx capture to attribute.
+
+### New files
+
+- `src/scanner-backtest.js` — pure module:
+  - `computeRuleAttribution(history, rules, opts)` — the
+    per-rule analyzer
+  - `computeBacktestSummary(history, rules, opts)` — wrapper
+    that bundles attribution + basket-wide aggregates
+  - Exports `MIN_DEFAULT_SAMPLES = 5`, `DEFAULT_DAYS_BACK = 30`
+- `tests/scanner-backtest.test.js` — **+14 tests** covering
+  empty/null history, unevaluated entries, daysBack window,
+  per-rule attribution math, suspicious-rule detection (the
+  CRITICAL property), tagless-rule skip, low-sample
+  exclusion-from-rankings, per-tier breakdown, summary
+  integration, default constants, invalid-opt fallback.
+
+### New endpoint
+
+```
+GET /api/scanner/backtest
+  ?days=N (1-90, default 30)
+  &min=N  (1-100, default 5)
+```
+
+Returns:
+
+```json
+{
+  "windowDays": 30,
+  "totalEvaluated": 243,
+  "perRule": {
+    "FALLING_KNIFE": {
+      "tag": "🔪FALLING", "weight": -50,
+      "fired": 12, "absent": 231,
+      "firedWinRate": 8, "absentWinRate": 41,
+      "firedAvgGain": -7.2, "absentAvgGain": 2.1,
+      "delta": -9.3,
+      "sampleSize": "sufficient"
+    },
+    ...
+  },
+  "byTier": { "ULTRA": {...}, "STRONG": {...} },
+  "topPositiveDelta": ["MTF_BULL_FULL", "SILENT_ACCUMULATION", ...],
+  "topNegativeDelta": ["FALLING_KNIFE", ...],
+  "suspiciousRules": [],
+  "basket": {
+    "total": 243, "wins": 99, "losses": 41, "partials": 103,
+    "winRate": 40, "avgGain": 1.8, "medianGain": 1.2
+  }
+}
+```
+
+### Server changes
+
+- `server.js`:
+  - +3 imports (`scannerBacktest`, `scoringRules`,
+    `scannerTagStats` already imported)
+  - +new `GET /api/scanner/backtest` endpoint gated by
+    `SCANNER_BACKTEST_ENABLED` env flag (default ON)
+- `.env.example` — documents `SCANNER_BACKTEST_ENABLED=true`
+
+### Verification
+
+- `npm run check` — 781/781 tests pass (+14 new).
+- Manual verification post-deploy:
+  ```bash
+  curl -s https://shamcyrpto.com/api/scanner/backtest?days=7 \
+    | python3 -m json.tool | head -50
+  ```
+  Expected: a JSON response with `totalEvaluated > 0` after
+  tag-stats has accumulated signals (24h post-deploy minimum;
+  meaningful after 7 days).
+
+### Rollback
+
+`SCANNER_BACKTEST_ENABLED=false` in `.env`, then
+`pm2 restart --update-env`. Endpoint returns 503. The
+underlying module remains available for direct require.
+
+### Audit plan status — FINAL
+
+| Phase | Status |
+|---|---|
+| 1.1 — Shared P&D detection | merged earlier |
+| 1.1.b — Retail LS data source | merged earlier |
+| 1.2 — Manipulation hard-cap | merged earlier |
+| 1.3 — Smart ULTRA cooldown delta-bypass | merged earlier |
+| 2.A.1 — Unified scoring rules registry | **EXTENDED COMPLETE** (35 rules) |
+| 2.A.2 — PWA reads server signals | COMPLETE (3 ratchets) |
+| 2.A.3 — Engine wired to THRESHOLDS | merged earlier |
+| 2.A.4 — ATR-aware SL/TP bounds | merged earlier |
+| 2.A.4.b — Tier-aware ATR multipliers | COMPLETE (PR #110) |
+| 2.A.5 — Contract test populated | done as part of 2.A.1 |
+| 3.1 — Per-tag win-rate tracking | merged earlier |
+| 3.2 — Gate-rejection telemetry | merged earlier |
+| **4 — Backtest harness** | **COMPLETE (this PR)** |
+
+**Original audit plan: 100% delivered.** Phase 4 is the
+foundation for future evidence-based weight tuning — its real
+value materializes after tag-stats accumulates 14-30 days of
+post-deploy signals.
+
 ## [Scanner Phase 2.A.1 PR H — REVERSAL / BTC_OK_* / CVD_BUY] — 2026-05-21
 
 **Server-side: NO BEHAVIOUR CHANGE. Client-side: NO BEHAVIOUR

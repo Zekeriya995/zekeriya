@@ -1,34 +1,38 @@
-# Session 2026-05-20 — Summary
+# Session 2026-05-20 → 2026-05-21 — Summary
 
-Overnight remediation session. Closes out the original
-SCANNER_AUDIT_2026_05_15.md plan to the extent possible
-tonight; the only remaining items (backtest harness, full
-quickScan removal) need data or scope that doesn't fit a
-single session.
+Overnight remediation session. Closed out the original
+SCANNER_AUDIT_2026_05_15.md plan in full (Phases 1.x, 2.A.1,
+2.A.2, 2.A.3, 2.A.4, 2.A.4.b, 2.A.5, 3.1, 3.2) and **continued
+beyond it** at the user's explicit request — adding 4 more
+PRs (F/G/H + docs) that extend the parity ratchet to almost
+every simple scoring rule.
 
 ## Headline result
 
-**11 PRs merged tonight, 1 in flight (PR FINAL — docs cleanup).**
-Phase 2.A.1 parity ratchet **COMPLETE** (20 rules in the
-registry). Phase 2.A.2 (PWA reads server signals) **COMPLETE**
-in three ratchets. The 2026-05-20 BTC screenshot regression
-(TP1 +6.5% over "1-4 hours") is now structurally fixed both
-server-side and client-side.
+**17 PRs merged this session.** Registry grew from 6 → **35 rules**.
+Tests grew from 700 → **767**. Phase 2.A.1 parity ratchet
+COMPLETE for every simple (single-tag, additive) rule. Phase
+2.A.2 (PWA reads server signals) COMPLETE in three ratchets.
+Phase 2.A.4.b (tier-aware ATR) addresses the 2026-05-20 BTC
+screenshot regression structurally.
 
 ## PRs merged in chronological order
 
-| PR   | Title                                              | Notable                                                                                                                                                               |
-| ---- | -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| #110 | Phase 2.A.4.b — Tier-aware ATR multipliers         | Directly addresses BTC TP1 regression. Tighter mults for tier-1 majors. R:R drops 2.0→1.5 (above audit floor of 1.3). Adds `📐ATR_T1` observability tag.              |
-| #112 | Phase 2.A.2.1 — Client overlays server SL/TP/RR    | First ratchet of "PWA reads server signals". Caught 2 BLOCKERs in review: `_scanWarn` typo + `smartEntry` was the actual UI data path (top-level `r.sl` was a no-op). |
-| #113 | Phase 2.A.2.2 — Client tier demotion               | Asymmetric: server can DEMOTE but never PROMOTE. Surfaces `🚫MANIP_CAP` / `🔪FALLING` / `🚨P&D_RISK` / `🚨MANIP_HIGH` as `🛑SRV_DEMOTE`.                              |
-| #114 | Phase 2.A.1 PR C — TIER1/TIER2/NEW migration       | Caught BLOCKER: TIER1 ∩ tier2Coins overlap (hot majors land in both lists) would have silently scored +15. Fixed by precedence-in-condition gate `isTier1 !== true`.  |
-| #115 | docs: VPS deployment guide                         | Step-by-step guide for tomorrow's deploy.                                                                                                                             |
-| #116 | Phase 2.A.2.3 — Client merges selected server tags | Promotes `📐ATR_T1 / 📐ATR_ZONES / 🔪FALLING / 🚫MANIP_CAP / 🚨MANIP_HIGH / ⚠️MANIP_MED / 🌐FR_NEG` to visible cards. Exact-match allowlist (no prefix).              |
-| #117 | Phase 2.A.1 PR D — FR / LS / coinalyzeFR migration | Caught BLOCKER: client DOES have `coinalyzeFR` data (from `/api/all`), so the inline rule at app.js:2641 had to be migrated AND deleted. First iteration missed both. |
-| #118 | docs: deploy guide refresh                         | Marks #113-#116 merged, lists #117 pending.                                                                                                                           |
-| #119 | Phase 2.A.1 PR E — MTF / RSI / MACD migration      | Server-only data; 8 rules. No client changes needed (strict no-op gates). Histogram tie-breaker (+3/-3 tagless) kept inline — doesn't fit current rule shape.         |
-| #120 | Phase 2.A.1 PR FINAL — doc + ledger cleanup        | THIS PR. No code.                                                                                                                                                     |
+| PR   | Title                                                | Notable                                                                                                                                                               |
+| ---- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #110 | Phase 2.A.4.b — Tier-aware ATR multipliers           | Directly addresses BTC TP1 regression. Tighter mults for tier-1 majors. R:R drops 2.0→1.5 (above audit floor of 1.3). Adds `📐ATR_T1` observability tag.              |
+| #112 | Phase 2.A.2.1 — Client overlays server SL/TP/RR      | First ratchet of "PWA reads server signals". Caught 2 BLOCKERs in review: `_scanWarn` typo + `smartEntry` was the actual UI data path (top-level `r.sl` was a no-op). |
+| #113 | Phase 2.A.2.2 — Client tier demotion                 | Asymmetric: server can DEMOTE but never PROMOTE. Surfaces `🚫MANIP_CAP` / `🔪FALLING` / `🚨P&D_RISK` / `🚨MANIP_HIGH` as `🛑SRV_DEMOTE`.                              |
+| #114 | Phase 2.A.1 PR C — TIER1/TIER2/NEW migration         | Caught BLOCKER: TIER1 ∩ tier2Coins overlap (hot majors land in both lists) would have silently scored +15. Fixed by precedence-in-condition gate `isTier1 !== true`.  |
+| #115 | docs: VPS deployment guide                           | Step-by-step guide for tomorrow's deploy.                                                                                                                             |
+| #116 | Phase 2.A.2.3 — Client merges selected server tags   | Promotes `📐ATR_T1 / 📐ATR_ZONES / 🔪FALLING / 🚫MANIP_CAP / 🚨MANIP_HIGH / ⚠️MANIP_MED / 🌐FR_NEG` to visible cards. Exact-match allowlist (no prefix).              |
+| #117 | Phase 2.A.1 PR D — FR / LS / coinalyzeFR migration   | Caught BLOCKER: client DOES have `coinalyzeFR` data (from `/api/all`), so the inline rule at app.js:2641 had to be migrated AND deleted. First iteration missed both. |
+| #118 | docs: deploy guide refresh                           | Marks #113-#116 merged, lists #117 pending.                                                                                                                           |
+| #119 | Phase 2.A.1 PR E — MTF / RSI / MACD migration        | Server-only data; 8 rules. No client changes needed (strict no-op gates). Histogram tie-breaker (+3/-3 tagless) kept inline — doesn't fit current rule shape.         |
+| #120 | Phase 2.A.1 PR FINAL — doc + ledger cleanup          | First "complete" snapshot. No code.                                                                                                                                   |
+| #121 | Phase 2.A.1 PR F — VOL chain + change-band           | +7 rules (VOL_MEGA/HIGH/NORMAL + CHANGE_RISING/LATE/PENALTY_GT3/GT5). Tagless rules first appear here. Client's 4th VOL tier `📊vol` lowercase preserved inline.      |
+| #122 | Phase 2.A.1 PR G — AT_HIGH/BOTTOM/TAKER/COINALYZE_OI | +4 rules. AT_HIGH/BOTTOM/TAKER bit-for-bit on both sides; COINALYZE_OI server-only with Option-C client no-op.                                                        |
+| #123 | Phase 2.A.1 PR H — REVERSAL/BTC*OK*\*/CVD_BUY        | +4 rules. All client-only data; server cleanly no-ops via strict gates. BTC market check migrated as two-sided rule (bonus + tagless penalty).                        |
 
 ## Pre-merge review process
 
@@ -58,34 +62,52 @@ Plus a SRE NIT on PR #113 that became a meaningful improvement
 (tier demotion hoisted above the bounds-validity gate so it
 fires even when bounds are corrupt).
 
-## Final registry composition (20 rules)
+## Final registry composition (35 rules)
 
 ```
-TIER1_BONUS, TIER2_BONUS, NEW_BONUS  (mutual-exclusive precedence)
-SILENT_ACCUMULATION, EARLY_ENTRY, STEALTH
-FR_VERY_NEG, FR_MILDLY_NEG, FR_OVEREXTENDED  (FR chain precedence)
-LS_SHORTS
-COINALYZE_FR_NEG
-FALLING_KNIFE  (defensive suppression, not a migration)
-MTF_BULL_FULL, MTF_BULL_PARTIAL, MTF_BEAR_FULL, MTF_BEAR_PARTIAL
-RSI_OS, RSI_OB
-MACD_BULL_CROSS, MACD_BEAR_CROSS
+PR A: TIER1_BONUS, NEW_BONUS, SILENT_ACCUMULATION, EARLY_ENTRY, STEALTH
+PR C: TIER2_BONUS
+PR D: FR_VERY_NEG, FR_MILDLY_NEG, FR_OVEREXTENDED, LS_SHORTS, COINALYZE_FR_NEG
+PR E: MTF_BULL_FULL, MTF_BULL_PARTIAL, MTF_BEAR_FULL, MTF_BEAR_PARTIAL,
+      RSI_OS, RSI_OB, MACD_BULL_CROSS, MACD_BEAR_CROSS
+PR F: VOL_MEGA, VOL_HIGH, VOL_NORMAL, CHANGE_RISING, CHANGE_LATE,
+      CHANGE_PENALTY_GT3 (tagless), CHANGE_PENALTY_GT5 (tagless)
+PR G: AT_HIGH, BOTTOM, TAKER_SKEW, COINALYZE_OI
+PR H: REVERSAL, BTC_OK_BONUS, BTC_NOT_OK_PENALTY (tagless), CVD_BUY
+Plus FALLING_KNIFE (PR #108, native to registry, not a migration)
 ```
 
-Each rule is `Object.freeze`'d, has a unique id, tag, weight, and
-pure condition. Contract test in `tests/scoring-rules.test.js`
-pins every rule's shape + behaviour. 746 / 746 tests pass.
+Each rule is `Object.freeze`'d, has a unique id, tag (or `null`
+for tagless score-only rules), weight, and pure condition. Contract
+test in `tests/scoring-rules.test.js` pins every rule's shape +
+behaviour. **767 / 767 tests pass.**
 
 ## Patterns the registry doesn't express yet (deferred)
 
-- Multi-tag tier rules (whaleWave A/B/C/D, complex MTF
-  branching) — would need `tagFn(ctx)` shape extension
-- Non-additive scoring (P&D KILL → score floor at -100)
-  — would need `scoreFn(score, ctx)` or `kind: 'modifier'`
-- Dynamic tag strings (`📗BID:Nx`) — needs `tagFn(ctx)`
-- Compound rules reading earlier rule outputs — needs two-pass
-- MACD histogram tie-breaker (tagless +3/-3) — could fit
-  `tag: null` weights but felt out of scope
+- Multi-tag tier rules (whaleWave A/B/C/D) — would need
+  `tagFn(ctx) => string | string[]` shape extension
+- Non-additive scoring (P&D KILL → score floor at -100) — would
+  need `scoreFn(score, ctx) => newScore` or `kind: 'modifier'`
+- Dynamic tag strings (`📗BID:Nx`, `📗snap:Nx`,
+  `🐋✨WHALE_TARGET:N`, `🐋WHALE_ACTIVE:N`) — needs `tagFn(ctx)`
+- Compound rules reading earlier rule outputs (none in current
+  code, but a hypothetical extension would need a two-pass evaluator)
+- MACD histogram tie-breaker (tagless +3/-3) — now COULD fit
+  the registry as `tag: null` rules (precedent set by PR F's
+  CHANGE*PENALTY*\* and PR H's BTC_NOT_OK_PENALTY); kept inline
+  as the only inline scoring left on the server
+
+Remaining client-only inline rules not migrated:
+
+- `📊CVD_BUY` migrated in PR H ✓
+- `📘BID_PRESS` (bookTickers) — simple, could migrate next batch
+- `📈OI_BUILD`, `OI↑` (oiHistory time-series) — needs ctx
+  carrying oiHistory; harder to migrate without shape extension
+- `🧠SMART` (topTradersLS positions) — compound condition
+- `▲▲` (prediction sc) — depends on a prediction engine
+- `💥LIQ_SHORT` (liquidationData) — time-windowed aggregation
+- Coinbase Premium / Bitfinex / DEX-CEX (xex.signals) — array-
+  based signal sets, needs `tagFn` or compound condition
 
 Documented in `src/scoring-rules.js` header.
 
@@ -111,13 +133,18 @@ Expected user-visible changes after deploy:
 
 ## Numbers
 
-- Tests: 700 (pre-session) → **746** (+46)
-- Registry rules: 6 (pre-session) → **20** (+14)
-- PRs merged: **11** (+1 docs in flight)
+- Tests: 700 (pre-session) → **767** (+67)
+- Registry rules: 6 (pre-session) → **35** (+29)
+- PRs merged: **17** (#110 pre-deployed + #112-#123)
+- Inline-rule deletions: ~25+ blocks across `src/scanner-engine.js`
+  and `app.js quickScan`
 - New observability tags: `📡SRV`, `🛑SRV_DEMOTE`, `📐ATR_T1`
 - New env flag: `SCANNER_TIER_AWARE_ATR_ZONES` (default ON, PR #110)
-- New localStorage flag wired (Phase 0 reservation): `nxScannerFix_server_signals`
-- Reviewer BLOCKERs caught + fixed: **3 real BLOCKERs** + several NITs
+- New localStorage flag wired (Phase 0 reservation):
+  `nxScannerFix_server_signals`
+- Reviewer BLOCKERs caught + fixed: **4 real BLOCKERs** + several NITs.
+  All would have shipped silently if not for parallel reviewers
+  (CI alone passed every BLOCKER PR).
 
 ## Status of the original 16-phase audit plan
 

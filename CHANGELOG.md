@@ -1,5 +1,116 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.1 PR F — VOL chain + change-band migration] — 2026-05-20
+
+**Server-side AND client-side: NO BEHAVIOUR CHANGE.** Seven more
+rules join the unified registry. The VOL chain (MEGA / HIGH /
+NORMAL — 3 of the 4 client tiers; the 4th `📊vol` lowercase
+stays inline because the server never had it) plus the four
+change-band rules (RISING / LATE / late-penalty-GT3 /
+late-penalty-GT5) are now declarative.
+
+### Rules added (7)
+
+| Rule | Weight | Tag | Condition |
+|---|---|---|---|
+| `VOL_MEGA` | +25 | `🔥MEGA_VOL` | `volume > 1e9` |
+| `VOL_HIGH` | +18 | `📊HIGH_VOL` | `volume > 1e8 && volume <= 1e9` |
+| `VOL_NORMAL` | +10 | `📊VOL` | `volume > 3e7 && volume <= 1e8` |
+| `CHANGE_RISING` | +8 | `📈RISING` | `change >= 3 && change < 5` |
+| `CHANGE_LATE` | −5 | `⚠️LATE` | `change >= 5 && change < 8` |
+| `CHANGE_PENALTY_GT3` | −15 | **null** (tagless) | `change > 3` |
+| `CHANGE_PENALTY_GT5` | −30 | **null** (tagless) | `change > 5` |
+
+### VOL chain — server vs client divergence preserved
+
+The client has a 4th tier `📊vol` (lowercase) at weight 5 for
+`volume in (1e7, 3e7]` that the server NEVER had. Pre-PR-F the
+two sides agreed on tiers 1-3 (MEGA/HIGH/NORMAL) and diverged
+on tier 4. Migrating tier 4 to the registry would add `+5` to
+server scoring on every coin in that volume range — a behaviour
+change. **PR F preserves the divergence**: the 3 shared tiers
+are in the registry, the 4th `📊vol` stays inline on the client
+(now the ONLY inline scoring rule the client carries besides
+the P&D detector and a few dynamic-tag rules).
+
+### Change-band rules — INDEPENDENT, not mutually exclusive
+
+Pre-PR-F the inline code had:
+```js
+if (change >= 3 && change < 5) score += 8; tags.push('📈RISING');
+if (change >= 5 && change < 8) score -= 5; tags.push('⚠️LATE');
+if (change > 3) score -= 15;
+if (change > 5) score -= 30;
+```
+
+Note that RISING/LATE are mutually exclusive (disjoint change
+ranges), but the late-penalty rules OVERLAP with both. The
+registry models this as 4 INDEPENDENT rules — there's no
+mutual-exclusion gate because the inline behaviour was already
+"each fires independently when its condition matches". The
+overlapping combinations a `change` value can trigger:
+
+| change | Rules fired | Total |
+|---|---|---|
+| 3 | RISING only | +8 |
+| 3.1 | RISING + PENALTY_GT3 | -7 |
+| 4 | RISING + PENALTY_GT3 | -7 |
+| 5 | LATE + PENALTY_GT3 | -20 |
+| 5.1 | LATE + PENALTY_GT3 + PENALTY_GT5 | -50 |
+| 6 | LATE + PENALTY_GT3 + PENALTY_GT5 | -50 |
+| 8 | PENALTY_GT3 + PENALTY_GT5 only | -45 |
+| 10 | PENALTY_GT3 + PENALTY_GT5 only | -45 |
+
+`CHANGE_PENALTY_*` rules use `tag: null` per the rule shape (the
+registry has supported tagless rules since PR A).
+
+### Files changed
+
+- `src/scoring-rules.js` — adds 7 rules at the end of `RULES`
+  (after MACD_BEAR_CROSS).
+- `src/scanner-engine.js` — DELETES the inline VOL chain (was
+  lines 366-375) and the inline change bands + late penalties
+  (was lines 354-363).
+- `app.js quickScan` — DELETES the inline 3 VOL tiers (was
+  2629-2631), inline change bands (was 2623-2627). KEEPS the
+  4th tier `📊vol` line gated to `(d.v > 1e7 && d.v <= 3e7)`.
+  Adds 7 new rule IDs to the forEach list. Defensive fallback
+  extended to mirror the new inline-equivalent logic for
+  registry-load failure parity.
+- `tests/scoring-rules.test.js` — **+9 tests**:
+  - VOL_MEGA / VOL_HIGH / VOL_NORMAL per-rule contract (3)
+  - VOL chain exhaustive mutual exclusion across 12 volume
+    samples (1)
+  - CHANGE_RISING / CHANGE_LATE / CHANGE_PENALTY_GT3 /
+    CHANGE_PENALTY_GT5 per-rule contract (4)
+  - CHANGE overlap matrix (independent-rule additive behaviour)
+    end-to-end via applyRules (1)
+  Plus updates to 10 existing applyRules tests that need the
+  VOL_NORMAL +10 added to their expected scores.
+
+### Verification
+
+- `npm run check` — 755/755 tests pass (+9 over PR E's 746).
+- Server-side regression: `tests/scanner-engine.test.js` still
+  passes (the inline deletions are compensated by the registry
+  rules running on the same ctx).
+
+### Rollback
+
+No behaviour change. To revert: `git revert <merge-commit>`.
+
+### Parity ratchet status — extended beyond the original plan
+
+The original audit plan was Phase A through Phase E. PR F adds
+this 7-rule batch on top of that — pure parity-ratchet hygiene.
+Remaining inline rules in app.js / scanner-engine.js use
+patterns that don't fit the current rule shape (dynamic tag
+suffixes like `📗BID:Nx`, multi-tag whale waves, non-additive
+scoring like P&D KILL). Those need shape extensions (`tagFn`,
+`scoreFn`) before migration.
+
+After PR F the registry holds **27 rules** (was 20 pre-PR-F).
+
 ## [Scanner Phase 2.A.1 PR D — FR / LS / coinalyzeFR migration] — 2026-05-20
 
 **Server-side AND client-side: NO BEHAVIOUR CHANGE.** Bit-for-bit

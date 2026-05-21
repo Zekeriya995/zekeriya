@@ -339,6 +339,79 @@ const RULES = Object.freeze([
     tag: '📊MACD_BEAR',
     condition: (ctx) => ctx.macdCross === 'bear',
   }),
+  /* Phase 2.A.1 PR F — VOL chain + change-band rules.
+     All 7 rules below were inline on BOTH sides pre-PR-F with
+     identical logic (volume tiers + change-magnitude bands +
+     late-entry penalties). Bit-for-bit equivalent migration.
+
+     The 3 VOL_* rules form a mutually-exclusive precedence chain
+     (same Option-C pattern as TIER1>TIER2>NEW and FR_*):
+       volume in (1e9, ∞):       VOL_MEGA fires (+25)
+       volume in (1e8, 1e9]:     VOL_HIGH fires (+18)
+       volume in (3e7, 1e8]:     VOL_NORMAL fires (+10)
+       volume in (0, 3e7]:       none fire (matches the inline
+                                  `else if` drop-through; server
+                                  has no 4th tier, and the client
+                                  retains its '📊vol' lowercase
+                                  tier inline because the server
+                                  never emitted it — divergent on
+                                  purpose).
+
+     The CHANGE_* rules are INDEPENDENT, not mutually exclusive.
+     They model the pre-PR-F overlapping inline behaviour exactly:
+       change in [3, 5):  CHANGE_RISING (+8, '📈RISING')
+                          + CHANGE_PENALTY_GT3 (-15, no tag)
+       change in [5, 8):  CHANGE_LATE (-5, '⚠️LATE')
+                          + CHANGE_PENALTY_GT3 (-15) + CHANGE_PENALTY_GT5 (-30)
+       change > 8:        CHANGE_PENALTY_GT3 (-15) + CHANGE_PENALTY_GT5 (-30)
+                          (RISING/LATE don't fire above 8)
+       change = 3:        CHANGE_RISING only (`> 3` doesn't fire)
+       change < 3:        nothing fires
+     CHANGE_PENALTY_GT3 and CHANGE_PENALTY_GT5 are tagless
+     score-only rules — they use `tag: null` per the rule shape
+     (already supported by applyRules). */
+  Object.freeze({
+    id: 'VOL_MEGA',
+    weight: 25,
+    tag: '🔥MEGA_VOL',
+    condition: (ctx) => ctx.volume > 1e9,
+  }),
+  Object.freeze({
+    id: 'VOL_HIGH',
+    weight: 18,
+    tag: '📊HIGH_VOL',
+    condition: (ctx) => ctx.volume > 1e8 && ctx.volume <= 1e9,
+  }),
+  Object.freeze({
+    id: 'VOL_NORMAL',
+    weight: 10,
+    tag: '📊VOL',
+    condition: (ctx) => ctx.volume > 3e7 && ctx.volume <= 1e8,
+  }),
+  Object.freeze({
+    id: 'CHANGE_RISING',
+    weight: 8,
+    tag: '📈RISING',
+    condition: (ctx) => ctx.change >= 3 && ctx.change < 5,
+  }),
+  Object.freeze({
+    id: 'CHANGE_LATE',
+    weight: -5,
+    tag: '⚠️LATE',
+    condition: (ctx) => ctx.change >= 5 && ctx.change < 8,
+  }),
+  Object.freeze({
+    id: 'CHANGE_PENALTY_GT3',
+    weight: -15,
+    tag: null,
+    condition: (ctx) => ctx.change > 3,
+  }),
+  Object.freeze({
+    id: 'CHANGE_PENALTY_GT5',
+    weight: -30,
+    tag: null,
+    condition: (ctx) => ctx.change > 5,
+  }),
 ]);
 
 /* applyRules(ctx) — pure function. Runs every rule against the ctx

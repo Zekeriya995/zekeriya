@@ -161,14 +161,16 @@ test('TIER2_BONUS — does NOT fire when isTier1=true even if isTier2=true (TIER
 test('applyRules — TIER1∩TIER2 overlap coin scores +10 (TIER1 only), NOT +15', () => {
   /* End-to-end regression: a BTC-shaped ctx that's both tier-1
      AND in the client's tier-2 list should produce the same
-     score as before PR C (+10 from TIER1_BONUS only). If a
-     future refactor inadvertently removes the precedence gate
-     on TIER2_BONUS, this test catches it. */
+     TIER bonus as before PR C (+10 from TIER1_BONUS only — NOT
+     +15 with TIER2 stacked). If a future refactor inadvertently
+     removes the precedence gate on TIER2_BONUS, this test catches
+     it. (Total score also includes VOL_NORMAL +10 after PR F.) */
   const out = applyRules({ isTier1: true, isTier2: true, volume: 6e7, change: 1.5 });
   /* Score: TIER1 (+10) + SILENT_ACC (+25, since 6e7>5e7 and
      abs(1.5)<2) + EARLY_ENTRY (+20, since 6e7>3e7 and 1.5 in
-     [0.3, 2)). NO TIER2, NO NEW. Total = 55. */
-  assert.equal(out.scoreDelta, 55);
+     [0.3, 2)) + VOL_NORMAL (+10, since 6e7>3e7 and <=1e8 — PR F).
+     NO TIER2, NO NEW, NO CHANGE_* (change=1.5 < 3). Total = 65. */
+  assert.equal(out.scoreDelta, 65);
   assert.ok(out.tagsDelta.includes('🏆TOP100'), 'must carry TIER1 tag');
   assert.ok(!out.tagsDelta.includes('🥈T2'), 'must NOT carry TIER2 tag on overlap');
   assert.ok(!out.tagsDelta.includes('🔍NEW'), 'must NOT carry NEW tag');
@@ -203,15 +205,14 @@ test('TIER1 / TIER2 / NEW — three-way mutual exclusion (client ctx)', () => {
   }
 });
 
-test('applyRules — tier-2 client coin scores +5 (not +5+2)', () => {
+test('applyRules — tier-2 client coin scores TIER2 only (NOT TIER2+NEW)', () => {
   /* End-to-end check via applyRules: a tier-2 coin at $80M and
-     +0.5% should fire TIER2_BONUS (+5), SILENT_ACC (+25),
-     EARLY_ENTRY (+20). Total +50. Without the !== true gate on
-     NEW_BONUS, it would also +2 to +52 — that's the regression
-     this PR guards against. */
+     +0.5% should fire TIER2_BONUS (+5, NOT +5+2 — the !== true
+     gate on NEW_BONUS prevents that), SILENT_ACC (+25),
+     EARLY_ENTRY (+20), VOL_NORMAL (+10, PR F). Total = 60. */
   const out = applyRules({ isTier1: false, isTier2: true, volume: 8e7, change: 0.5 });
-  assert.equal(out.scoreDelta, 50);
-  assert.deepEqual(out.tagsDelta.sort(), ['🥈T2', '🐋ACC', '🔍EARLY'].sort());
+  assert.equal(out.scoreDelta, 60);
+  assert.deepEqual(out.tagsDelta.sort(), ['🥈T2', '🐋ACC', '🔍EARLY', '📊VOL'].sort());
 });
 
 test('SILENT_ACCUMULATION — fires on high volume + small change', () => {
@@ -377,11 +378,14 @@ test('applyRules — server full FR/LS coin sums all 4 FR/LS rules', () => {
   });
   /* TIER1 (10) + SILENT_ACC (25, 8e7>5e7, abs(1)<2) + EARLY_ENTRY (20,
      8e7>3e7, 1 in [0.3,2)) + FR_VERY_NEG (12) + LS_SHORTS (10) +
-     COINALYZE_FR_NEG (8) = 85. STEALTH does NOT fire (8e7 not > 8e7). */
-  assert.equal(out.scoreDelta, 85);
+     COINALYZE_FR_NEG (8) + VOL_NORMAL (10, PR F) = 95.
+     STEALTH does NOT fire (8e7 not > 8e7).
+     CHANGE_* does NOT fire (change=1 < 3). */
+  assert.equal(out.scoreDelta, 95);
   assert.ok(out.tagsDelta.includes('FR⬇️'));
   assert.ok(out.tagsDelta.includes('🩳SHORTS'));
   assert.ok(out.tagsDelta.includes('🌐FR_NEG'));
+  assert.ok(out.tagsDelta.includes('📊VOL'));
 });
 
 test('applyRules — client ctx (no coinalyzeFR) skips COINALYZE_FR_NEG cleanly', () => {
@@ -397,8 +401,9 @@ test('applyRules — client ctx (no coinalyzeFR) skips COINALYZE_FR_NEG cleanly'
     lsRatio: 0.5,
     /* no coinalyzeFRRate */
   });
-  /* NEW (2) + SILENT_ACC (25) + EARLY (20) + FR_VERY_NEG (12) + LS_SHORTS (10) = 69 */
-  assert.equal(out.scoreDelta, 69);
+  /* NEW (2) + SILENT_ACC (25) + EARLY (20) + FR_VERY_NEG (12) +
+     LS_SHORTS (10) + VOL_NORMAL (10, PR F) = 79. */
+  assert.equal(out.scoreDelta, 79);
   assert.ok(!out.tagsDelta.includes('🌐FR_NEG'), 'client must NOT see server-only tag');
 });
 
@@ -521,8 +526,10 @@ test('MACD_BEAR_CROSS — fires only on macdCross === "bear"', () => {
 test('applyRules — full MTF bullish + RSI oversold + MACD bull cross sums correctly', () => {
   /* Tier-1 BTC-shaped ctx with all three momentum confirmations:
      TIER1 (+10) + SILENT_ACC (+25) + EARLY (+20) + MTF_BULL_FULL (+15)
-     + RSI_OS (+10) + MACD_BULL_CROSS (+12) = +92.
-     STEALTH does NOT fire (8e7 not > 8e7, strict). */
+     + RSI_OS (+10) + MACD_BULL_CROSS (+12) + VOL_NORMAL (+10, PR F)
+     = +102.
+     STEALTH does NOT fire (8e7 not > 8e7, strict).
+     CHANGE_* does NOT fire (change=0.5 < 3). */
   const out = applyRules({
     isTier1: true,
     volume: 8e7,
@@ -532,7 +539,7 @@ test('applyRules — full MTF bullish + RSI oversold + MACD bull cross sums corr
     rsi: 25,
     macdCross: 'bull',
   });
-  assert.equal(out.scoreDelta, 92);
+  assert.equal(out.scoreDelta, 102);
   assert.ok(out.tagsDelta.includes('🎯MTF_BULL'));
   assert.ok(out.tagsDelta.includes('📉RSI_OS'));
   assert.ok(out.tagsDelta.includes('📊MACD_BULL'));
@@ -545,8 +552,9 @@ test('applyRules — client ctx (no MTF/RSI/MACD fields) skips all 8 rules', () 
      these values in quickScan, so PR E must NOT change client
      scoring. */
   const out = applyRules({ isTier1: false, isTier2: false, volume: 8e7, change: 1 });
-  /* NEW (2) + SILENT_ACC (25, 8e7>5e7 && abs(1)<2) + EARLY (20). Total = 47. */
-  assert.equal(out.scoreDelta, 47);
+  /* NEW (2) + SILENT_ACC (25, 8e7>5e7 && abs(1)<2) + EARLY (20) +
+     VOL_NORMAL (10, PR F). Total = 57. */
+  assert.equal(out.scoreDelta, 57);
   for (const t of [
     '🎯MTF_BULL',
     '🎯MTF_BULL_2',
@@ -561,36 +569,166 @@ test('applyRules — client ctx (no MTF/RSI/MACD fields) skips all 8 rules', () 
   }
 });
 
+/* ─── Phase 2.A.1 PR F — VOL chain + change-band rules ───────── */
+
+test('VOL_MEGA — fires on volume > 1e9', () => {
+  assert.equal(fire('VOL_MEGA', { volume: 2e9 }), true);
+  /* Boundary: exactly 1e9 does NOT fire (strict >). */
+  assert.equal(fire('VOL_MEGA', { volume: 1e9 }), false);
+  const r = RULES.find((r) => r.id === 'VOL_MEGA');
+  assert.equal(r.weight, 25);
+  assert.equal(r.tag, '🔥MEGA_VOL');
+});
+
+test('VOL_HIGH — fires on volume in (1e8, 1e9]', () => {
+  assert.equal(fire('VOL_HIGH', { volume: 5e8 }), true);
+  assert.equal(fire('VOL_HIGH', { volume: 1e9 }), true); /* upper inclusive */
+  /* Boundary: exactly 1e8 does NOT fire (strict >). */
+  assert.equal(fire('VOL_HIGH', { volume: 1e8 }), false);
+  assert.equal(fire('VOL_HIGH', { volume: 2e9 }), false); /* above range */
+  const r = RULES.find((r) => r.id === 'VOL_HIGH');
+  assert.equal(r.weight, 18);
+  assert.equal(r.tag, '📊HIGH_VOL');
+});
+
+test('VOL_NORMAL — fires on volume in (3e7, 1e8]', () => {
+  assert.equal(fire('VOL_NORMAL', { volume: 5e7 }), true);
+  assert.equal(fire('VOL_NORMAL', { volume: 1e8 }), true); /* upper inclusive */
+  /* Boundary: exactly 3e7 does NOT fire (strict >). */
+  assert.equal(fire('VOL_NORMAL', { volume: 3e7 }), false);
+  assert.equal(fire('VOL_NORMAL', { volume: 5e8 }), false); /* above range */
+  const r = RULES.find((r) => r.id === 'VOL_NORMAL');
+  assert.equal(r.weight, 10);
+  assert.equal(r.tag, '📊VOL');
+});
+
+test('VOL chain — exactly one rule fires across the volume spectrum', () => {
+  /* The 3 server VOL tiers form a mutually-exclusive precedence
+     chain by their disjoint ranges (the client's lowercase
+     '📊vol' tier in (1e7, 3e7] stays inline). Verify exhaustively. */
+  const samples = [
+    { volume: 5e9, expected: 'VOL_MEGA' },
+    { volume: 2e9, expected: 'VOL_MEGA' },
+    { volume: 1.1e9, expected: 'VOL_MEGA' },
+    { volume: 1e9, expected: 'VOL_HIGH' } /* upper boundary */,
+    { volume: 5e8, expected: 'VOL_HIGH' },
+    { volume: 1.1e8, expected: 'VOL_HIGH' },
+    { volume: 1e8, expected: 'VOL_NORMAL' } /* upper boundary */,
+    { volume: 5e7, expected: 'VOL_NORMAL' },
+    { volume: 3.1e7, expected: 'VOL_NORMAL' },
+    { volume: 3e7, expected: null } /* server has no 4th tier */,
+    { volume: 2e7, expected: null } /* client emits '📊vol' inline; registry does not */,
+    { volume: 5e6, expected: null },
+  ];
+  for (const { volume, expected } of samples) {
+    const fired = ['VOL_MEGA', 'VOL_HIGH', 'VOL_NORMAL'].filter((id) => fire(id, { volume }));
+    if (expected) {
+      assert.deepEqual(fired, [expected], `volume=${volume}`);
+    } else {
+      assert.deepEqual(fired, [], `volume=${volume} should fire nothing`);
+    }
+  }
+});
+
+test('CHANGE_RISING — fires on change in [3, 5)', () => {
+  assert.equal(fire('CHANGE_RISING', { change: 3 }), true);
+  assert.equal(fire('CHANGE_RISING', { change: 4 }), true);
+  /* Boundary: exactly 5 does NOT fire (strict <). */
+  assert.equal(fire('CHANGE_RISING', { change: 5 }), false);
+  /* Below 3 does not fire. */
+  assert.equal(fire('CHANGE_RISING', { change: 2.9 }), false);
+  const r = RULES.find((r) => r.id === 'CHANGE_RISING');
+  assert.equal(r.weight, 8);
+  assert.equal(r.tag, '📈RISING');
+});
+
+test('CHANGE_LATE — fires on change in [5, 8)', () => {
+  assert.equal(fire('CHANGE_LATE', { change: 5 }), true);
+  assert.equal(fire('CHANGE_LATE', { change: 7.9 }), true);
+  /* Boundary: exactly 8 does NOT fire (strict <). */
+  assert.equal(fire('CHANGE_LATE', { change: 8 }), false);
+  /* Below 5 does not fire. */
+  assert.equal(fire('CHANGE_LATE', { change: 4.9 }), false);
+  const r = RULES.find((r) => r.id === 'CHANGE_LATE');
+  assert.equal(r.weight, -5);
+  assert.equal(r.tag, '⚠️LATE');
+});
+
+test('CHANGE_PENALTY_GT3 — fires on change > 3 (independent overlap with RISING/LATE)', () => {
+  assert.equal(fire('CHANGE_PENALTY_GT3', { change: 3.1 }), true);
+  assert.equal(fire('CHANGE_PENALTY_GT3', { change: 100 }), true);
+  /* Boundary: exactly 3 does NOT fire (strict >). */
+  assert.equal(fire('CHANGE_PENALTY_GT3', { change: 3 }), false);
+  const r = RULES.find((r) => r.id === 'CHANGE_PENALTY_GT3');
+  assert.equal(r.weight, -15);
+  assert.equal(r.tag, null); /* tagless score-only adjustment */
+});
+
+test('CHANGE_PENALTY_GT5 — fires on change > 5 (independent overlap with LATE)', () => {
+  assert.equal(fire('CHANGE_PENALTY_GT5', { change: 5.1 }), true);
+  /* Boundary: exactly 5 does NOT fire (strict >). */
+  assert.equal(fire('CHANGE_PENALTY_GT5', { change: 5 }), false);
+  const r = RULES.find((r) => r.id === 'CHANGE_PENALTY_GT5');
+  assert.equal(r.weight, -30);
+  assert.equal(r.tag, null);
+});
+
+test('CHANGE rules — overlapping combinations match the pre-PR-F inline behaviour', () => {
+  /* Verify the additive-overlap behaviour the inline if-chain had:
+       change=4   : RISING (+8) + PENALTY_GT3 (-15)               = -7
+       change=6   : LATE (-5)  + PENALTY_GT3 (-15) + PENALTY_GT5  = -50
+       change=10  : just PENALTY_GT3 + PENALTY_GT5 (RISING/LATE  = -45
+                    don't fire above 8)
+       change=3   : RISING only (penalty needs > 3)                = +8
+       change=5   : LATE only (penalty needs > 5; penalty_gt3      = -5+(-15) = -20
+                    catches it because 5 > 3, but penalty_gt5
+                    needs > 5 strictly)
+     Just exercise applyRules for these edge cases. Bound contracts
+     pinned individually above; this is the overlap matrix. */
+  /* change=4 */
+  let out = applyRules({ isTier1: false, isTier2: false, volume: 1e6, change: 4 });
+  /* NEW (2) + RISING (8) + PENALTY_GT3 (-15) = -5 */
+  assert.equal(out.scoreDelta, -5);
+  /* change=6 */
+  out = applyRules({ isTier1: false, isTier2: false, volume: 1e6, change: 6 });
+  /* NEW (2) + LATE (-5) + PENALTY_GT3 (-15) + PENALTY_GT5 (-30) = -48 */
+  assert.equal(out.scoreDelta, -48);
+});
+
 /* ─── applyRules — aggregate behavior ─────────────────────────── */
 
 test('applyRules — TIER1 coin with high vol + flat change fires multiple rules', () => {
-  /* BTC-shaped: tier1, $80M volume, 0.5% change. Expected:
-     TIER1_BONUS (+10), SILENT_ACC (+25), EARLY_ENTRY (+20),
-     STEALTH (+15). NEW_BONUS does NOT fire (mutually exclusive
-     with TIER1). Total = 70. */
+  /* BTC-shaped: tier1, $80M volume, 0.5% change. */
   const out = applyRules({ isTier1: true, volume: 8e7, change: 0.5 });
   /* Volume 8e7 is NOT > 8e7 (strict >), so STEALTH does not fire.
      Recompute: TIER1 (10) + SILENT_ACC (25, since 8e7 > 5e7 and
      abs(0.5) < 2) + EARLY_ENTRY (20, since 8e7 > 3e7 and 0.5 in
-     [0.3, 2)). NEW_BONUS doesn't fire. Total = 55. */
-  assert.equal(out.scoreDelta, 55);
-  assert.deepEqual(out.tagsDelta.sort(), ['🏆TOP100', '🐋ACC', '🔍EARLY'].sort());
+     [0.3, 2)) + VOL_NORMAL (10, since 8e7 > 3e7 && <=1e8 — PR F).
+     NEW_BONUS doesn't fire. CHANGE_* doesn't fire (change=0.5 < 3).
+     Total = 65. */
+  assert.equal(out.scoreDelta, 65);
+  assert.deepEqual(out.tagsDelta.sort(), ['🏆TOP100', '🐋ACC', '🔍EARLY', '📊VOL'].sort());
 });
 
 test('applyRules — STEALTH fires at volume just above 8e7', () => {
   const out = applyRules({ isTier1: false, volume: 8.5e7, change: 1 });
-  /* NEW_BONUS (2) + SILENT_ACC (25) + EARLY_ENTRY (20) + STEALTH (15)
-     = 62. */
-  assert.equal(out.scoreDelta, 62);
+  /* NEW (2) + SILENT_ACC (25) + EARLY (20) + STEALTH (15) +
+     VOL_NORMAL (10, 8.5e7 in (3e7, 1e8] — PR F) = 72. */
+  assert.equal(out.scoreDelta, 72);
   assert.ok(out.tagsDelta.includes('🔍STEALTH'));
   assert.ok(out.tagsDelta.includes('🔍NEW'));
+  assert.ok(out.tagsDelta.includes('📊VOL'));
 });
 
-test('applyRules — no rules fire on a thin / quiet ticker', () => {
-  /* Low volume, big move → none of these 5 rules apply. */
+test('applyRules — thin / quiet ticker fires only the tier bonus + late penalties', () => {
+  /* Low volume (1e6 < 3e7, no VOL rule fires), big move (change=10
+     > 5 → CHANGE_PENALTY_GT3 -15 AND CHANGE_PENALTY_GT5 -30; but
+     change >= 8 so RISING/LATE do NOT fire). */
   const out = applyRules({ isTier1: false, volume: 1e6, change: 10 });
-  /* NEW_BONUS still fires (it's a flat bonus on non-tier-1). */
-  assert.equal(out.scoreDelta, 2);
+  /* NEW (2) + CHANGE_PENALTY_GT3 (-15, tagless) +
+     CHANGE_PENALTY_GT5 (-30, tagless) = -43. No VOL_*
+     (1e6 < 3e7), no RISING/LATE (change >= 8). */
+  assert.equal(out.scoreDelta, -43);
   assert.deepEqual(out.tagsDelta, ['🔍NEW']);
 });
 
@@ -702,18 +840,16 @@ test('FALLING_KNIFE — does NOT fire when change is missing or non-numeric', ()
 });
 
 test('FALLING_KNIFE — penalty drops a STRONG-scoring coin below the gate', () => {
-  /* SAGA-shaped: tier-1ish high volume, change = -15. Net score
-     before this rule: TIER1 (10) + SILENT_ACC (would fire on |change|<2
-     → no, change=-15 is far from flat → does NOT fire) + VOL bonuses
-     in other rules... but FALLING_KNIFE adds -50. Walk the applyRules
-     output explicitly. */
+  /* SAGA-shaped: tier-1ish high volume, change = -15. */
   const ctx = { isTier1: true, volume: 1e8, change: -15 };
   const out = applyRules(ctx);
-  /* TIER1_BONUS (+10) and FALLING_KNIFE (-50) → net -40.
+  /* TIER1_BONUS (+10) + FALLING_KNIFE (-50) + VOL_NORMAL (+10,
+     1e8 in (3e7, 1e8] strict-inclusive upper — PR F) = -30.
      SILENT_ACC needs |change|<2 → does NOT fire on -15.
      EARLY_ENTRY needs change in [0.3, 2) → does NOT fire on -15.
-     STEALTH needs change in [0.5, 3) → does NOT fire on -15. */
-  assert.equal(out.scoreDelta, -40);
+     STEALTH needs change in [0.5, 3) → does NOT fire on -15.
+     CHANGE_* needs change > 3 → does NOT fire on -15. */
+  assert.equal(out.scoreDelta, -30);
   assert.ok(out.tagsDelta.includes('🏆TOP100'));
   assert.ok(out.tagsDelta.includes('🔪FALLING'));
 });

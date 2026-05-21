@@ -927,6 +927,21 @@ function qualityFilterRejectReason(r, ctx) {
   if (ctx.priceAtDetection && ctx.priceAtDetection > 0) {
     var drift = ((r.p - ctx.priceAtDetection) / ctx.priceAtDetection) * 100;
     if (drift > 8) return 'drift';
+    /* Stale-drawdown gate. The original drift > 8 check only catches
+       the "missed the move up" case. But a signal whose price has
+       DROPPED significantly since detection is equally bad —
+       represents a setup that has broken since we identified it.
+       The user-visible case that motivated this gate: ETH detected
+       at $2,363 with a "STRONG signal" verdict, but by the time
+       the user sees the card the price is $2,134 (-9.7% from
+       detection). The card still showed "🟢 إشارة قوية" because
+       the score formula doesn't penalise downward drift.
+       Threshold -5% mirrors the freshness=old cutoff in app.js
+       deepAnalyze (Math.abs(_changeDet) > 5). Symmetric with the
+       upward drift > 8 gate's spirit; the asymmetric magnitude
+       (5 vs 8) reflects that downward drift is more dangerous —
+       we're chasing a falling setup, not just a missed pump. */
+    if (drift < -5) return 'stale-drawdown';
   }
   return null;
 }

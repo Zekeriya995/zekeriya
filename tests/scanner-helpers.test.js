@@ -1385,6 +1385,75 @@ test('qualityFilterRejectReason — drift-from-detection gate (>8%)', () => {
   assert.equal(qualityFilterRejectReason({ ...base, p: 110 }, { priceAtDetection: 100 }), 'drift');
 });
 
+/* ─── 2026-05-21 stale-drawdown gate ─────────────────────────────
+   The original drift gate above only catches +8% drift (missed the
+   pump). A signal whose price has DROPPED significantly since
+   detection is equally bad — represents a broken setup the user
+   would chase. Motivating case: ETH detected at $2,363, current
+   price $2,134 (-9.7% from detection), but the card still showed
+   "🟢 إشارة قوية" because the score formula didn't penalise
+   downward drift. The gate now rejects drift < -5% with reason
+   'stale-drawdown'. */
+
+test('qualityFilterRejectReason — stale-drawdown gate (drift < -5%)', () => {
+  const base = {
+    c: 0,
+    passed: 5,
+    smartEntry: { rr: 3 },
+    pdFlags: 0,
+    tfAlign: { bearish4h: false },
+  };
+  /* -4.99% drift — does NOT fire (cutoff is strict <). */
+  assert.equal(
+    qualityFilterRejectReason({ ...base, p: 95.01 }, { priceAtDetection: 100 }),
+    null,
+    '-4.99% is the cutoff'
+  );
+  /* -5% drift exactly — does NOT fire (strict <). */
+  assert.equal(
+    qualityFilterRejectReason({ ...base, p: 95 }, { priceAtDetection: 100 }),
+    null,
+    '-5.0% is the boundary, NOT rejected'
+  );
+  /* -5.01% drift — fires. */
+  assert.equal(
+    qualityFilterRejectReason({ ...base, p: 94.99 }, { priceAtDetection: 100 }),
+    'stale-drawdown'
+  );
+  /* -9.7% — the ETH 2026-05-21 case. */
+  assert.equal(
+    qualityFilterRejectReason({ ...base, p: 2134.19 }, { priceAtDetection: 2363.56 }),
+    'stale-drawdown',
+    'ETH 2026-05-21 case: -9.7% drift must be rejected'
+  );
+  /* -20% (severe) — fires. */
+  assert.equal(
+    qualityFilterRejectReason({ ...base, p: 80 }, { priceAtDetection: 100 }),
+    'stale-drawdown'
+  );
+});
+
+test('qualityFilterRejectReason — drift gates are asymmetric (5 down, 8 up)', () => {
+  /* The thresholds are deliberately asymmetric: downward drift is
+     more dangerous (chasing a falling setup) than upward drift
+     (missed a pump). Pin the asymmetry as a contract so a future
+     refactor doesn't silently equalise them. */
+  const base = {
+    c: 0,
+    passed: 5,
+    smartEntry: { rr: 3 },
+    pdFlags: 0,
+    tfAlign: { bearish4h: false },
+  };
+  /* +7% drift — does NOT fire upward gate. */
+  assert.equal(qualityFilterRejectReason({ ...base, p: 107 }, { priceAtDetection: 100 }), null);
+  /* -7% drift — DOES fire downward gate. */
+  assert.equal(
+    qualityFilterRejectReason({ ...base, p: 93 }, { priceAtDetection: 100 }),
+    'stale-drawdown'
+  );
+});
+
 /* ─── INTEGRATION SUITE 3: end-to-end pipeline survivor invariant ──
    The composition of the gates should leave a known-good signal
    intact and reject any signal that fails any one gate. This is the

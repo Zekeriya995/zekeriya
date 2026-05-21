@@ -1,5 +1,105 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner — stale-signal display fix + downward-drift gate] — 2026-05-21
+
+**User-visible bug fix.** Closes the ETH 2026-05-21 screenshot
+case where a signal detected at $2,363 with current price
+$2,134 (-9.7% from detection) was still displayed as
+"🟢 إشارة قوية — فرصة حقيقية" alongside a "قد يكون متأخراً"
+warning. Three coordinated changes:
+
+### 1. New qualityFilter gate: `stale-drawdown`
+
+`src/scanner-helpers.js qualityFilterRejectReason` previously
+only rejected upward drift (`drift > 8`, "missed the pump").
+A signal whose price has DROPPED ≥5% from detection is now
+also rejected with reason `stale-drawdown`.
+
+Asymmetric thresholds (5% down, 8% up) by design: downward
+drift is more dangerous — chasing a falling setup is worse
+than missing a pump. Pinned by a dedicated test.
+
+The ETH case (-9.7%) is now blocked at the qualityFilter — it
+won't even render as a card. Test fixture uses the exact
+$2,363 → $2,134 numbers.
+
+### 2. Verdict block is now freshness-aware
+
+`app.js` signal-card render previously read only `s.conf` for
+the verdict line, so a score-80 signal showed "🟢 إشارة قوية"
+even when `freshness === 'old'`. Now the verdict downgrade
+ladder respects freshness:
+
+| Condition | Verdict |
+|---|---|
+| conf ≥ 85 + ULTRA + fresh | 🟢 إشارة ممتازة — ادخل بثقة |
+| conf ≥ 80 + fresh | 🟢 إشارة قوية — فرصة حقيقية |
+| conf ≥ 70 + (fresh OR warm) | 🟡 فرصة جيدة — ادخل بحذر |
+| freshness === 'old' (any conf) | ⚪ إشارة قديمة — للمراقبة فقط |
+| conf ≥ 55 | 🔵 إشارة متوسطة — للمراقبة |
+| else | ⚪ فرصة محتملة — راقب فقط |
+
+Stale signals now ALWAYS show the muted "for monitoring only"
+verdict, regardless of their raw score. The contradiction
+"green badge + late warning" can no longer happen.
+
+### 3. Timing label distinguishes re-emergence from fresh detection
+
+`app.js` timing block previously printed "ظهر منذ الآن" when
+`ageMinutes < 1`, even when the signal had been re-detected
+after `src/portfolio.js recSig` had reset `firstSeen` on the
+1h dormancy clause (preserving `priceAtDetection` for the
+drift gate — see the comment in `recSig`).
+
+Result: card claimed "appeared just now" while showing a
+detection price hours / days old. Now:
+
+```js
+const _isReEmergence = sigAge < 5 && Math.abs(sigDrift) >= 2;
+const ageText = _isReEmergence ? 'إعادة ظهور' : ...
+```
+
+When the age is fresh AND drift ≥2% the label switches to
+"إعادة ظهور" (re-emerged), clarifying that the signal is a
+return-after-dormancy rather than a brand-new detection.
+
+### Files changed
+
+- `src/scanner-helpers.js qualityFilterRejectReason`: +5 lines
+  for the downward-drift gate, with a doc-comment explaining
+  the ETH motivating case and the asymmetry rationale
+- `app.js` signal card render: 2 blocks updated (verdict ladder
+  + timing label)
+- `tests/scanner-helpers.test.js`: **+2 tests** pinning the
+  -5% boundary, -9.7% ETH case, and the asymmetric 5-vs-8
+  invariant
+
+### Verification
+
+- `npm run check` — 797/797 tests pass (+2).
+- Manual: after deploy + hard-refresh in browser, ETH-like
+  signals with drift < -5% no longer render as cards. Borderline
+  cases (-2% to -5% drift) render with the "إشارة قديمة" muted
+  verdict.
+
+### Rollback
+
+`git revert <merge-commit>`. The drift gate has the same shape
+as the original (just one extra `if`); reverting is trivial.
+
+### Future considerations (not in this PR)
+
+- The fast-mode signal type (10-30 min scalps) uses fixed
+  ±1.5%/-0.5% bounds regardless of ATR. In a -9.7%-dropped
+  market the -0.5% stop is too tight. A future PR could
+  tier-aware-ATR-ize fast-mode too.
+- `src/portfolio.js recSig` preserves `priceAtDetection`
+  across 1h dormancy resets. The qualityFilter and UX fixes
+  here mean the preservation is now strictly beneficial
+  (drift gate keeps protecting), but a future refactor could
+  split the data model into `firstDetectionPrice` (preserved)
+  and `lastSeenPrice` (updated) for cleaner semantics.
+
 ## [Scanner Phase 4 Part 3 — ctx-based hybrid attribution] — 2026-05-21
 
 **Server-side.** Extends `computeRuleAttribution` to **replay

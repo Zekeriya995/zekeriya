@@ -1754,11 +1754,27 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
       var _wrTxt=(lang==='ar'?'نجاح سابق ':'Past win rate ')+_wrBucket.rate+'% ('+_wrBucket.samples+')';
       _wrHTML='<div style="font-size:9px;color:'+_wrCol+';font-weight:700;margin-top:4px;text-align:center">🏆 '+_wrTxt+'</div>';
     }
-    /* Verdict (Part B) */
+    /* Verdict (Part B).
+       Freshness-aware downgrade (the ETH 2026-05-21 fix): a signal
+       whose detection price drifted significantly from the current
+       price OR whose firstSeen is hours old must NEVER carry the
+       "Excellent" or "Strong" verdict, regardless of its raw conf
+       score. The pre-fix UX showed "🟢 إشارة قوية" alongside the
+       "قد يكون متأخراً" warning — a contradiction the user could
+       reasonably trust the green badge over.
+
+       The qualityFilter (src/scanner-helpers.js) now rejects signals
+       with drift < -5% outright (reason 'stale-drawdown'), but
+       borderline cases (-2% to -5% drift, or 15-60min age) still
+       reach this block. For those we downgrade the verdict to
+       "monitor" / "watch only" so the green badge can't fire. */
     var verdict,vCol,vBg;
-    if(s.conf>=85&&s.ultra){verdict=lang==='ar'?'🟢 إشارة ممتازة — ادخل بثقة':'🟢 Excellent — Enter Now';vCol='var(--up)';vBg='rgba(0,255,136,.08)'}
-    else if(s.conf>=80){verdict=lang==='ar'?'🟢 إشارة قوية — فرصة حقيقية':'🟢 Strong Signal';vCol='var(--up)';vBg='rgba(0,255,136,.06)'}
-    else if(s.conf>=70){verdict=lang==='ar'?'🟡 فرصة جيدة — ادخل بحذر':'🟡 Good — Enter Carefully';vCol='var(--warn)';vBg='rgba(255,184,0,.04)'}
+    var _isStale=s.freshness==='old';
+    var _isWarm=s.freshness==='warm';
+    if(s.conf>=85&&s.ultra&&!_isStale&&!_isWarm){verdict=lang==='ar'?'🟢 إشارة ممتازة — ادخل بثقة':'🟢 Excellent — Enter Now';vCol='var(--up)';vBg='rgba(0,255,136,.08)'}
+    else if(s.conf>=80&&!_isStale&&!_isWarm){verdict=lang==='ar'?'🟢 إشارة قوية — فرصة حقيقية':'🟢 Strong Signal';vCol='var(--up)';vBg='rgba(0,255,136,.06)'}
+    else if(s.conf>=70&&!_isStale){verdict=lang==='ar'?'🟡 فرصة جيدة — ادخل بحذر':'🟡 Good — Enter Carefully';vCol='var(--warn)';vBg='rgba(255,184,0,.04)'}
+    else if(_isStale){verdict=lang==='ar'?'⚪ إشارة قديمة — للمراقبة فقط':'⚪ Stale — Watch Only';vCol='var(--t2)';vBg='rgba(56,72,96,.04)'}
     else if(s.conf>=55){verdict=lang==='ar'?'🔵 إشارة متوسطة — للمراقبة':'🔵 Moderate — Monitor';vCol='var(--blue)';vBg='rgba(91,156,255,.04)'}
     else{verdict=lang==='ar'?'⚪ فرصة محتملة — راقب فقط':'⚪ Watch Only';vCol='var(--t2)';vBg='rgba(56,72,96,.04)'}
     var wConf=0;var ww=whaleWaves[s.s];if(ww&&ww.engine)wConf=ww.engine.confidence||0;
@@ -1769,7 +1785,16 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
     var chkHTML='<div class="sc-checks-grid">';
     chkNames.forEach(function(cn,ci){var k=chkKeys[ci];var pass=s.checks&&s.checks[k];chkHTML+='<div class="sc-chk-i '+(pass?'pass':'fail')+'">'+(pass?'✅':'·')+' '+cn+'</div>'});
     chkHTML+='</div>';
-    /* ═══ NEW: Signal Timing Display ═══ */
+    /* ═══ NEW: Signal Timing Display ═══
+       Inconsistency fix (2026-05-21 ETH case): the previous code
+       printed "ظهر منذ الآن" (sigAge < 1 min) alongside a stale
+       priceAtDetection that could be hours old when
+       src/portfolio.js recSig had reset firstSeen on dormancy
+       but preserved priceAtDetection (deliberate, to keep the
+       drift gate working). When |drift| > 2% we know this is a
+       re-emergence case, not a fresh detection — relabel the
+       timing line accordingly so the user isn't told "just now"
+       for a signal whose detection price is far from current. */
     var sigAge=s.ageMinutes||0;
     var sigDrift=s.changeFromDetection||0;
     var sigFresh=s.freshness||'fresh';
@@ -1780,7 +1805,21 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
     else if(sigFresh==='warm'){timingLabel=lang==='ar'?'لا زالت فرصة':'Still an opportunity'}
     else{timingLabel=lang==='ar'?'قد يكون متأخراً':'May be too late'}
     var driftCol=Math.abs(sigDrift)<2?'var(--up)':Math.abs(sigDrift)<4?'var(--warn)':'var(--dn)';
-    var ageText=sigAge<1?(lang==='ar'?'الآن':'just now'):sigAge<60?(sigAge+(lang==='ar'?' دقيقة':'m ago')):(Math.floor(sigAge/60)+(lang==='ar'?' ساعة':'h ago'));
+    /* Re-emergence detection: small ageMinutes (< 5) but significant
+       drift means recSig just reset firstSeen on dormancy and the
+       priceAtDetection is from a previous session. Label as
+       re-emergence, not "just now". */
+    var _isReEmergence=sigAge<5&&Math.abs(sigDrift)>=2;
+    var ageText;
+    if(_isReEmergence){
+      ageText=lang==='ar'?'إعادة ظهور':'re-emerged';
+    } else if(sigAge<1){
+      ageText=lang==='ar'?'الآن':'just now';
+    } else if(sigAge<60){
+      ageText=sigAge+(lang==='ar'?' دقيقة':'m ago');
+    } else {
+      ageText=Math.floor(sigAge/60)+(lang==='ar'?' ساعة':'h ago');
+    }
     var timingHTML='<div class="signal-timing">'
       +'<div style="display:flex;flex-direction:column;gap:2px">'
       +'<span style="color:var(--t1)">🟢 '+(lang==='ar'?'ظهر منذ ':'Appeared ')+ageText+'</span>'
@@ -1805,7 +1844,12 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
     }
     h+='<div class="scan-card-bar" style="background:'+_tier.barColor+'"></div><div class="scan-card-body">'
       /* Header: rank + name + type + time + confidence */
-      +'<div class="sc-head"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--t3);font-weight:800">#'+(i+1)+'</span><div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">'+_whaleMarker+s.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+'</div><span class="sc-time '+(ta.cls==='fresh'?'fresh':'')+'">'+(ta.cls==='fresh'?'🆕 ':'⏱ ')+ta.text+'</span></div></div><div style="text-align:right"><div class="sc-badge" style="background:'+(s.conf>=70?'var(--ud)':s.conf>=55?'var(--bd)':'var(--wd)')+';color:'+(s.conf>=70?'var(--up)':s.conf>=55?'var(--blue)':'var(--warn)')+'">'+s.conf+'%</div><div style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+tCol+';font-weight:700;margin-top:3px">'+tLbl+'</div></div></div>'
+      /* Conf% badge color — must respect freshness too. Pre-fix the
+         badge glowed green (`var(--up)`) whenever conf >= 70, even
+         if the verdict line below was downgraded to "إشارة قديمة".
+         Mute the badge to grey for stale signals so the visual
+         signal matches the verdict (NIT from PR #130 review). */
+      +'<div class="sc-head"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--t3);font-weight:800">#'+(i+1)+'</span><div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">'+_whaleMarker+s.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+'</div><span class="sc-time '+(ta.cls==='fresh'?'fresh':'')+'">'+(ta.cls==='fresh'?'🆕 ':'⏱ ')+ta.text+'</span></div></div><div style="text-align:right"><div class="sc-badge" style="background:'+(_isStale?'rgba(56,72,96,.3)':(s.conf>=70?'var(--ud)':s.conf>=55?'var(--bd)':'var(--wd)'))+';color:'+(_isStale?'var(--t2)':(s.conf>=70?'var(--up)':s.conf>=55?'var(--blue)':'var(--warn)'))+'">'+s.conf+'%</div><div style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+tCol+';font-weight:700;margin-top:3px">'+tLbl+'</div></div></div>'
       /* ═══ NEW: Signal Timing Bar ═══ */
       +timingHTML
       /* Price */
@@ -6564,9 +6608,19 @@ function renderTop3(){
     else if(r.c>=0.5&&r.c<3){type=ar?'تجميع':'Accumulation';icon='📊'}
     else{type=ar?'فرصة':'Opportunity';icon='📈'}
 
-    /* ═══ Recommendation ═══ */
+    /* ═══ Recommendation ═══
+       VIP top-3 freshness gate (NIT from PR #130 review): the panel
+       has its own quality logic (signalQualityGate above) that does
+       NOT check drift/freshness, so without this guard a stale
+       ETH-like signal could survive the gate and show "💡 شراء قوي"
+       in the VIP cards while the Scanner tab below correctly
+       downgrades it. Mirror the same freshness-aware downgrade as
+       the Scanner verdict block: stale → muted "Watch Only"
+       regardless of raw conf. */
     var rec,recCol;
-    if(conf>=90){rec=ar?'💡 شراء قوي':'💡 Strong Buy';recCol='var(--up)'}
+    var _top3Stale=r.freshness==='old';
+    if(_top3Stale){rec=ar?'💡 إشارة قديمة — راقب فقط':'💡 Stale — Watch Only';recCol='var(--t2)'}
+    else if(conf>=90){rec=ar?'💡 شراء قوي':'💡 Strong Buy';recCol='var(--up)'}
     else if(conf>=80){rec=ar?'💡 فرصة ذهبية':'💡 Golden';recCol='var(--neon)'}
     else if(conf>=70){rec=ar?'💡 ادخل بحذر':'💡 Enter Carefully';recCol='var(--warn)'}
     else{rec=ar?'💡 راقب فقط':'💡 Watch Only';recCol='var(--t2)'}

@@ -1844,7 +1844,12 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
     }
     h+='<div class="scan-card-bar" style="background:'+_tier.barColor+'"></div><div class="scan-card-body">'
       /* Header: rank + name + type + time + confidence */
-      +'<div class="sc-head"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--t3);font-weight:800">#'+(i+1)+'</span><div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">'+_whaleMarker+s.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+'</div><span class="sc-time '+(ta.cls==='fresh'?'fresh':'')+'">'+(ta.cls==='fresh'?'🆕 ':'⏱ ')+ta.text+'</span></div></div><div style="text-align:right"><div class="sc-badge" style="background:'+(s.conf>=70?'var(--ud)':s.conf>=55?'var(--bd)':'var(--wd)')+';color:'+(s.conf>=70?'var(--up)':s.conf>=55?'var(--blue)':'var(--warn)')+'">'+s.conf+'%</div><div style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+tCol+';font-weight:700;margin-top:3px">'+tLbl+'</div></div></div>'
+      /* Conf% badge color — must respect freshness too. Pre-fix the
+         badge glowed green (`var(--up)`) whenever conf >= 70, even
+         if the verdict line below was downgraded to "إشارة قديمة".
+         Mute the badge to grey for stale signals so the visual
+         signal matches the verdict (NIT from PR #130 review). */
+      +'<div class="sc-head"><div style="display:flex;align-items:center;gap:8px"><span style="font-size:11px;color:var(--t3);font-weight:800">#'+(i+1)+'</span><div><div style="font-family:var(--fd);font-weight:800;font-size:14px;color:var(--t0)">'+_whaleMarker+s.s+(tb?' <span style="font-size:8px">'+tb+'</span>':'')+'</div><span class="sc-time '+(ta.cls==='fresh'?'fresh':'')+'">'+(ta.cls==='fresh'?'🆕 ':'⏱ ')+ta.text+'</span></div></div><div style="text-align:right"><div class="sc-badge" style="background:'+(_isStale?'rgba(56,72,96,.3)':(s.conf>=70?'var(--ud)':s.conf>=55?'var(--bd)':'var(--wd)'))+';color:'+(_isStale?'var(--t2)':(s.conf>=70?'var(--up)':s.conf>=55?'var(--blue)':'var(--warn)'))+'">'+s.conf+'%</div><div style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+tCol+';font-weight:700;margin-top:3px">'+tLbl+'</div></div></div>'
       /* ═══ NEW: Signal Timing Bar ═══ */
       +timingHTML
       /* Price */
@@ -6603,9 +6608,19 @@ function renderTop3(){
     else if(r.c>=0.5&&r.c<3){type=ar?'تجميع':'Accumulation';icon='📊'}
     else{type=ar?'فرصة':'Opportunity';icon='📈'}
 
-    /* ═══ Recommendation ═══ */
+    /* ═══ Recommendation ═══
+       VIP top-3 freshness gate (NIT from PR #130 review): the panel
+       has its own quality logic (signalQualityGate above) that does
+       NOT check drift/freshness, so without this guard a stale
+       ETH-like signal could survive the gate and show "💡 شراء قوي"
+       in the VIP cards while the Scanner tab below correctly
+       downgrades it. Mirror the same freshness-aware downgrade as
+       the Scanner verdict block: stale → muted "Watch Only"
+       regardless of raw conf. */
     var rec,recCol;
-    if(conf>=90){rec=ar?'💡 شراء قوي':'💡 Strong Buy';recCol='var(--up)'}
+    var _top3Stale=r.freshness==='old';
+    if(_top3Stale){rec=ar?'💡 إشارة قديمة — راقب فقط':'💡 Stale — Watch Only';recCol='var(--t2)'}
+    else if(conf>=90){rec=ar?'💡 شراء قوي':'💡 Strong Buy';recCol='var(--up)'}
     else if(conf>=80){rec=ar?'💡 فرصة ذهبية':'💡 Golden';recCol='var(--neon)'}
     else if(conf>=70){rec=ar?'💡 ادخل بحذر':'💡 Enter Carefully';recCol='var(--warn)'}
     else{rec=ar?'💡 راقب فقط':'💡 Watch Only';recCol='var(--t2)'}

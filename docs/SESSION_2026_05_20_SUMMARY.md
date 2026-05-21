@@ -9,30 +9,33 @@ every simple scoring rule.
 
 ## Headline result
 
-**17 PRs merged this session.** Registry grew from 6 → **35 rules**.
-Tests grew from 700 → **767**. Phase 2.A.1 parity ratchet
-COMPLETE for every simple (single-tag, additive) rule. Phase
-2.A.2 (PWA reads server signals) COMPLETE in three ratchets.
-Phase 2.A.4.b (tier-aware ATR) addresses the 2026-05-20 BTC
-screenshot regression structurally.
+**18 PRs merged this session — original audit plan 100% delivered.**
+Registry grew from 6 → **35 rules**. Tests grew from 700 →
+**781**. Phase 2.A.1 parity ratchet COMPLETE for every simple
+(single-tag, additive) rule. Phase 2.A.2 (PWA reads server
+signals) COMPLETE in three ratchets. Phase 2.A.4.b (tier-aware
+ATR) addresses the 2026-05-20 BTC screenshot regression
+structurally. **Phase 4 (backtest harness) COMPLETE** — the
+foundation for evidence-based weight tuning is now live.
 
 ## PRs merged in chronological order
 
-| PR   | Title                                                | Notable                                                                                                                                                               |
-| ---- | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| #110 | Phase 2.A.4.b — Tier-aware ATR multipliers           | Directly addresses BTC TP1 regression. Tighter mults for tier-1 majors. R:R drops 2.0→1.5 (above audit floor of 1.3). Adds `📐ATR_T1` observability tag.              |
-| #112 | Phase 2.A.2.1 — Client overlays server SL/TP/RR      | First ratchet of "PWA reads server signals". Caught 2 BLOCKERs in review: `_scanWarn` typo + `smartEntry` was the actual UI data path (top-level `r.sl` was a no-op). |
-| #113 | Phase 2.A.2.2 — Client tier demotion                 | Asymmetric: server can DEMOTE but never PROMOTE. Surfaces `🚫MANIP_CAP` / `🔪FALLING` / `🚨P&D_RISK` / `🚨MANIP_HIGH` as `🛑SRV_DEMOTE`.                              |
-| #114 | Phase 2.A.1 PR C — TIER1/TIER2/NEW migration         | Caught BLOCKER: TIER1 ∩ tier2Coins overlap (hot majors land in both lists) would have silently scored +15. Fixed by precedence-in-condition gate `isTier1 !== true`.  |
-| #115 | docs: VPS deployment guide                           | Step-by-step guide for tomorrow's deploy.                                                                                                                             |
-| #116 | Phase 2.A.2.3 — Client merges selected server tags   | Promotes `📐ATR_T1 / 📐ATR_ZONES / 🔪FALLING / 🚫MANIP_CAP / 🚨MANIP_HIGH / ⚠️MANIP_MED / 🌐FR_NEG` to visible cards. Exact-match allowlist (no prefix).              |
-| #117 | Phase 2.A.1 PR D — FR / LS / coinalyzeFR migration   | Caught BLOCKER: client DOES have `coinalyzeFR` data (from `/api/all`), so the inline rule at app.js:2641 had to be migrated AND deleted. First iteration missed both. |
-| #118 | docs: deploy guide refresh                           | Marks #113-#116 merged, lists #117 pending.                                                                                                                           |
-| #119 | Phase 2.A.1 PR E — MTF / RSI / MACD migration        | Server-only data; 8 rules. No client changes needed (strict no-op gates). Histogram tie-breaker (+3/-3 tagless) kept inline — doesn't fit current rule shape.         |
-| #120 | Phase 2.A.1 PR FINAL — doc + ledger cleanup          | First "complete" snapshot. No code.                                                                                                                                   |
-| #121 | Phase 2.A.1 PR F — VOL chain + change-band           | +7 rules (VOL_MEGA/HIGH/NORMAL + CHANGE_RISING/LATE/PENALTY_GT3/GT5). Tagless rules first appear here. Client's 4th VOL tier `📊vol` lowercase preserved inline.      |
-| #122 | Phase 2.A.1 PR G — AT_HIGH/BOTTOM/TAKER/COINALYZE_OI | +4 rules. AT_HIGH/BOTTOM/TAKER bit-for-bit on both sides; COINALYZE_OI server-only with Option-C client no-op.                                                        |
-| #123 | Phase 2.A.1 PR H — REVERSAL/BTC*OK*\*/CVD_BUY        | +4 rules. All client-only data; server cleanly no-ops via strict gates. BTC market check migrated as two-sided rule (bonus + tagless penalty).                        |
+| PR   | Title                                                   | Notable                                                                                                                                                                                                                                                                                                                         |
+| ---- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| #110 | Phase 2.A.4.b — Tier-aware ATR multipliers              | Directly addresses BTC TP1 regression. Tighter mults for tier-1 majors. R:R drops 2.0→1.5 (above audit floor of 1.3). Adds `📐ATR_T1` observability tag.                                                                                                                                                                        |
+| #112 | Phase 2.A.2.1 — Client overlays server SL/TP/RR         | First ratchet of "PWA reads server signals". Caught 2 BLOCKERs in review: `_scanWarn` typo + `smartEntry` was the actual UI data path (top-level `r.sl` was a no-op).                                                                                                                                                           |
+| #113 | Phase 2.A.2.2 — Client tier demotion                    | Asymmetric: server can DEMOTE but never PROMOTE. Surfaces `🚫MANIP_CAP` / `🔪FALLING` / `🚨P&D_RISK` / `🚨MANIP_HIGH` as `🛑SRV_DEMOTE`.                                                                                                                                                                                        |
+| #114 | Phase 2.A.1 PR C — TIER1/TIER2/NEW migration            | Caught BLOCKER: TIER1 ∩ tier2Coins overlap (hot majors land in both lists) would have silently scored +15. Fixed by precedence-in-condition gate `isTier1 !== true`.                                                                                                                                                            |
+| #115 | docs: VPS deployment guide                              | Step-by-step guide for tomorrow's deploy.                                                                                                                                                                                                                                                                                       |
+| #116 | Phase 2.A.2.3 — Client merges selected server tags      | Promotes `📐ATR_T1 / 📐ATR_ZONES / 🔪FALLING / 🚫MANIP_CAP / 🚨MANIP_HIGH / ⚠️MANIP_MED / 🌐FR_NEG` to visible cards. Exact-match allowlist (no prefix).                                                                                                                                                                        |
+| #117 | Phase 2.A.1 PR D — FR / LS / coinalyzeFR migration      | Caught BLOCKER: client DOES have `coinalyzeFR` data (from `/api/all`), so the inline rule at app.js:2641 had to be migrated AND deleted. First iteration missed both.                                                                                                                                                           |
+| #118 | docs: deploy guide refresh                              | Marks #113-#116 merged, lists #117 pending.                                                                                                                                                                                                                                                                                     |
+| #119 | Phase 2.A.1 PR E — MTF / RSI / MACD migration           | Server-only data; 8 rules. No client changes needed (strict no-op gates). Histogram tie-breaker (+3/-3 tagless) kept inline — doesn't fit current rule shape.                                                                                                                                                                   |
+| #120 | Phase 2.A.1 PR FINAL — doc + ledger cleanup             | First "complete" snapshot. No code.                                                                                                                                                                                                                                                                                             |
+| #121 | Phase 2.A.1 PR F — VOL chain + change-band              | +7 rules (VOL_MEGA/HIGH/NORMAL + CHANGE_RISING/LATE/PENALTY_GT3/GT5). Tagless rules first appear here. Client's 4th VOL tier `📊vol` lowercase preserved inline.                                                                                                                                                                |
+| #122 | Phase 2.A.1 PR G — AT_HIGH/BOTTOM/TAKER/COINALYZE_OI    | +4 rules. AT_HIGH/BOTTOM/TAKER bit-for-bit on both sides; COINALYZE_OI server-only with Option-C client no-op.                                                                                                                                                                                                                  |
+| #123 | Phase 2.A.1 PR H — REVERSAL/BTC*OK*\*/CVD_BUY           | +4 rules. All client-only data; server cleanly no-ops via strict gates. BTC market check migrated as two-sided rule (bonus + tagless penalty).                                                                                                                                                                                  |
+| #125 | **Phase 4 — Backtest harness (per-rule effectiveness)** | **Closes the last item in the original audit plan.** New `src/scanner-backtest.js` module + `GET /api/scanner/backtest` endpoint. Answers "which rules predict wins, which hurt?" with marginal-gain delta per rule + `suspiciousRules` list (positive-weight rules with negative outcome correlation — the worst kind of bug). |
 
 ## Pre-merge review process
 
@@ -133,18 +136,21 @@ Expected user-visible changes after deploy:
 
 ## Numbers
 
-- Tests: 700 (pre-session) → **767** (+67)
+- Tests: 700 (pre-session) → **781** (+81)
 - Registry rules: 6 (pre-session) → **35** (+29)
-- PRs merged: **17** (#110 pre-deployed + #112-#123)
+- PRs merged: **18** (#110 pre-deployed + #112-#125)
 - Inline-rule deletions: ~25+ blocks across `src/scanner-engine.js`
   and `app.js quickScan`
 - New observability tags: `📡SRV`, `🛑SRV_DEMOTE`, `📐ATR_T1`
-- New env flag: `SCANNER_TIER_AWARE_ATR_ZONES` (default ON, PR #110)
+- New env flags: `SCANNER_TIER_AWARE_ATR_ZONES` (PR #110),
+  `SCANNER_BACKTEST_ENABLED` (PR #125) — both default ON
 - New localStorage flag wired (Phase 0 reservation):
   `nxScannerFix_server_signals`
-- Reviewer BLOCKERs caught + fixed: **4 real BLOCKERs** + several NITs.
-  All would have shipped silently if not for parallel reviewers
-  (CI alone passed every BLOCKER PR).
+- New endpoint: `GET /api/scanner/backtest` (Phase 4)
+- Reviewer BLOCKERs caught + fixed: **4 real BLOCKERs** + several
+  NITs. All would have shipped silently if not for parallel
+  reviewers (CI alone passed every BLOCKER PR).
+- **Original audit plan: 100% delivered.**
 
 ## Status of the original 16-phase audit plan
 

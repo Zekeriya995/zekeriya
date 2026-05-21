@@ -1,5 +1,84 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 4 Part 3 — ctx-based hybrid attribution] — 2026-05-21
+
+**Server-side.** Extends `computeRuleAttribution` to **replay
+each rule's condition against the persisted ctx** when present,
+falling back to the original tag-membership check otherwise.
+
+### The capability this unlocks
+
+Before Part 3, the 3 tagless rules (`CHANGE_PENALTY_GT3`,
+`CHANGE_PENALTY_GT5`, `BTC_NOT_OK_PENALTY`) were structurally
+unattributable — they don't push anything into the tag bag, so
+the tag-based attribution from PR #125 had nothing to look at.
+
+Part 3 lets the harness replay `rule.condition(entry.ctx)`
+directly. For tagless rules this is the ONLY way to know if
+they fired; for tagged rules it's a stricter equivalent that
+also catches a class of bug where the tag string drifts between
+the registry and the signal emitter.
+
+### Hybrid attribution logic
+
+For each (rule, entry) pair:
+
+1. If `entry.ctx` exists AND rule has a `condition` function →
+   replay condition. Most accurate; covers tagless rules.
+2. Else if rule has a tag → tag-membership in `entry.tags`
+   (the original Part 1 behaviour). Backwards-compatible with
+   old entries on disk.
+3. Else (tagless + no ctx) → SKIP. Cannot attribute.
+
+For TAGGED rules with ctx, both methods produce identical
+answers because the same condition produced the tag at signal
+time. The hybrid only changes behaviour for tagless rules +
+new entries — strictly additive.
+
+### Defensive: buggy rule conditions
+
+If a rule's condition function throws, the (rule, entry) pair
+is skipped silently. The backtest never crashes. Tested
+explicitly.
+
+### Output shape addition
+
+Each `perRule[ruleId]` entry now includes
+`attributableEntries: N` — how many entries could be attributed
+to this rule (via ctx OR tag). A rule with
+`attributableEntries: 0` is omitted from `perRule` to keep the
+output clean. The `tag` field can now be `null` for tagless
+rules attributed via ctx.
+
+### Files changed
+
+- `src/scanner-backtest.js` — both `computeRuleAttribution` and
+  its `byTier` companion loop now use the hybrid (ctx-first,
+  tag-fallback) attribution.
+- `tests/scanner-backtest.test.js` — **+5 tests** covering
+  tagless attribution via ctx, tagged rule attributed via ctx
+  (no tag in tags), mixed history backwards-compat, buggy
+  condition tolerance, tagless-without-ctx skip.
+
+### Verification
+
+- `npm run check` — **795/795 tests pass** (+5 over PR #127's
+  790).
+
+### Operational note
+
+Until ~24h of ctx-bearing entries accumulate post-deploy, the
+hybrid path won't fire for any entry — all entries on disk are
+from before PR #127 and lack ctx. Backwards compat keeps the
+backtest working in the meantime. After the first day, new
+entries start carrying ctx and the tagless rules appear in the
+`/api/scanner/backtest` response.
+
+### Rollback
+
+`git revert`. Pure additive: removes the ctx-replay path; falls
+back to PR #125 tag-based behaviour for all entries.
+
 ## [Scanner Phase 4 Part 2 — ctx capture for backtest harness] — 2026-05-21
 
 **Server-side. Foundation for richer Phase 4 analyses.** Adds the

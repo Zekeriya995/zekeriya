@@ -350,29 +350,10 @@ function scoreSymbol(sym, ctx) {
   score += registryResult.scoreDelta;
   for (const t of registryResult.tagsDelta) tags.push(t);
 
-  /* Already running */
-  if (d.change >= 3 && d.change < 5) {
-    score += 8;
-    tags.push('📈RISING');
-  }
-  if (d.change >= 5 && d.change < 8) {
-    score -= 5;
-    tags.push('⚠️LATE');
-  }
-  if (d.change > 3) score -= 15;
-  if (d.change > 5) score -= 30;
-
-  /* Volume tiers */
-  if (d.volume > 1e9) {
-    score += 25;
-    tags.push('🔥MEGA_VOL');
-  } else if (d.volume > 1e8) {
-    score += 18;
-    tags.push('📊HIGH_VOL');
-  } else if (d.volume > 3e7) {
-    score += 10;
-    tags.push('📊VOL');
-  }
+  /* Change bands + late-entry penalties + Volume tiers — all
+     migrated to the unified registry in PR F (CHANGE_RISING /
+     CHANGE_LATE / CHANGE_PENALTY_GT3 / CHANGE_PENALTY_GT5 /
+     VOL_MEGA / VOL_HIGH / VOL_NORMAL). See src/scoring-rules.js. */
 
   /* Near daily high — breakout imminent */
   if (

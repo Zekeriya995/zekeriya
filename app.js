@@ -2594,7 +2594,9 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
       'TIER1_BONUS','TIER2_BONUS','NEW_BONUS',
       'SILENT_ACCUMULATION','EARLY_ENTRY','STEALTH',
       'FR_VERY_NEG','FR_MILDLY_NEG','FR_OVEREXTENDED','LS_SHORTS',
-      'COINALYZE_FR_NEG'
+      'COINALYZE_FR_NEG',
+      'VOL_MEGA','VOL_HIGH','VOL_NORMAL',
+      'CHANGE_RISING','CHANGE_LATE','CHANGE_PENALTY_GT3','CHANGE_PENALTY_GT5'
     ].forEach(function(_id){
       var _r = window.SCORING_RULES.RULES.find(function(x){return x.id===_id});
       if (_r && _r.condition(_ruleCtx)) { sc += _r.weight; if (_r.tag) tags.push(_r.tag); }
@@ -2618,18 +2620,27 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
     }
     if(_lsClientNow&&_lsClientNow.ratio<0.8){sc+=10;tags.push('🩳SHORTS')}
     if(_czFrClientNow&&_czFrClientNow.rate<-0.01){sc+=8;tags.push('🌐FR_NEG')}
+    /* PR F additions to defensive fallback — VOL chain (3 tiers) +
+       change bands + late-entry penalties. Mirrors the inline
+       pre-PR-F logic so a registry-load failure produces bit-for-bit
+       identical scoring. */
+    if(d.c>=3&&d.c<5){sc+=8;tags.push('📈RISING')}
+    if(d.c>=5&&d.c<8){sc-=5;tags.push('⚠️LATE')}
+    if(d.c>3)sc-=15;
+    if(d.c>5)sc-=30;
+    if(d.v>1e9){sc+=25;tags.push('🔥MEGA_VOL')}
+    else if(d.v>1e8){sc+=18;tags.push('📊HIGH_VOL')}
+    else if(d.v>3e7){sc+=10;tags.push('📊VOL')}
   }
-  /* Already moving — penalise lateness */
-  if(d.c>=3&&d.c<5){sc+=8;tags.push('📈RISING')}
-  if(d.c>=5&&d.c<8){sc-=5;tags.push('⚠️LATE')}
-  /* Penalties for late entries */
-  if(d.c>3)sc-=15;
-  if(d.c>5)sc-=30;
-  /* Volume anomaly */
-  if(d.v>1e9){sc+=25;tags.push('🔥MEGA_VOL')}
-  else if(d.v>1e8){sc+=18;tags.push('📊HIGH_VOL')}
-  else if(d.v>3e7){sc+=10;tags.push('📊VOL')}
-  else if(d.v>1e7){sc+=5;tags.push('📊vol')}
+  /* Change bands + late-entry penalties + 3 VOL tiers — migrated
+     to the unified registry in PR F (CHANGE_RISING / CHANGE_LATE
+     / CHANGE_PENALTY_GT3 / CHANGE_PENALTY_GT5 / VOL_MEGA /
+     VOL_HIGH / VOL_NORMAL). Volume range 1e9 / 1e8 / 3e7
+     covered by registry. The 4th VOL tier '📊vol' lowercase
+     (volume in (1e7, 3e7]) stays inline below — the server never
+     emitted it, so adding it as a registry rule would change
+     server scoring. Client-only divergence preserved on purpose. */
+  if(d.v>1e7&&d.v<=3e7){sc+=5;tags.push('📊vol')}
   /* Near daily high with volume = breakout imminent */
   if(d.h>0&&d.p>0&&((d.h-d.p)/d.p)*100<1.5&&d.c>0&&d.c<3){sc+=12;tags.push('🎯AT_HIGH')}
   /* Bottom buying */

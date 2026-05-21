@@ -34,6 +34,69 @@ const RECORD_COOLDOWN_MS = 60 * 60 * 1000;
    the worst-case overhead is ~600 KB. */
 const MAX_TAGS = 30;
 
+/* Phase 4 Part 2: capture the registry input ctx with each
+   recorded signal so the backtest harness can attribute tagless
+   rules and replay rule modifications against actual outcomes.
+
+   Storage cost: the ctx today has 16 fields (mostly numbers +
+   short enums), serialising to ~250-400 bytes per entry. At 1000
+   entries that's ~250-400 KB on top of the existing ~200 KB tag
+   payload. Worst case: ~600 KB scanner-history.json. Acceptable.
+
+   Allowlist-by-key approach: we only persist KNOWN ctx fields,
+   never the whole object. If a future PR adds a private/sensitive
+   ctx field, it stays out of the persisted history until
+   explicitly added here. */
+/* Per-field expected-type schema. Stricter than "any scalar" so
+   a value of the wrong type (e.g. a string in a boolean slot)
+   gets dropped rather than silently coerced. The accepted JS
+   types per field match what the registry rule conditions
+   strict-check against. */
+const CTX_TYPE_MAP = Object.freeze({
+  isTier1: 'boolean',
+  isTier2: 'boolean',
+  volume: 'number',
+  change: 'number',
+  high: 'number',
+  low: 'number',
+  price: 'number',
+  frRate: 'number',
+  lsRatio: 'number',
+  coinalyzeFRRate: 'number',
+  coinalyzeOIValue: 'number',
+  takerAvg: 'number',
+  takerRatio: 'number',
+  mtfStrength: 'string',
+  mtfBias: 'string',
+  rsi: 'number',
+  macdCross: 'string',
+  btcMarketOk: 'boolean',
+  cvdTrend: 'string',
+  cvdDelta: 'number',
+});
+
+const CTX_ALLOWLIST_KEYS = Object.freeze(Object.keys(CTX_TYPE_MAP));
+
+function _sanitizeCtx(rawCtx) {
+  if (!rawCtx || typeof rawCtx !== 'object') return null;
+  const out = {};
+  for (const k of CTX_ALLOWLIST_KEYS) {
+    const v = rawCtx[k];
+    if (v === undefined || v === null) continue;
+    const expected = CTX_TYPE_MAP[k];
+    if (expected === 'number' && typeof v === 'number' && Number.isFinite(v)) {
+      out[k] = v;
+    } else if (expected === 'boolean' && typeof v === 'boolean') {
+      out[k] = v;
+    } else if (expected === 'string' && typeof v === 'string' && v.length <= 32) {
+      out[k] = v;
+    }
+    /* Mismatched types are silently dropped — same posture as
+       the registry rules' strict typeof gates. */
+  }
+  return out;
+}
+
 function loadHistory() {
   try {
     if (fs.existsSync(HISTORY_FILE)) {
@@ -88,7 +151,15 @@ function recordSignal(history, sig, now) {
     break;
   }
 
-  history.push({
+  /* Phase 4 Part 2: persist the sanitized ctx when present. The
+     sanitizer allowlists known scalar keys and rejects unknown
+     fields — so a future ctx extension can't leak sensitive data
+     into the history file by accident. Entries without ctx (old
+     ones loaded from disk, or signals from a legacy emitter)
+     work the same as before — `ctx` is just absent on those. */
+  const persistedCtx = _sanitizeCtx(sig.ctx);
+
+  const entry = {
     s: sig.s,
     score: sig.score,
     tier: sig.tier,
@@ -99,7 +170,9 @@ function recordSignal(history, sig, now) {
     tags: Array.isArray(sig.tags) ? sig.tags.slice(0, MAX_TAGS) : [],
     recordedAt: ts,
     evaluated: false,
-  });
+  };
+  if (persistedCtx) entry.ctx = persistedCtx;
+  history.push(entry);
 
   /* Cap the array — drop the oldest entries when full. */
   while (history.length > MAX_HISTORY) {
@@ -283,9 +356,11 @@ module.exports = {
   MAX_TAGS,
   EVAL_AFTER_MS,
   RECORD_COOLDOWN_MS,
+  CTX_ALLOWLIST_KEYS,
   loadHistory,
   saveHistory,
   recordSignal,
   evaluateOpenSignals,
   computeStats,
+  _sanitizeCtx, // exported for testing
 };

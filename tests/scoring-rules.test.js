@@ -695,6 +695,93 @@ test('CHANGE rules — overlapping combinations match the pre-PR-F inline behavi
   assert.equal(out.scoreDelta, -48);
 });
 
+/* ─── Phase 2.A.1 PR G — AT_HIGH / BOTTOM / TAKER / COINALYZE_OI */
+
+test('AT_HIGH — fires near daily high with small positive change', () => {
+  /* price 99.5, high 100 → (100-99.5)/99.5 ≈ 0.5% < 1.5% ✓
+     change 1 ∈ (0, 3) ✓ → fires */
+  assert.equal(fire('AT_HIGH', { high: 100, low: 95, price: 99.5, change: 1, volume: 1e7 }), true);
+  /* Boundary: change=0 does NOT fire (strict >). */
+  assert.equal(fire('AT_HIGH', { high: 100, low: 95, price: 99.5, change: 0, volume: 1e7 }), false);
+  /* Boundary: change=3 does NOT fire (strict <). */
+  assert.equal(fire('AT_HIGH', { high: 100, low: 95, price: 99.5, change: 3, volume: 1e7 }), false);
+  /* Too far from high (5% away) — does NOT fire. */
+  assert.equal(fire('AT_HIGH', { high: 100, low: 95, price: 95, change: 1, volume: 1e7 }), false);
+  const r = RULES.find((r) => r.id === 'AT_HIGH');
+  assert.equal(r.weight, 12);
+  assert.equal(r.tag, '🎯AT_HIGH');
+});
+
+test('AT_HIGH — missing or non-numeric high/price does NOT fire', () => {
+  for (const bad of [undefined, null, NaN, '100', {}]) {
+    assert.equal(fire('AT_HIGH', { high: bad, price: 99, change: 1 }), false);
+    assert.equal(fire('AT_HIGH', { high: 100, price: bad, change: 1 }), false);
+  }
+});
+
+test('BOTTOM — fires in lower 25% of daily range with volume > 5e6', () => {
+  /* range 95-100, price=96 → (96-95)/(100-95) = 20% < 25% ✓
+     volume 1e7 > 5e6 ✓ → fires */
+  assert.equal(fire('BOTTOM', { high: 100, low: 95, price: 96, volume: 1e7 }), true);
+  /* Price at top of range (price=99) → 80% > 25% → does NOT fire. */
+  assert.equal(fire('BOTTOM', { high: 100, low: 95, price: 99, volume: 1e7 }), false);
+  /* high===low (sideways) → guarded, does NOT fire. */
+  assert.equal(fire('BOTTOM', { high: 100, low: 100, price: 100, volume: 1e7 }), false);
+  /* Volume below 5e6 → does NOT fire. */
+  assert.equal(fire('BOTTOM', { high: 100, low: 95, price: 96, volume: 1e6 }), false);
+  const r = RULES.find((r) => r.id === 'BOTTOM');
+  assert.equal(r.weight, 10);
+  assert.equal(r.tag, '📉BOTTOM');
+});
+
+test('BOTTOM — missing high/low/price does NOT fire (typeof gates)', () => {
+  for (const bad of [undefined, null, NaN, '99']) {
+    assert.equal(fire('BOTTOM', { high: bad, low: 95, price: 96, volume: 1e7 }), false);
+    assert.equal(fire('BOTTOM', { high: 100, low: bad, price: 96, volume: 1e7 }), false);
+    assert.equal(fire('BOTTOM', { high: 100, low: 95, price: bad, volume: 1e7 }), false);
+  }
+});
+
+test('TAKER_SKEW — fires when ratio > avg * 1.3', () => {
+  assert.equal(fire('TAKER_SKEW', { takerAvg: 1, takerRatio: 1.5 }), true);
+  /* Boundary: ratio exactly avg*1.3 does NOT fire (strict >). */
+  assert.equal(fire('TAKER_SKEW', { takerAvg: 1, takerRatio: 1.3 }), false);
+  /* Avg <= 0 does NOT fire (div-by-zero guard). */
+  assert.equal(fire('TAKER_SKEW', { takerAvg: 0, takerRatio: 1.5 }), false);
+  const r = RULES.find((r) => r.id === 'TAKER_SKEW');
+  assert.equal(r.weight, 15);
+  assert.equal(r.tag, '💹TAKER');
+});
+
+test('TAKER_SKEW — missing data does NOT fire', () => {
+  for (const bad of [undefined, null, NaN, '1.5', {}]) {
+    assert.equal(fire('TAKER_SKEW', { takerAvg: bad, takerRatio: 1.5 }), false);
+    assert.equal(fire('TAKER_SKEW', { takerAvg: 1, takerRatio: bad }), false);
+  }
+});
+
+test('COINALYZE_OI — fires on positive aggregated OI with flat change', () => {
+  assert.equal(fire('COINALYZE_OI', { coinalyzeOIValue: 5e6, change: 1 }), true);
+  assert.equal(fire('COINALYZE_OI', { coinalyzeOIValue: 5e6, change: -2 }), true);
+  /* Boundary: |change|=3 does NOT fire (strict <). */
+  assert.equal(fire('COINALYZE_OI', { coinalyzeOIValue: 5e6, change: 3 }), false);
+  assert.equal(fire('COINALYZE_OI', { coinalyzeOIValue: 5e6, change: -3 }), false);
+  /* Zero/negative OI value does NOT fire. */
+  assert.equal(fire('COINALYZE_OI', { coinalyzeOIValue: 0, change: 1 }), false);
+  const r = RULES.find((r) => r.id === 'COINALYZE_OI');
+  assert.equal(r.weight, 6);
+  assert.equal(r.tag, '🌐OI');
+});
+
+test('COINALYZE_OI — does NOT fire on client ctx (no coinalyzeOIValue field)', () => {
+  /* Option-C pattern: client has no aggregated multi-exchange OI
+     feed. The strict typeof gate makes the rule cleanly no-op
+     when coinalyzeOIValue is absent — same as COINALYZE_FR_NEG
+     in PR D and the MTF rules in PR E. */
+  const clientCtx = { isTier1: false, isTier2: false, volume: 1e8, change: 1 };
+  assert.equal(fire('COINALYZE_OI', clientCtx), false);
+});
+
 /* ─── applyRules — aggregate behavior ─────────────────────────── */
 
 test('applyRules — TIER1 coin with high vol + flat change fires multiple rules', () => {

@@ -2577,12 +2577,29 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   var _frClientNow = FR[s];
   var _lsClientNow = LS[s];
   var _czFrClientNow = coinalyzeFR[s];
+  var _takerClientNow = takerData[s];
   if (window.SCORING_RULES) {
     var _ruleCtx = {
       isTier1: isTier1,
       isTier2: isTier2,
       volume: d.v,
       change: d.c,
+      /* PR G additions: high/low/price for AT_HIGH/BOTTOM;
+         takerAvg/takerRatio for TAKER_SKEW. coinalyzeOIValue
+         intentionally omitted — client doesn't have aggregated
+         multi-exchange OI; the strict typeof gate on
+         COINALYZE_OI cleanly no-ops on the client. */
+      high: typeof d.h === 'number' ? d.h : undefined,
+      low: typeof d.l === 'number' ? d.l : undefined,
+      price: typeof d.p === 'number' ? d.p : undefined,
+      takerAvg:
+        _takerClientNow && typeof _takerClientNow.avg === 'number'
+          ? _takerClientNow.avg
+          : undefined,
+      takerRatio:
+        _takerClientNow && typeof _takerClientNow.ratio === 'number'
+          ? _takerClientNow.ratio
+          : undefined,
       frRate: _frClientNow && typeof _frClientNow.rate === 'number' ? _frClientNow.rate : undefined,
       lsRatio: _lsClientNow && typeof _lsClientNow.ratio === 'number' ? _lsClientNow.ratio : undefined,
       coinalyzeFRRate:
@@ -2596,7 +2613,8 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
       'FR_VERY_NEG','FR_MILDLY_NEG','FR_OVEREXTENDED','LS_SHORTS',
       'COINALYZE_FR_NEG',
       'VOL_MEGA','VOL_HIGH','VOL_NORMAL',
-      'CHANGE_RISING','CHANGE_LATE','CHANGE_PENALTY_GT3','CHANGE_PENALTY_GT5'
+      'CHANGE_RISING','CHANGE_LATE','CHANGE_PENALTY_GT3','CHANGE_PENALTY_GT5',
+      'AT_HIGH','BOTTOM','TAKER_SKEW'
     ].forEach(function(_id){
       var _r = window.SCORING_RULES.RULES.find(function(x){return x.id===_id});
       if (_r && _r.condition(_ruleCtx)) { sc += _r.weight; if (_r.tag) tags.push(_r.tag); }
@@ -2631,6 +2649,10 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
     if(d.v>1e9){sc+=25;tags.push('🔥MEGA_VOL')}
     else if(d.v>1e8){sc+=18;tags.push('📊HIGH_VOL')}
     else if(d.v>3e7){sc+=10;tags.push('📊VOL')}
+    /* PR G additions to fallback */
+    if(d.h>0&&d.p>0&&((d.h-d.p)/d.p)*100<1.5&&d.c>0&&d.c<3){sc+=12;tags.push('🎯AT_HIGH')}
+    if(d.h&&d.l&&d.h!==d.l&&((d.p-d.l)/(d.h-d.l))*100<25&&d.v>5e6){sc+=10;tags.push('📉BOTTOM')}
+    if(_takerClientNow&&_takerClientNow.avg>0&&_takerClientNow.ratio>_takerClientNow.avg*1.3){sc+=15;tags.push('💹TAKER')}
   }
   /* Change bands + late-entry penalties + 3 VOL tiers — migrated
      to the unified registry in PR F (CHANGE_RISING / CHANGE_LATE
@@ -2641,14 +2663,10 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
      emitted it, so adding it as a registry rule would change
      server scoring. Client-only divergence preserved on purpose. */
   if(d.v>1e7&&d.v<=3e7){sc+=5;tags.push('📊vol')}
-  /* Near daily high with volume = breakout imminent */
-  if(d.h>0&&d.p>0&&((d.h-d.p)/d.p)*100<1.5&&d.c>0&&d.c<3){sc+=12;tags.push('🎯AT_HIGH')}
-  /* Bottom buying */
-  if(d.h&&d.l&&d.h!==d.l&&((d.p-d.l)/(d.h-d.l))*100<25&&d.v>5e6){sc+=10;tags.push('📉BOTTOM')}
+  /* AT_HIGH and BOTTOM migrated to registry in PR G.
+     TAKER_SKEW (was 💹TAKER inline) migrated to registry in PR G. */
   /* ═══ DATA SOURCE 1: aggCVD — cumulative volume delta ═══ */
   if(aggCVD[s]&&aggCVD[s].trend==='BUYING'&&aggCVD[s].delta>0&&d.c<3){sc+=20;tags.push('📊CVD_BUY')}
-  /* ═══ DATA SOURCE 2: takerData — taker buy/sell ratio ═══ */
-  if(takerData[s]&&takerData[s].avg>0&&takerData[s].ratio>takerData[s].avg*1.3){sc+=15;tags.push('💹TAKER')}
   /* ═══ DATA SOURCE 3: depthSnapshots — order book depth ═══
      Snapshot ratio feeds the rolling Order Flow Imbalance history. A
      single-snapshot wall is easily spoofed, so we only award the WALL

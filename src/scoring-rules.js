@@ -412,6 +412,78 @@ const RULES = Object.freeze([
     tag: null,
     condition: (ctx) => ctx.change > 5,
   }),
+  /* Phase 2.A.1 PR G — daily-range + taker + multi-exchange OI.
+     AT_HIGH and BOTTOM and TAKER_SKEW were inline on BOTH sides
+     pre-PR-G with identical logic. COINALYZE_OI was server-only
+     (the client has no aggregated multi-exchange OI feed). Each
+     condition uses strict typeof gates so missing data cleanly
+     no-ops — same Option-C pattern as PR D's COINALYZE_FR_NEG
+     and PR E's MTF/RSI/MACD rules. */
+  Object.freeze({
+    id: 'AT_HIGH',
+    weight: 12,
+    tag: '🎯AT_HIGH',
+    /* Near-daily-high breakout setup. The (high - price) / price
+       < 1.5% condition catches symbols within 1.5% of their 24h
+       high, AND positive-but-small change keeps it pre-breakout
+       (not chasing). Strict-checks on price/high guard against
+       0 or missing data which would yield NaN or Infinity. */
+    condition: (ctx) =>
+      typeof ctx.high === 'number' &&
+      typeof ctx.price === 'number' &&
+      ctx.high > 0 &&
+      ctx.price > 0 &&
+      ((ctx.high - ctx.price) / ctx.price) * 100 < 1.5 &&
+      ctx.change > 0 &&
+      ctx.change < 3,
+  }),
+  Object.freeze({
+    id: 'BOTTOM',
+    weight: 10,
+    tag: '📉BOTTOM',
+    /* Bottom-of-range buying. The (price - low) / (high - low)
+       < 25% places the price in the lower quartile of the 24h
+       range. Volume floor at 5e6 keeps thin-illiquid bottoms
+       from firing. The high !== low guard avoids divide-by-zero
+       (sideways days). */
+    condition: (ctx) =>
+      typeof ctx.high === 'number' &&
+      typeof ctx.low === 'number' &&
+      typeof ctx.price === 'number' &&
+      ctx.high > 0 &&
+      ctx.low > 0 &&
+      ctx.high !== ctx.low &&
+      ((ctx.price - ctx.low) / (ctx.high - ctx.low)) * 100 < 25 &&
+      typeof ctx.volume === 'number' &&
+      ctx.volume > 5e6,
+  }),
+  Object.freeze({
+    id: 'TAKER_SKEW',
+    weight: 15,
+    tag: '💹TAKER',
+    /* Taker buy/sell ratio elevated above the 10-min rolling
+       average — institutional aggressors stepping in. Avg > 0
+       avoids div-by-zero on cold-start tickers. */
+    condition: (ctx) =>
+      typeof ctx.takerAvg === 'number' &&
+      typeof ctx.takerRatio === 'number' &&
+      ctx.takerAvg > 0 &&
+      ctx.takerRatio > ctx.takerAvg * 1.3,
+  }),
+  Object.freeze({
+    id: 'COINALYZE_OI',
+    weight: 6,
+    tag: '🌐OI',
+    /* Multi-exchange aggregated OI build under price-flatness
+       — distinct from per-exchange OI (the SMART rule). Server-
+       only data (client has no coinalyzeOI feed); the strict
+       typeof gate makes this rule no-op cleanly on the client. */
+    condition: (ctx) =>
+      typeof ctx.coinalyzeOIValue === 'number' &&
+      ctx.coinalyzeOIValue > 0 &&
+      typeof ctx.change === 'number' &&
+      Math.abs(ctx.change) < 3,
+  }),
 ]);
 
 /* applyRules(ctx) — pure function. Runs every rule against the ctx

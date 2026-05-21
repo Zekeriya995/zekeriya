@@ -332,16 +332,28 @@ function scoreSymbol(sym, ctx) {
   const _ind = ctx.indicator || null;
   const _mtf = ctx.mtfAgreement || null;
   const _macd = _ind && _ind.macd ? _ind.macd : null;
+  /* PR G additions: high, low, price, takerAvg, takerRatio,
+     coinalyzeOIValue let the registry run AT_HIGH / BOTTOM /
+     TAKER_SKEW / COINALYZE_OI. */
   const registryResult = scoringRules.applyRules({
     isTier1: isTier1,
     volume: d.volume,
     change: d.change,
+    high: typeof d.high === 'number' ? d.high : undefined,
+    low: typeof d.low === 'number' ? d.low : undefined,
+    price: typeof d.price === 'number' ? d.price : undefined,
     frRate: ctx.fr && typeof ctx.fr.rate === 'number' ? ctx.fr.rate : undefined,
     lsRatio: ctx.ls && typeof ctx.ls.ratio === 'number' ? ctx.ls.ratio : undefined,
     coinalyzeFRRate:
       ctx.coinalyzeFR && typeof ctx.coinalyzeFR.rate === 'number'
         ? ctx.coinalyzeFR.rate
         : undefined,
+    coinalyzeOIValue:
+      ctx.coinalyzeOI && typeof ctx.coinalyzeOI.value === 'number'
+        ? ctx.coinalyzeOI.value
+        : undefined,
+    takerAvg: ctx.taker && typeof ctx.taker.avg === 'number' ? ctx.taker.avg : undefined,
+    takerRatio: ctx.taker && typeof ctx.taker.ratio === 'number' ? ctx.taker.ratio : undefined,
     mtfStrength: _mtf ? _mtf.strength : undefined,
     mtfBias: _mtf ? _mtf.agreement : undefined,
     rsi: _ind && typeof _ind.rsi === 'number' ? _ind.rsi : undefined,
@@ -355,40 +367,9 @@ function scoreSymbol(sym, ctx) {
      CHANGE_LATE / CHANGE_PENALTY_GT3 / CHANGE_PENALTY_GT5 /
      VOL_MEGA / VOL_HIGH / VOL_NORMAL). See src/scoring-rules.js. */
 
-  /* Near daily high — breakout imminent */
-  if (
-    d.high > 0 &&
-    d.price > 0 &&
-    ((d.high - d.price) / d.price) * 100 < 1.5 &&
-    d.change > 0 &&
-    d.change < 3
-  ) {
-    score += 12;
-    tags.push('🎯AT_HIGH');
-  }
-
-  /* Bottom buying */
-  if (
-    d.high &&
-    d.low &&
-    d.high !== d.low &&
-    ((d.price - d.low) / (d.high - d.low)) * 100 < 25 &&
-    d.volume > 5e6
-  ) {
-    score += 10;
-    tags.push('📉BOTTOM');
-  }
-
-  /* Funding rate, LS ratio — migrated to the unified registry in
-     PR D (FR_VERY_NEG, FR_MILDLY_NEG, FR_OVEREXTENDED, LS_SHORTS).
-     See src/scoring-rules.js for the precedence chain and the
-     comment block on the FR* rules. */
-
-  /* Taker buy/sell skew */
-  if (ctx.taker && ctx.taker.avg > 0 && ctx.taker.ratio > ctx.taker.avg * 1.3) {
-    score += 15;
-    tags.push('💹TAKER');
-  }
+  /* AT_HIGH (near-daily-high breakout), BOTTOM (bottom-of-range
+     buying), FR/LS chain, TAKER_SKEW — all migrated to the
+     unified registry in PR D + PR G. See src/scoring-rules.js. */
 
   /* Order book depth — bid wall */
   if (ctx.depth && ctx.depth.bids && ctx.depth.asks) {
@@ -407,11 +388,9 @@ function scoreSymbol(sym, ctx) {
     }
   }
 
-  /* OI building (multi-exchange aggregated) */
-  if (ctx.coinalyzeOI && ctx.coinalyzeOI.value > 0 && Math.abs(d.change) < 3) {
-    score += 6;
-    tags.push('🌐OI');
-  }
+  /* OI building (multi-exchange aggregated) — migrated to the
+     unified registry in PR G as COINALYZE_OI. See
+     src/scoring-rules.js. */
 
   /* Multi-exchange FR negative — migrated to the unified registry
      in PR D (COINALYZE_FR_NEG). See src/scoring-rules.js. */

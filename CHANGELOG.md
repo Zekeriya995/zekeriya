@@ -1,5 +1,72 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.1 PR G — AT_HIGH / BOTTOM / TAKER / COINALYZE_OI] — 2026-05-21
+
+**Server-side AND client-side: NO BEHAVIOUR CHANGE.** Four more
+rules join the unified registry. Registry now holds **31 rules
+total**.
+
+### Rules added (4)
+
+| Rule | Weight | Tag | Condition |
+|---|---|---|---|
+| `AT_HIGH` | +12 | `🎯AT_HIGH` | near 24h high + small positive change |
+| `BOTTOM` | +10 | `📉BOTTOM` | lower 25% of 24h range + volume > 5e6 |
+| `TAKER_SKEW` | +15 | `💹TAKER` | `takerRatio > takerAvg * 1.3` |
+| `COINALYZE_OI` | +6 | `🌐OI` | multi-exchange OI positive + |change| < 3 (server-only) |
+
+AT_HIGH / BOTTOM / TAKER_SKEW were inline on BOTH sides with
+identical logic. COINALYZE_OI is server-only (client has no
+aggregated multi-exchange OI feed) and uses the Option-C
+typeof-gate pattern to no-op cleanly on the client.
+
+### ctx extensions
+
+| Field | Source | Notes |
+|---|---|---|
+| `high` | `d.high` (server) / `d.h` (client) | 24h high price |
+| `low` | `d.low` / `d.l` | 24h low price |
+| `price` | `d.price` / `d.p` | current price |
+| `takerAvg` | `ctx.taker.avg` / `takerData[s].avg` | rolling avg |
+| `takerRatio` | `ctx.taker.ratio` / `takerData[s].ratio` | spot ratio |
+| `coinalyzeOIValue` | `ctx.coinalyzeOI.value` (server only) | aggregated OI |
+
+### Files changed
+
+- `src/scoring-rules.js` — +4 rules at end of array
+- `src/scanner-engine.js` — extends applyRules ctx with 6 new
+  fields; deletes inline AT_HIGH (was ~358-368), BOTTOM (was
+  ~371-380), TAKER (was ~388-391), COINALYZE_OI (was ~392-395)
+- `app.js quickScan` — extends ctx; adds AT_HIGH/BOTTOM/
+  TAKER_SKEW to forEach; deletes inline blocks; defensive
+  fallback extended
+- `tests/scoring-rules.test.js` — **+8 tests** (per-rule
+  boundaries + missing-data no-ops + client-ctx no-op for the
+  server-only rule)
+
+### Verification
+
+- `npm run check` — 763/763 tests pass (+8 over PR F's 755).
+
+### Rollback
+
+No behaviour change. To revert: `git revert <merge-commit>`.
+
+### Parity ratchet status (post-PR-G)
+
+| PR | Migrated | Status |
+|---|---|---|
+| PR A | TIER1 + NEW + SILENT_ACC + EARLY + STEALTH | merged |
+| PR B (client narrow) | SILENT_ACC + EARLY + STEALTH | merged |
+| PR C | TIER1/TIER2/NEW (precedence) | merged |
+| PR D | FR + LS + COINALYZE_FR_NEG | merged |
+| PR E | MTF + RSI + MACD cross | merged |
+| PR FINAL | docs cleanup | merged |
+| PR F | VOL + change bands + late penalties | merged |
+| **PR G (this)** | **AT_HIGH + BOTTOM + TAKER + COINALYZE_OI** | **here** |
+
+Plus FALLING_KNIFE → **31 rules in the registry.**
+
 ## [Scanner Phase 2.A.1 PR F — VOL chain + change-band migration] — 2026-05-20
 
 **Server-side AND client-side: NO BEHAVIOUR CHANGE.** Seven more

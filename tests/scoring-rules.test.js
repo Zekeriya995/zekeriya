@@ -782,6 +782,59 @@ test('COINALYZE_OI — does NOT fire on client ctx (no coinalyzeOIValue field)',
   assert.equal(fire('COINALYZE_OI', clientCtx), false);
 });
 
+/* ─── Phase 2.A.1 PR H — REVERSAL / BTC_OK_* / CVD_BUY ────────── */
+
+test('REVERSAL — fires on change in [-10, -3] with volume > 5e7', () => {
+  assert.equal(fire('REVERSAL', { change: -5, volume: 1e8 }), true);
+  assert.equal(fire('REVERSAL', { change: -3, volume: 1e8 }), true); /* upper boundary */
+  assert.equal(fire('REVERSAL', { change: -10, volume: 1e8 }), true); /* lower boundary */
+  /* Outside the [-10, -3] range — does NOT fire. */
+  assert.equal(fire('REVERSAL', { change: -2, volume: 1e8 }), false);
+  assert.equal(fire('REVERSAL', { change: -11, volume: 1e8 }), false);
+  /* Volume below 5e7 — does NOT fire. */
+  assert.equal(fire('REVERSAL', { change: -5, volume: 4e7 }), false);
+  const r = RULES.find((r) => r.id === 'REVERSAL');
+  assert.equal(r.weight, 12);
+  assert.equal(r.tag, '🔄REVERSAL');
+});
+
+test('BTC_OK_BONUS / BTC_NOT_OK_PENALTY — mutually exclusive based on btcMarketOk', () => {
+  assert.equal(fire('BTC_OK_BONUS', { btcMarketOk: true }), true);
+  assert.equal(fire('BTC_OK_BONUS', { btcMarketOk: false }), false);
+  assert.equal(fire('BTC_NOT_OK_PENALTY', { btcMarketOk: false }), true);
+  assert.equal(fire('BTC_NOT_OK_PENALTY', { btcMarketOk: true }), false);
+  /* Neither fires when btcMarketOk is undefined (server-side ctx
+     before PR H wires it). Critical: this is the bit-for-bit
+     server-preservation property. */
+  assert.equal(fire('BTC_OK_BONUS', {}), false);
+  assert.equal(fire('BTC_NOT_OK_PENALTY', {}), false);
+  /* BTC_NOT_OK_PENALTY is tagless (the inline pre-PR-H also
+     emitted no tag for the penalty branch). */
+  const r = RULES.find((r) => r.id === 'BTC_NOT_OK_PENALTY');
+  assert.equal(r.tag, null);
+});
+
+test('CVD_BUY — fires only on trend === "BUYING" with positive delta + change < 3', () => {
+  assert.equal(fire('CVD_BUY', { cvdTrend: 'BUYING', cvdDelta: 1000, change: 1 }), true);
+  /* Boundary: change=3 does NOT fire (strict <). */
+  assert.equal(fire('CVD_BUY', { cvdTrend: 'BUYING', cvdDelta: 1000, change: 3 }), false);
+  /* Other trends do NOT fire. */
+  assert.equal(fire('CVD_BUY', { cvdTrend: 'SELLING', cvdDelta: 1000, change: 1 }), false);
+  assert.equal(fire('CVD_BUY', { cvdTrend: 'NEUTRAL', cvdDelta: 1000, change: 1 }), false);
+  /* Negative delta does NOT fire. */
+  assert.equal(fire('CVD_BUY', { cvdTrend: 'BUYING', cvdDelta: -100, change: 1 }), false);
+  const r = RULES.find((r) => r.id === 'CVD_BUY');
+  assert.equal(r.weight, 20);
+  assert.equal(r.tag, '📊CVD_BUY');
+});
+
+test('CVD_BUY — server ctx (no cvdTrend/cvdDelta) cleanly no-ops', () => {
+  /* Server has no aggCVD feed. Verify the rule does not fire
+     for a server-shaped ctx. */
+  const serverCtx = { isTier1: true, volume: 1e8, change: 1 };
+  assert.equal(fire('CVD_BUY', serverCtx), false);
+});
+
 /* ─── applyRules — aggregate behavior ─────────────────────────── */
 
 test('applyRules — TIER1 coin with high vol + flat change fires multiple rules', () => {

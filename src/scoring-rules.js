@@ -484,6 +484,63 @@ const RULES = Object.freeze([
       typeof ctx.change === 'number' &&
       Math.abs(ctx.change) < 3,
   }),
+  /* Phase 2.A.1 PR H — REVERSAL + BTC market check + CVD_BUY.
+     All 4 below are client-only data sources today (server has no
+     aggCVD feed; the server-side BTC-market check is an inline
+     ad-hoc condition the server doesn't currently apply). Each
+     rule uses strict typeof / equality gates so a server ctx
+     (which omits these fields) cleanly no-ops — same Option-C
+     pattern as COINALYZE_OI in PR G. */
+  Object.freeze({
+    id: 'REVERSAL',
+    weight: 12,
+    tag: '🔄REVERSAL',
+    /* Counter-trend bounce setup. Coin down 3-10% with strong
+       volume — institutions buying the dip. Beyond -10% the
+       FALLING_KNIFE rule takes over (the SAGA finding). */
+    condition: (ctx) =>
+      typeof ctx.change === 'number' &&
+      ctx.change <= -3 &&
+      ctx.change >= -10 &&
+      typeof ctx.volume === 'number' &&
+      ctx.volume > 5e7,
+  }),
+  Object.freeze({
+    id: 'BTC_OK_BONUS',
+    weight: 5,
+    tag: 'BTC✅',
+    /* BTC market is OK (BTC change > -2%). Small bonus on every
+       signal that fires under healthy market conditions. */
+    condition: (ctx) => ctx.btcMarketOk === true,
+  }),
+  Object.freeze({
+    id: 'BTC_NOT_OK_PENALTY',
+    weight: -10,
+    tag: null,
+    /* Tagless penalty when BTC is selling off — every signal
+       gets dinged because alts typically follow BTC down.
+       Strict `=== false` (not `!== true`) so an undefined
+       btcMarketOk on the server cleanly no-ops both this and
+       BTC_OK_BONUS — preserving the server's pre-PR-H
+       behaviour of not applying the BTC market check. */
+    condition: (ctx) => ctx.btcMarketOk === false,
+  }),
+  Object.freeze({
+    id: 'CVD_BUY',
+    weight: 20,
+    tag: '📊CVD_BUY',
+    /* Cumulative volume delta trending BUYING with positive
+       delta and change still small (< 3%) — institutional
+       accumulation before the visible move. Client-only data
+       source (server has no aggCVD feed); typeof gates make
+       this rule no-op on the server. */
+    condition: (ctx) =>
+      ctx.cvdTrend === 'BUYING' &&
+      typeof ctx.cvdDelta === 'number' &&
+      ctx.cvdDelta > 0 &&
+      typeof ctx.change === 'number' &&
+      ctx.change < 3,
+  }),
 ]);
 
 /* applyRules(ctx) — pure function. Runs every rule against the ctx

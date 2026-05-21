@@ -2578,17 +2578,13 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   var _lsClientNow = LS[s];
   var _czFrClientNow = coinalyzeFR[s];
   var _takerClientNow = takerData[s];
+  var _cvdClientNow = aggCVD[s];
   if (window.SCORING_RULES) {
     var _ruleCtx = {
       isTier1: isTier1,
       isTier2: isTier2,
       volume: d.v,
       change: d.c,
-      /* PR G additions: high/low/price for AT_HIGH/BOTTOM;
-         takerAvg/takerRatio for TAKER_SKEW. coinalyzeOIValue
-         intentionally omitted — client doesn't have aggregated
-         multi-exchange OI; the strict typeof gate on
-         COINALYZE_OI cleanly no-ops on the client. */
       high: typeof d.h === 'number' ? d.h : undefined,
       low: typeof d.l === 'number' ? d.l : undefined,
       price: typeof d.p === 'number' ? d.p : undefined,
@@ -2606,6 +2602,14 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
         _czFrClientNow && typeof _czFrClientNow.rate === 'number'
           ? _czFrClientNow.rate
           : undefined,
+      /* PR H additions */
+      btcMarketOk: btcOk === true ? true : (btcOk === false ? false : undefined),
+      cvdTrend: _cvdClientNow && typeof _cvdClientNow.trend === 'string'
+        ? _cvdClientNow.trend
+        : undefined,
+      cvdDelta: _cvdClientNow && typeof _cvdClientNow.delta === 'number'
+        ? _cvdClientNow.delta
+        : undefined,
     };
     [
       'TIER1_BONUS','TIER2_BONUS','NEW_BONUS',
@@ -2614,7 +2618,8 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
       'COINALYZE_FR_NEG',
       'VOL_MEGA','VOL_HIGH','VOL_NORMAL',
       'CHANGE_RISING','CHANGE_LATE','CHANGE_PENALTY_GT3','CHANGE_PENALTY_GT5',
-      'AT_HIGH','BOTTOM','TAKER_SKEW'
+      'AT_HIGH','BOTTOM','TAKER_SKEW',
+      'REVERSAL','BTC_OK_BONUS','BTC_NOT_OK_PENALTY','CVD_BUY'
     ].forEach(function(_id){
       var _r = window.SCORING_RULES.RULES.find(function(x){return x.id===_id});
       if (_r && _r.condition(_ruleCtx)) { sc += _r.weight; if (_r.tag) tags.push(_r.tag); }
@@ -2653,6 +2658,10 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
     if(d.h>0&&d.p>0&&((d.h-d.p)/d.p)*100<1.5&&d.c>0&&d.c<3){sc+=12;tags.push('🎯AT_HIGH')}
     if(d.h&&d.l&&d.h!==d.l&&((d.p-d.l)/(d.h-d.l))*100<25&&d.v>5e6){sc+=10;tags.push('📉BOTTOM')}
     if(_takerClientNow&&_takerClientNow.avg>0&&_takerClientNow.ratio>_takerClientNow.avg*1.3){sc+=15;tags.push('💹TAKER')}
+    /* PR H additions to fallback */
+    if(d.c<=-3&&d.c>=-10&&d.v>5e7){sc+=12;tags.push('🔄REVERSAL')}
+    if(btcOk){sc+=5;tags.push('BTC✅')} else{sc-=10}
+    if(_cvdClientNow&&_cvdClientNow.trend==='BUYING'&&_cvdClientNow.delta>0&&d.c<3){sc+=20;tags.push('📊CVD_BUY')}
   }
   /* Change bands + late-entry penalties + 3 VOL tiers — migrated
      to the unified registry in PR F (CHANGE_RISING / CHANGE_LATE
@@ -2665,8 +2674,7 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   if(d.v>1e7&&d.v<=3e7){sc+=5;tags.push('📊vol')}
   /* AT_HIGH and BOTTOM migrated to registry in PR G.
      TAKER_SKEW (was 💹TAKER inline) migrated to registry in PR G. */
-  /* ═══ DATA SOURCE 1: aggCVD — cumulative volume delta ═══ */
-  if(aggCVD[s]&&aggCVD[s].trend==='BUYING'&&aggCVD[s].delta>0&&d.c<3){sc+=20;tags.push('📊CVD_BUY')}
+  /* CVD_BUY migrated to registry in PR H */
   /* ═══ DATA SOURCE 3: depthSnapshots — order book depth ═══
      Snapshot ratio feeds the rolling Order Flow Imbalance history. A
      single-snapshot wall is easily spoofed, so we only award the WALL
@@ -2734,11 +2742,8 @@ function quickScan(){var STABLES=['USDT','USDC','TUSD','DAI','BUSD','FDUSD','USD
   var _pred=getPredArrow(s);
   if(_pred&&_pred.sc>=4){sc+=8;tags.push('▲▲')}
   else if(_pred&&_pred.sc<=-4){sc-=15}
-  /* ═══ BTC market check ═══ */
-  if(btcOk){sc+=5;tags.push('BTC✅')}
-  else{sc-=10}
-  /* ═══ Negative change + high volume = reversal ═══ */
-  if(d.c<=-3&&d.c>=-10&&d.v>5e7){sc+=12;tags.push('🔄REVERSAL')}
+  /* BTC_OK_BONUS / BTC_NOT_OK_PENALTY and REVERSAL migrated
+     to registry in PR H */
   /* ═══ Idea 1 — Pump & Dump risk detector ═══
      Count how many late-cycle warning signs are firing at once. Any
      single one is normal market noise; three together is the classic

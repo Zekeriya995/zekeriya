@@ -1,5 +1,68 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 2.A.1 PR H — REVERSAL / BTC_OK_* / CVD_BUY] — 2026-05-21
+
+**Server-side: NO BEHAVIOUR CHANGE. Client-side: NO BEHAVIOUR
+CHANGE.** Four more rules join the unified registry. Registry now
+holds **35 rules total**.
+
+### Rules added (4)
+
+| Rule | Weight | Tag | Condition |
+|---|---|---|---|
+| `REVERSAL` | +12 | `🔄REVERSAL` | change in [-10, -3] + volume > 5e7 |
+| `BTC_OK_BONUS` | +5 | `BTC✅` | `btcMarketOk === true` |
+| `BTC_NOT_OK_PENALTY` | −10 | **null** (tagless) | `btcMarketOk === false` |
+| `CVD_BUY` | +20 | `📊CVD_BUY` | `cvdTrend === 'BUYING' && cvdDelta > 0 && change < 3` |
+
+All 4 were client-only data sources pre-PR-H. Server ctx omits
+`btcMarketOk` / `cvdTrend` / `cvdDelta` → all 4 rules cleanly
+no-op via strict equality / typeof gates (same Option-C pattern
+as COINALYZE_OI in PR G).
+
+### BTC market check — two-sided rule
+
+The pre-PR-H inline was `if(btcOk){sc+=5;tags.push('BTC✅')} else
+{sc-=10}`. Migrated as TWO rules:
+- `BTC_OK_BONUS`: `btcMarketOk === true` → +5 with `BTC✅` tag
+- `BTC_NOT_OK_PENALTY`: `btcMarketOk === false` → −10, tagless
+
+The `=== true` / `=== false` strict checks (NOT `!==`) preserve
+the server's pre-PR-H behaviour: server ctx has no `btcMarketOk`
+field, so both rules see undefined and neither fires — matching
+the server's pre-PR-H behaviour of not applying the BTC market
+check at all.
+
+### Files changed
+
+- `src/scoring-rules.js` — +4 rules at end of array
+- `app.js quickScan` — ctx extended with `btcMarketOk` /
+  `cvdTrend` / `cvdDelta`; rule IDs added to forEach; inline
+  REVERSAL / BTC check / CVD_BUY blocks deleted; defensive
+  fallback extended
+- `src/scanner-engine.js` — unchanged (these are client-only
+  rules; server ctx omits the new fields)
+- `tests/scoring-rules.test.js` — **+4 tests** covering
+  REVERSAL boundaries, BTC_OK / BTC_NOT_OK mutual exclusion +
+  server-ctx no-op, CVD_BUY boundaries, CVD_BUY server-ctx no-op
+
+### Verification
+
+- `npm run check` — 767/767 tests pass (+4 over PR G's 763).
+
+### Rollback
+
+No behaviour change. To revert: `git revert <merge-commit>`.
+
+### Parity ratchet status (post-PR-H)
+
+| PR | Migrated | Status |
+|---|---|---|
+| PR A-G | 30 rules (registry + ATR + FR/MTF/VOL/CHANGE/AT_HIGH/etc.) | merged |
+| **PR H (this)** | **REVERSAL + BTC_OK_* + CVD_BUY (4 rules)** | **here** |
+
+Plus FALLING_KNIFE → **35 rules in the registry.**
+
 ## [Scanner Phase 2.A.1 PR G — AT_HIGH / BOTTOM / TAKER / COINALYZE_OI] — 2026-05-21
 
 **Server-side AND client-side: NO BEHAVIOUR CHANGE.** Four more

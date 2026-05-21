@@ -247,3 +247,156 @@ test('invalid daysBack falls back to default', () => {
   const out2 = computeRuleAttribution([], RULES, { now: NOW, daysBack: 'abc' });
   assert.equal(out2.windowDays, DEFAULT_DAYS_BACK);
 });
+
+/* ─── Phase 4 Part 3 — hybrid attribution (ctx-based when present) */
+
+/* Rules with REAL conditions for the ctx-replay tests. */
+const RULES_WITH_CONDITIONS = Object.freeze([
+  Object.freeze({
+    id: 'BIG_VOL',
+    weight: 25,
+    tag: '🔥BIG',
+    condition: (ctx) => ctx && ctx.volume > 1e8,
+  }),
+  Object.freeze({
+    id: 'TAGLESS_PENALTY',
+    weight: -15,
+    tag: null /* tagless — can only be attributed via ctx replay */,
+    condition: (ctx) => ctx && ctx.change > 5,
+  }),
+]);
+
+test('Part 3 — ctx-based attribution catches a TAGLESS rule', () => {
+  /* Pre-Part-3, tagless rules were skipped entirely. Now an entry
+     with ctx allows the harness to replay the condition and
+     attribute the rule. */
+  const hist = [
+    /* 5 entries where TAGLESS_PENALTY's condition fires (change > 5)
+       and all 5 lose */
+    ...Array(5)
+      .fill(0)
+      .map(() =>
+        makeEntry({
+          tags: [],
+          pctChange: -4,
+          outcome: 'loss',
+        })
+      )
+      .map((e, i) => ({ ...e, ctx: { volume: 1e7, change: 7 + i } })),
+    /* 5 entries where condition does NOT fire (change <= 5) and
+       all 5 win */
+    ...Array(5)
+      .fill(0)
+      .map(() =>
+        makeEntry({
+          tags: [],
+          pctChange: 6,
+          outcome: 'win',
+        })
+      )
+      .map((e) => ({ ...e, ctx: { volume: 1e7, change: 1 } })),
+  ];
+  const out = computeRuleAttribution(hist, RULES_WITH_CONDITIONS, { now: NOW });
+  /* TAGLESS_PENALTY MUST appear in perRule now (was skipped pre-Part-3). */
+  assert.ok('TAGLESS_PENALTY' in out.perRule, 'tagless rule must be attributable via ctx');
+  const tp = out.perRule.TAGLESS_PENALTY;
+  assert.equal(tp.fired, 5);
+  assert.equal(tp.absent, 5);
+  assert.equal(tp.firedAvgGain, -4);
+  assert.equal(tp.absentAvgGain, 6);
+  assert.equal(tp.delta, -10);
+  assert.equal(tp.attributableEntries, 10);
+  assert.equal(tp.tag, null);
+});
+
+test('Part 3 — tagged rule with ctx uses condition (same answer as tag)', () => {
+  /* For a TAGGED rule, both paths produce identical results
+     because the same condition produced the tag at signal time.
+     This test verifies the hybrid switch doesn't break tagged
+     attribution. */
+  const hist = [
+    /* 3 entries where BIG_VOL fires (volume > 1e8) — note: NO
+       tag in entry.tags, but the ctx has volume > 1e8. Pre-Part-3
+       would not attribute these to BIG_VOL. Post-Part-3, the ctx
+       replay attributes them correctly. */
+    ...Array(3)
+      .fill(0)
+      .map(() => makeEntry({ tags: [], pctChange: 8, outcome: 'win' }))
+      .map((e) => ({ ...e, ctx: { volume: 5e8, change: 1 } })),
+    /* 3 entries where BIG_VOL doesn't fire */
+    ...Array(3)
+      .fill(0)
+      .map(() => makeEntry({ tags: [], pctChange: -2, outcome: 'partial_loss' }))
+      .map((e) => ({ ...e, ctx: { volume: 1e6, change: 1 } })),
+  ];
+  const out = computeRuleAttribution(hist, RULES_WITH_CONDITIONS, { now: NOW, minSamples: 3 });
+  const bv = out.perRule.BIG_VOL;
+  assert.equal(bv.fired, 3);
+  assert.equal(bv.absent, 3);
+  assert.equal(bv.firedAvgGain, 8);
+  assert.equal(bv.absentAvgGain, -2);
+});
+
+test('Part 3 — backwards compat: entries WITHOUT ctx fall back to tag attribution', () => {
+  /* Mix old entries (no ctx) and new entries (with ctx). The
+     hybrid should use ctx where available, tags elsewhere. */
+  const hist = [
+    /* Old entry with tag, no ctx — uses tag */
+    makeEntry({ tags: ['🔥BIG'], pctChange: 10, outcome: 'win' }),
+    makeEntry({ tags: ['🔥BIG'], pctChange: 10, outcome: 'win' }),
+    /* New entry with ctx, no tag — uses condition */
+    {
+      ...makeEntry({ tags: [], pctChange: 12, outcome: 'win' }),
+      ctx: { volume: 5e8, change: 1 } /* condition fires */,
+    },
+    /* New entry with ctx, condition doesn't fire */
+    {
+      ...makeEntry({ tags: [], pctChange: -3, outcome: 'partial_loss' }),
+      ctx: { volume: 1e6, change: 1 } /* condition doesn't fire */,
+    },
+  ];
+  const out = computeRuleAttribution(hist, RULES_WITH_CONDITIONS, { now: NOW, minSamples: 1 });
+  const bv = out.perRule.BIG_VOL;
+  /* 3 total fired (2 via tag, 1 via ctx); 1 absent (via ctx) */
+  assert.equal(bv.fired, 3);
+  assert.equal(bv.absent, 1);
+});
+
+test('Part 3 — rule whose condition throws is skipped per-entry (no crash)', () => {
+  /* Defensive: a buggy rule should not crash the backtest. */
+  const buggyRules = [
+    Object.freeze({
+      id: 'BUGGY',
+      weight: 10,
+      tag: '💣BUGGY',
+      condition: () => {
+        throw new Error('rule crash!');
+      },
+    }),
+  ];
+  const hist = [
+    { ...makeEntry({ tags: ['💣BUGGY'], pctChange: 5 }), ctx: { volume: 1e7 } },
+    { ...makeEntry({ tags: [], pctChange: 5 }), ctx: { volume: 1e7 } },
+  ];
+  /* Should NOT throw. */
+  let out;
+  assert.doesNotThrow(() => {
+    out = computeRuleAttribution(hist, buggyRules, { now: NOW, minSamples: 1 });
+  });
+  /* With ctx present and condition crashing, neither entry can
+     be attributed via ctx → both fall through to skip. With no
+     attributable entries the rule is omitted from perRule. */
+  assert.ok(!('BUGGY' in out.perRule));
+});
+
+test('Part 3 — tagless rule with no ctx anywhere is still skipped', () => {
+  /* If a tagless rule cannot be attributed against ANY evaluated
+     entry, it must be omitted from perRule (no noise). */
+  const hist = [
+    /* Old entries — no ctx, and the rule has no tag, so unattributable */
+    makeEntry({ tags: ['🔥BIG'], pctChange: 5 }),
+    makeEntry({ tags: ['🔥BIG'], pctChange: 5 }),
+  ];
+  const out = computeRuleAttribution(hist, RULES_WITH_CONDITIONS, { now: NOW, minSamples: 1 });
+  assert.ok(!('TAGLESS_PENALTY' in out.perRule), 'unattributable tagless rule must be omitted');
+});

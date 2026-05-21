@@ -131,24 +131,71 @@ function computeRuleAttribution(history, rules, opts) {
 
   if (evaluated.length === 0 || !Array.isArray(rules)) return empty;
 
-  /* Walk every rule in the registry. Skip rules with a null tag
-     (tagless score-only rules — we can't tell from the persisted
-     scanner-history whether they fired). */
+  /* Phase 4 Part 3: hybrid attribution. For each (rule, entry):
+     - If entry.ctx exists AND rule has a condition function,
+       replay the condition against the ctx — this is the most
+       accurate "did the rule fire?" answer AND it works for
+       tagless rules (which tag-based attribution can't see).
+     - Else if rule has a tag, use tag-membership in entry.tags
+       (the original Part 1 behaviour, kept for backwards compat
+       with old entries on disk that don't have ctx).
+     - Else (tagless rule with no ctx) → SKIP. We have no way
+       to attribute this entry to this rule.
+
+     For TAGGED rules with ctx, both methods produce identical
+     answers because the same condition produced the tag at
+     signal time. The hybrid only changes behaviour for tagless
+     rules + new entries — strictly an additive improvement.
+
+     Side benefit: this also catches a class of bug where a
+     rule's tag string drifts between the registry and the
+     signal emitter — the ctx-based replay is the source of
+     truth. (Today's code emits the tag via applyRules so this
+     can't happen, but future refactors could.) */
   const perRule = {};
   for (const rule of rules) {
     if (!rule || typeof rule.id !== 'string') continue;
-    if (rule.tag === null || rule.tag === undefined) continue;
+    /* Skip ONLY if BOTH the rule has no tag AND we'll have no
+       ctx-based fallback for any entry. We can't predict per-
+       entry ctx presence at this loop level, so we check per-
+       entry below and skip individual non-attributable
+       (rule, entry) pairs. The rule itself enters perRule when
+       at least one entry could be attributed. */
+    if (typeof rule.condition !== 'function' && (rule.tag === null || rule.tag === undefined)) {
+      continue;
+    }
 
     const fired = [];
     const absent = [];
+    let attributable = 0; /* entries we COULD attribute (had ctx or tag) */
     for (const entry of evaluated) {
-      const tags = Array.isArray(entry.tags) ? entry.tags : [];
-      if (tags.indexOf(rule.tag) !== -1) {
-        fired.push(entry);
+      let firedThis;
+      const hasCtx = entry.ctx && typeof entry.ctx === 'object';
+      if (hasCtx && typeof rule.condition === 'function') {
+        try {
+          firedThis = rule.condition(entry.ctx) === true;
+          attributable++;
+        } catch (_e) {
+          /* Defensive: a buggy rule condition shouldn't crash the
+             backtest. Skip this (rule, entry) pair. */
+          continue;
+        }
+      } else if (rule.tag !== null && rule.tag !== undefined) {
+        const tags = Array.isArray(entry.tags) ? entry.tags : [];
+        firedThis = tags.indexOf(rule.tag) !== -1;
+        attributable++;
       } else {
-        absent.push(entry);
+        /* Tagless rule, no ctx — can't attribute. Skip pair. */
+        continue;
       }
+      if (firedThis) fired.push(entry);
+      else absent.push(entry);
     }
+
+    /* Don't emit a perRule entry for a rule that couldn't be
+       attributed against any evaluated entry. This keeps the
+       output clean of noise. */
+    if (attributable === 0) continue;
 
     const firedWins = fired.filter((e) => e.outcome === 'win').length;
     const absentWins = absent.filter((e) => e.outcome === 'win').length;
@@ -159,7 +206,7 @@ function computeRuleAttribution(history, rules, opts) {
     const delta = firedAvgGain - absentAvgGain;
 
     perRule[rule.id] = {
-      tag: rule.tag,
+      tag: rule.tag /* may be null for tagless rules attributed via ctx */,
       weight: rule.weight,
       fired: fired.length,
       absent: absent.length,
@@ -169,6 +216,7 @@ function computeRuleAttribution(history, rules, opts) {
       absentAvgGain: _round2(absentAvgGain),
       delta: _round2(delta),
       sampleSize: fired.length >= minSamples ? 'sufficient' : 'low',
+      attributableEntries: attributable /* Part 3: how many entries could be attributed at all */,
     };
   }
 
@@ -208,14 +256,34 @@ function computeRuleAttribution(history, rules, opts) {
     };
     for (const rule of rules) {
       if (!rule || typeof rule.id !== 'string') continue;
-      if (rule.tag === null || rule.tag === undefined) continue;
-      const fired = tierEvaluated.filter(
-        (e) => Array.isArray(e.tags) && e.tags.indexOf(rule.tag) !== -1
-      );
-      const absent = tierEvaluated.filter(
-        (e) => !(Array.isArray(e.tags) && e.tags.indexOf(rule.tag) !== -1)
-      );
-      if (fired.length === 0 && absent.length === 0) continue;
+      if (typeof rule.condition !== 'function' && (rule.tag === null || rule.tag === undefined)) {
+        continue;
+      }
+      /* Same hybrid attribution as the top-level loop: ctx-based
+         when present, tag-based otherwise. */
+      const fired = [];
+      const absent = [];
+      let attributable = 0;
+      for (const e of tierEvaluated) {
+        let firedThis;
+        const hasCtx = e.ctx && typeof e.ctx === 'object';
+        if (hasCtx && typeof rule.condition === 'function') {
+          try {
+            firedThis = rule.condition(e.ctx) === true;
+            attributable++;
+          } catch (_err) {
+            continue;
+          }
+        } else if (rule.tag !== null && rule.tag !== undefined) {
+          firedThis = Array.isArray(e.tags) && e.tags.indexOf(rule.tag) !== -1;
+          attributable++;
+        } else {
+          continue;
+        }
+        if (firedThis) fired.push(e);
+        else absent.push(e);
+      }
+      if (attributable === 0) continue;
       const firedAvg =
         fired.length > 0 ? fired.reduce((s, e) => s + (e.pctChange || 0), 0) / fired.length : 0;
       const absentAvg =

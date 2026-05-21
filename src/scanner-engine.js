@@ -21,6 +21,7 @@
 const pdDetector = require('./scanner-pd-detector');
 const atrZonesModule = require('./scanner-atr-zones');
 const scoringRules = require('./scoring-rules');
+const scannerHistory = require('./scanner-history');
 
 /* Server-side P&D detector kill-switch. Default ON; set
    SCANNER_SERVER_PD_ENABLED=false in the env for instant rollback
@@ -626,8 +627,17 @@ function scoreSymbol(sym, ctx) {
        bounded-size guards) so the backtest harness can later
        attribute tagless rules and run rule-modification A/B
        simulations. Consumers that don't care about ctx (PWA card
-       renderers, push payload) can ignore the field. */
-    ctx: _ruleCtx,
+       renderers, push payload) can ignore the field.
+
+       Defense-in-depth: route the wire-exposed ctx through the
+       SAME sanitizer scanner-history uses for on-disk persistence.
+       That way the allowlist + per-field type schema enforces a
+       single source of truth for what _ruleCtx fields are
+       public-by-contract. Future PRs that add a sensitive field
+       to _ruleCtx without updating CTX_TYPE_MAP get screened
+       both at the wire AND at disk. SRE-review of PR #127
+       flagged the wire bypass; this closes it. */
+    ctx: scannerHistory._sanitizeCtx(_ruleCtx),
   };
 }
 

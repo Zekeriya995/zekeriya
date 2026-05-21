@@ -423,3 +423,138 @@ test('computeStats.alpha — empty history still returns alpha:null', () => {
   const out = computeStats([], 7, NOW);
   assert.equal(out.alpha, null);
 });
+
+/* ─── Phase 4 Part 2 — ctx capture ───────────────────────────── */
+
+const { _sanitizeCtx, CTX_ALLOWLIST_KEYS } = require('../src/scanner-history');
+
+test('_sanitizeCtx — null / non-object input returns null', () => {
+  assert.equal(_sanitizeCtx(null), null);
+  assert.equal(_sanitizeCtx(undefined), null);
+  assert.equal(_sanitizeCtx('a string'), null);
+  assert.equal(_sanitizeCtx(42), null);
+});
+
+test('_sanitizeCtx — allowlisted scalar fields are kept', () => {
+  const raw = {
+    isTier1: true,
+    isTier2: false,
+    volume: 1e8,
+    change: 1.5,
+    frRate: -0.05,
+    mtfStrength: 'full',
+    mtfBias: 'bullish',
+    cvdTrend: 'BUYING',
+    btcMarketOk: true,
+  };
+  const out = _sanitizeCtx(raw);
+  assert.equal(out.isTier1, true);
+  assert.equal(out.isTier2, false);
+  assert.equal(out.volume, 1e8);
+  assert.equal(out.change, 1.5);
+  assert.equal(out.frRate, -0.05);
+  assert.equal(out.mtfStrength, 'full');
+  assert.equal(out.mtfBias, 'bullish');
+  assert.equal(out.cvdTrend, 'BUYING');
+  assert.equal(out.btcMarketOk, true);
+});
+
+test('_sanitizeCtx — unknown keys are SILENTLY DROPPED (allowlist)', () => {
+  const raw = {
+    isTier1: true,
+    secretApiKey: 'should-not-persist',
+    nestedJunk: { foo: 'bar' },
+    someArray: [1, 2, 3],
+  };
+  const out = _sanitizeCtx(raw);
+  assert.equal(out.isTier1, true);
+  assert.equal(out.secretApiKey, undefined, 'unknown key must NOT persist');
+  assert.equal(out.nestedJunk, undefined);
+  assert.equal(out.someArray, undefined);
+});
+
+test('_sanitizeCtx — non-scalar values for known keys are rejected', () => {
+  const raw = {
+    volume: 'not-a-number',
+    change: { value: 1 },
+    isTier1: 'truthy-string',
+    mtfStrength: ['array'],
+  };
+  const out = _sanitizeCtx(raw);
+  assert.equal(out.volume, undefined);
+  assert.equal(out.change, undefined);
+  assert.equal(out.isTier1, undefined);
+  assert.equal(out.mtfStrength, undefined);
+});
+
+test('_sanitizeCtx — non-finite numbers (NaN, Infinity) rejected', () => {
+  const raw = { volume: NaN, change: Infinity, frRate: -Infinity };
+  const out = _sanitizeCtx(raw);
+  assert.equal(out.volume, undefined);
+  assert.equal(out.change, undefined);
+  assert.equal(out.frRate, undefined);
+});
+
+test('_sanitizeCtx — strings > 32 chars rejected', () => {
+  const raw = {
+    mtfStrength: 'x'.repeat(33),
+    mtfBias: 'bullish',
+  };
+  const out = _sanitizeCtx(raw);
+  assert.equal(out.mtfStrength, undefined);
+  assert.equal(out.mtfBias, 'bullish');
+});
+
+test('CTX_ALLOWLIST_KEYS — covers every ctx field used by the registry', () => {
+  /* Locks the contract: any new ctx field added in scoring-rules.js
+     MUST also be added to this allowlist if it should persist. */
+  assert.ok(CTX_ALLOWLIST_KEYS.includes('isTier1'));
+  assert.ok(CTX_ALLOWLIST_KEYS.includes('isTier2'));
+  assert.ok(CTX_ALLOWLIST_KEYS.includes('frRate'));
+  assert.ok(CTX_ALLOWLIST_KEYS.includes('coinalyzeOIValue'));
+  assert.ok(CTX_ALLOWLIST_KEYS.includes('mtfStrength'));
+  assert.ok(CTX_ALLOWLIST_KEYS.includes('macdCross'));
+  assert.ok(CTX_ALLOWLIST_KEYS.includes('cvdTrend'));
+  assert.ok(CTX_ALLOWLIST_KEYS.includes('btcMarketOk'));
+});
+
+test('recordSignal — captures sanitized ctx when sig.ctx is present', () => {
+  const h = [];
+  const sig = {
+    s: 'BTC',
+    tier: 'ULTRA',
+    score: 105,
+    price: 100,
+    tags: ['🏆TOP100'],
+    ctx: {
+      isTier1: true,
+      volume: 1e8,
+      change: 1,
+      mtfStrength: 'full',
+      mtfBias: 'bullish',
+      secretApiKey: 'leak-attempt',
+    },
+  };
+  recordSignal(h, sig, NOW);
+  assert.equal(h.length, 1);
+  assert.ok(h[0].ctx, 'ctx must be persisted');
+  assert.equal(h[0].ctx.isTier1, true);
+  assert.equal(h[0].ctx.mtfStrength, 'full');
+  assert.equal(h[0].ctx.secretApiKey, undefined, 'allowlist must strip unknown keys');
+});
+
+test('recordSignal — omits ctx field when sig.ctx is absent (backwards compat)', () => {
+  const h = [];
+  const sig = {
+    s: 'ETH',
+    tier: 'STRONG',
+    score: 75,
+    price: 2000,
+    tags: ['🏆TOP100'],
+  };
+  recordSignal(h, sig, NOW);
+  assert.equal(h.length, 1);
+  assert.equal(h[0].ctx, undefined, 'absent ctx must NOT add an empty ctx field');
+  assert.equal(h[0].s, 'ETH');
+  assert.equal(h[0].tier, 'STRONG');
+});

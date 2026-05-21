@@ -21,6 +21,7 @@
 const pdDetector = require('./scanner-pd-detector');
 const atrZonesModule = require('./scanner-atr-zones');
 const scoringRules = require('./scoring-rules');
+const scannerHistory = require('./scanner-history');
 
 /* Server-side P&D detector kill-switch. Default ON; set
    SCANNER_SERVER_PD_ENABLED=false in the env for instant rollback
@@ -334,8 +335,15 @@ function scoreSymbol(sym, ctx) {
   const _macd = _ind && _ind.macd ? _ind.macd : null;
   /* PR G additions: high, low, price, takerAvg, takerRatio,
      coinalyzeOIValue let the registry run AT_HIGH / BOTTOM /
-     TAKER_SKEW / COINALYZE_OI. */
-  const registryResult = scoringRules.applyRules({
+     TAKER_SKEW / COINALYZE_OI.
+
+     Phase 4 Part 2 — build the ctx as a named const so we can
+     attach it to the returned signal for scanner-history capture.
+     The history's stored ctx enables Phase 4's backtest harness
+     to attribute TAGLESS rules (CHANGE_PENALTY_GT3/GT5,
+     BTC_NOT_OK_PENALTY) which tag-based attribution can't see,
+     and is the data foundation for future A/B-replay backtests. */
+  const _ruleCtx = {
     isTier1: isTier1,
     volume: d.volume,
     change: d.change,
@@ -358,7 +366,8 @@ function scoreSymbol(sym, ctx) {
     mtfBias: _mtf ? _mtf.agreement : undefined,
     rsi: _ind && typeof _ind.rsi === 'number' ? _ind.rsi : undefined,
     macdCross: _macd && typeof _macd.cross === 'string' ? _macd.cross : undefined,
-  });
+  };
+  const registryResult = scoringRules.applyRules(_ruleCtx);
   score += registryResult.scoreDelta;
   for (const t of registryResult.tagsDelta) tags.push(t);
 
@@ -613,6 +622,22 @@ function scoreSymbol(sym, ctx) {
     tp2: tp2,
     rr: Math.round(rr * 100) / 100,
     ts: Date.now(),
+    /* Phase 4 Part 2: the registry input ctx captured at scoring
+       time. scanner-history.recordSignal persists it (subject to
+       bounded-size guards) so the backtest harness can later
+       attribute tagless rules and run rule-modification A/B
+       simulations. Consumers that don't care about ctx (PWA card
+       renderers, push payload) can ignore the field.
+
+       Defense-in-depth: route the wire-exposed ctx through the
+       SAME sanitizer scanner-history uses for on-disk persistence.
+       That way the allowlist + per-field type schema enforces a
+       single source of truth for what _ruleCtx fields are
+       public-by-contract. Future PRs that add a sensitive field
+       to _ruleCtx without updating CTX_TYPE_MAP get screened
+       both at the wire AND at disk. SRE-review of PR #127
+       flagged the wire bypass; this closes it. */
+    ctx: scannerHistory._sanitizeCtx(_ruleCtx),
   };
 }
 

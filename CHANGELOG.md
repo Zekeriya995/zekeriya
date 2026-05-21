@@ -1,5 +1,78 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Scanner Phase 4 Part 2 — ctx capture for backtest harness] — 2026-05-21
+
+**Server-side. Foundation for richer Phase 4 analyses.** Adds the
+input ctx that the registry consumed at signal-scoring time to
+each persisted scanner-history entry. Enables future PRs to:
+
+1. **Attribute tagless rules** (`CHANGE_PENALTY_GT3` /
+   `CHANGE_PENALTY_GT5` / `BTC_NOT_OK_PENALTY`) — these don't
+   appear in the persisted tag bag, so tag-based attribution
+   (PR #125) can't see them.
+2. **Replay rule modifications** against historical signals
+   (real A/B backtesting): re-run `applyRules` with rule
+   weights / conditions modified and compare against actual
+   outcomes.
+
+### Implementation
+
+- `scoreSymbol` builds the registry ctx as a named `_ruleCtx`
+  const and returns it on the signal under `ctx`. Consumers
+  that don't care (PWA cards, push payload) ignore the field.
+- `scanner-history.recordSignal` sanitises + persists `sig.ctx`
+  via an **allowlist + per-field type schema** (`CTX_TYPE_MAP`):
+  - Unknown keys silently dropped — no accidental private-state
+    leak to the on-disk JSON.
+  - Type mismatches silently dropped (string in a boolean slot
+    → ignored, matching registry rules' strict `typeof` gates).
+  - Strings capped at 32 chars.
+  - `NaN` / `Infinity` rejected.
+- Entries without `sig.ctx` (legacy signals) get NO `ctx` field
+  — backwards compatible.
+
+### Storage cost
+
+Each ctx serialises to ~250-400 bytes. At 1000 entries the file
+grows ~200 KB → ~600 KB worst case. Acceptable for the analytic
+value.
+
+### Files changed
+
+- `src/scanner-engine.js` — `scoreSymbol` extracts the registry
+  input ctx into a named `_ruleCtx` const, then returns it on
+  the signal object.
+- `src/scanner-history.js` — new `CTX_TYPE_MAP`,
+  `CTX_ALLOWLIST_KEYS`, `_sanitizeCtx` exports. `recordSignal`
+  invokes the sanitizer and attaches the result when non-null.
+- `tests/scanner-history.test.js` — **+10 tests** covering
+  sanitiser edge cases (null/non-object, allowlist, unknown
+  keys dropped, type mismatches dropped, NaN/Infinity, string
+  length cap), the allowlist contract, `recordSignal` ctx
+  capture happy path, `recordSignal` backwards compat.
+
+### Verification
+
+- `npm run check` — **790/790 tests pass** (+10 over PR #125's
+  781).
+
+### Rollback
+
+Data-capture only — no behaviour change. `git revert
+<merge-commit>`. Old entries' `ctx` field stays on disk
+harmlessly; code stops reading/writing it.
+
+### Future work this unlocks
+
+- **Part 3**: extend `scanner-backtest.js` to use `entry.ctx`
+  when present, replaying every rule's condition against the
+  ctx for proper attribution (covers the 3 tagless rules +
+  any future schema-extended rules).
+- **Part 4**: rule-modification A/B replay. Take a RULES
+  override (e.g. `FALLING_KNIFE.weight = -30`), re-run
+  `applyRules` against every entry's ctx, compare what the
+  resulting tier would have been vs the recorded tier.
+
 ## [Scanner Phase 4 — Backtest harness (per-rule effectiveness)] — 2026-05-21
 
 **Server-side. NEW READ-ONLY ENDPOINT. No state mutation. No

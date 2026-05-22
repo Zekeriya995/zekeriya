@@ -651,6 +651,29 @@ function classifyGemTiming(gainPct) {
      c in [3, 8)       +10 */
 function scoreGemCandidate(ticker, klineStats, v3) {
   if (!ticker) return { score: 0, tags: [] };
+  /* Gem Hunter trend gate (2026-05-22 audit): coins down >5% in 24h
+     are NOT gem candidates. The audit found HYPER (-6.8%) and MEGA
+     (-6.2%) leaking into the gem grid with "مبكر — ادخل!" badges,
+     because the previous scoring formula only awarded points for
+     positive ticker.c (+20 for [0,3), +10 for [3,8)) but did NOT
+     penalize or block negative ticker.c. Result: a coin in a
+     visible downtrend got through if it had a volume spike OR
+     early-timing classification — exactly the falling-knife pattern
+     the rest of the audit (FALLING_KNIFE rule, stale-drawdown
+     gate) was designed to eliminate.
+
+     Threshold -5% matches the freshness=old cutoff in app.js
+     deepAnalyze and the new stale-drawdown gate in
+     qualityFilterRejectReason — keeps the gem hunter consistent
+     with the rest of the system's falling-trend posture.
+
+     Returns blocked:true so the orchestrator (app.js
+     loadSmallCaps2) can skip cleanly without re-checking the
+     condition. Score zero and tag '🔻FALLING' surface the
+     decision in any downstream consumer that reads the result. */
+  if (ticker.c != null && ticker.c < -5) {
+    return { score: 0, tags: ['🔻FALLING'], blocked: true };
+  }
   var sc = 0;
   var tags = [];
   if (klineStats && klineStats.vx != null) {

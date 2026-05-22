@@ -2050,18 +2050,33 @@ async function loadSmallCaps2(){
       try{_wPnL=calcWhalePnL(s)}catch(_e){}
       try{_cvd=analyzeCVD(s)}catch(_e){}
       var _scored=scoreGemCandidate(d,{vx:vx,timing:timing},{iceberg:_ice,vpin:_vp,whalePnL:_wPnL,cvd:_cvd});
+      /* Skip candidates blocked by scoreGemCandidate's trend gate
+         (2026-05-22 audit fix — coins down >5% in 24h are not
+         gem candidates). Do this BEFORE computing target/stop to
+         avoid wasting cycles on rejected coins. */
+      if(_scored.blocked)return;
       var sc=_scored.score;
       var tags=_scored.tags;
       var target=timing!=='late'?pN*(timing==='early'?GEM_CONFIG.TARGET_EARLY:GEM_CONFIG.TARGET_STILL):null;
       var stop=timing!=='late'?pN*(timing==='early'?GEM_CONFIG.STOP_EARLY:GEM_CONFIG.STOP_STILL):null;
-      /* Reuse the prefilter rug calc — getRugPullRisk is pure and FR
-         hasn't changed within this loop, so a second call would burn
-         cycles on the hot path. */
       var rugRisk=getRugPullRisk(d,frArgFor(s),bookTickers[s]);
       var mc=marketCapData[s]||0;
-      /* Gate: raised threshold + momentum requirement so V3-only
-         candidates without volume confirmation don't surface. */
-      var hasMomentum=vx>=1.5||timing==='early'||timing==='still';
+      /* Momentum gate — tightened in the 2026-05-22 audit. The previous
+         OR-gate (`vx>=1.5 OR timing IN [early,still]`) admitted
+         candidates with NEITHER a real volume spike NOR a usable
+         price-from-spike position — examples caught in production:
+           - NXPC (vx=0.3, early)  → vol declining 70%, still "early"
+           - PLUME (vx=1.0, early) → vol flat, still "early"
+         Both ate a slot on the user's screen with no scoring basis
+         (vx<1.5 contributes 0 to scoreGemCandidate per the formula
+         at scanner-helpers.js:656-670).
+
+         New gate: BOTH conditions required, with a small lower-bound
+         relaxation for clearly-early candidates (timing='early'
+         tolerates vx down to 1.2x — early but not yet exploding).
+         'late' timing is always rejected because the spike has
+         already played out by definition. */
+      var hasMomentum=(vx>=1.5&&(timing==='early'||timing==='still'))||(vx>=1.2&&timing==='early');
       if(sc>=GEM_CONFIG.SCORE_MIN&&hasMomentum){
         res.push({s:s,p:d.p,c:d.c,v:d.v,mc:mc,rugRisk:rugRisk,vx:vx,gain:gain,timing:timing,tBadge:tBadge,sc:sc,tags:tags,target:target,stop:stop});
       }
@@ -2115,7 +2130,25 @@ function renderSmallCaps(res){
     /* Rug-risk pill: visible reassurance that we filtered, not just guessed. */
     var rugCol=g.rugRisk<30?'var(--up)':g.rugRisk<60?'var(--warn)':'var(--dn)';
     var rugTxt=g.rugRisk<30?t('gem_safe_pill'):g.rugRisk<60?t('gem_medium_pill'):t('gem_risk_pill');
-    var mcDisplay=g.mc>0?fmt(g.mc):t('gem_mc_unknown');
+    var mcKnown=g.mc>0;
+    var mcDisplay=mcKnown?fmt(g.mc):t('gem_mc_unknown');
+    /* MC unknown → amber warning color so the user knows the
+       market-cap range filter didn't actually gate this candidate
+       (the gate at app.js:2010 requires mc > 0 to enforce the
+       range, so mc=0 from missing CoinGecko data slips through
+       silently). 2026-05-22 audit fix. */
+    var mcCol=mcKnown?'var(--t2)':'var(--warn)';
+    /* Numeric score badge — the audit found that all cards
+       looked identical bar the volume number, so a 75-point
+       candidate and a 35-point one (the SCORE_MIN floor) looked
+       equally credible to the user. Surfacing the raw score lets
+       the user calibrate confidence per card. Color ladder
+       matches the existing visual semantics:
+         85+ : green   (var(--up))
+         70+ : neon    (var(--neon))
+         50+ : warn    (var(--warn))
+         else: muted  (var(--t2))  */
+    var scoreCol=g.sc>=85?'var(--up)':g.sc>=70?'var(--neon)':g.sc>=50?'var(--warn)':'var(--t2)';
     /* "Appeared X minutes ago" badge — uses the existing timeBadge() /
        timeAgo() helpers so the format matches the rest of the app
        (الآن / منذ Xم / منذ Xس). g.firstSeen is stamped by
@@ -2128,6 +2161,7 @@ function renderSmallCaps(res){
       +'<span style="font-weight:800;font-size:14px">💎 '+sSafe+'</span>'
       +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+g.tBadge.col+';font-weight:700">'+esc(g.tBadge.ic)+' '+esc(g.tBadge.l)+'</span>'
       +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+rugCol+';font-weight:700">'+esc(rugTxt)+'</span>'
+      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+scoreCol+';font-weight:800;font-family:var(--fm)">'+g.sc+' pts</span>'
       +ageBadge
       +'</div>'
       +'<span style="font-family:var(--fm);font-size:12px;font-weight:800;color:var(--neon)">'+g.vx.toFixed(1)+'x vol</span>'
@@ -2136,7 +2170,7 @@ function renderSmallCaps(res){
       +'<span>'+fP(g.p)+'</span>'
       +'<span style="color:'+(g.c>=0?'var(--up)':'var(--dn)')+'">'+(g.c>=0?'+':'')+g.c.toFixed(1)+'%</span>'
       +'<span>Vol:'+fmt(g.v)+'</span>'
-      +'<span style="color:var(--t2)">'+esc(t('gem_mc_label'))+esc(mcDisplay)+'</span>'
+      +'<span style="color:'+mcCol+'">'+(mcKnown?'':'⚠ ')+esc(t('gem_mc_label'))+esc(mcDisplay)+'</span>'
       +'<span style="color:var(--warn)">+'+g.gain.toFixed(1)+'% '+esc(t('gem_from_spike'))+'</span>'
       +'</div>';
     /* V3 confirmation chips — only when we have 1+ */

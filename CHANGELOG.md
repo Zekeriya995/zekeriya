@@ -1,5 +1,134 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Gem Hunter — quality audit fixes] — 2026-05-22
+
+**Scope: Gem Hunter (`صيد الجواهر`) tab only.** Four coordinated
+fixes after a hands-on audit of the gem grid in production
+(2026-05-22 screenshot review):
+
+### What the audit found
+
+Five candidates surfaced in the gem grid; only one (PSG, 2.5x
+vol, +8.2%) was a real signal. The other four were noise:
+
+| Coin | vx | 24h | Issue |
+|---|---|---|---|
+| PLUME | 1.0x | +2.0% | vx below scoring threshold, surfacing on timing alone |
+| NXPC | 0.3x | +2.8% | volume DECLINING but classified as "early" |
+| HYPER | 1.6x | **-6.8%** | falling knife passed as "Early — Enter!" |
+| MEGA | 1.9x | **-6.2%** | same pattern |
+
+Signal-to-noise: 1/5 = 20%. Unacceptable for a production
+"opportunity hunter" tab.
+
+### The four coordinated fixes
+
+#### 1. Falling-trend gate in `scoreGemCandidate`
+
+`src/scanner-helpers.js` — coins with `ticker.c < -5%` now
+short-circuit with `{ score: 0, tags: ['🔻FALLING'], blocked: true }`.
+Threshold (-5%) intentionally matches:
+- the freshness=`old` cutoff in `app.js deepAnalyze`
+- the stale-drawdown gate in `qualityFilterRejectReason`
+
+Consistent falling-knife posture across the whole scanner now.
+Pinned by 5 boundary tests (-5% exact passes, -5.01% blocks,
+HYPER -6.8% case locked, null ticker.c does not block).
+
+#### 2. Tightened momentum gate in `loadSmallCaps2`
+
+`app.js:2064` — was `vx>=1.5 OR timing in [early,still]` (OR).
+Now requires BOTH:
+
+```js
+hasMomentum = (vx >= 1.5 && timing in [early, still])
+           OR (vx >= 1.2 && timing === 'early')
+```
+
+The second clause is a small relaxation for clearly-early
+candidates (the spike hasn't fully materialized yet but price
+is fresh). `'late'` timing always rejected — the move has
+already played out.
+
+NXPC (vx=0.3, early) and PLUME (vx=1.0, early) both fall
+below the new floor.
+
+#### 3. Numeric score badge per card
+
+`app.js renderSmallCaps` — each card now shows its raw score
+as a pill ("73 pts"). Color ladder mirrors the existing visual
+semantics:
+
+| Score | Color |
+|---|---|
+| 85+ | green (`var(--up)`) |
+| 70-84 | neon (`var(--neon)`) |
+| 50-69 | warn (`var(--warn)`) |
+| 35-49 | muted (`var(--t2)`) |
+
+Pre-fix all cards looked equally credible regardless of whether
+they were at the SCORE_MIN floor (35) or at 75+. Now the user
+can calibrate confidence per card.
+
+#### 4. MC transparency
+
+`app.js renderSmallCaps` — when `g.mc === 0` (CoinGecko data
+missing), the MC label now renders in warn color with a
+"⚠" prefix. The audit noted that the MC range filter at
+`app.js:2010` only enforces when `mc > 0`, so coins with no
+known MC slip past the cap-range guard silently. Surfacing
+the "unknown" state makes the user aware that this candidate
+wasn't size-gated.
+
+### Files changed
+
+- `src/scanner-helpers.js scoreGemCandidate` — +13 lines for
+  the falling-trend gate (with doc-block explaining the audit
+  case)
+- `app.js loadSmallCaps2` (~line 2064) — momentum gate
+  tightened, plus a `blocked` skip before target/stop math
+- `app.js renderSmallCaps` (~line 2114) — score badge
+  + MC warning chip
+- `tests/scanner-helpers.test.js` — **+5 tests** covering
+  the trend gate (block, boundary, regression, null-safety)
+
+### Verification
+
+- `npm run check` → **802/802 tests pass** (+5).
+- Lint + format clean.
+
+### Expected user-visible impact
+
+Applied to the audit's 5-candidate snapshot:
+
+| Coin | Pre-fix | Post-fix |
+|---|---|---|
+| PLUME (1.0x, +2.0%) | shown | **hidden** (vx < 1.2) |
+| NXPC (0.3x, +2.8%) | shown | **hidden** (vx < 1.2) |
+| **PSG (2.5x, +8.2%)** | shown | **shown** with explicit score |
+| HYPER (1.6x, -6.8%) | shown | **hidden** (trend gate) |
+| MEGA (1.9x, -6.2%) | shown | **hidden** (trend gate) |
+
+S/N ratio: 20% → **100%**.
+
+### Rollback
+
+`git revert <merge-commit>`. The trend gate is one short-circuit
+in `scoreGemCandidate`; the momentum gate is a single boolean
+expression; the score badge and MC warning are pure HTML-string
+additions in the render function. All localised to the Gem
+Hunter — no other tab affected.
+
+### Out of scope (filed for later)
+
+- The "all 5 cards showing 11 min" pattern from the screenshot
+  could indicate `gemTrackFirstSeen` stamping all cards with
+  scan-cycle time instead of true detection time. Needs a
+  dedicated investigation; not in this PR.
+- The `RUG_MAX = 70` threshold inherits from the original
+  audit; could be tightened to 50 once we have more failure
+  data (currently every shown card passes "safe").
+
 ## [Scanner — stale-signal display fix + downward-drift gate] — 2026-05-21
 
 **User-visible bug fix.** Closes the ETH 2026-05-21 screenshot

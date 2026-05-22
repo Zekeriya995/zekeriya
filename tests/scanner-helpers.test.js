@@ -404,6 +404,58 @@ test('scoreGemCandidate — c kicker buckets', () => {
   assert.equal(scoreGemCandidate(t3, null, null).score, 0);
 });
 
+/* ─── 2026-05-22 audit — Gem Hunter trend gate ─────────────────
+   Coins down >5% in 24h must not surface in the gem grid. The
+   audit case: HYPER at -6.8% and MEGA at -6.2% were appearing
+   as "Early — Enter!" with the previous formula that only
+   awarded points for positive ticker.c, didn't reject anything.
+   New behaviour: `scoreGemCandidate` short-circuits with
+   `blocked: true, tags: ['🔻FALLING']` so the orchestrator can
+   skip the candidate cleanly. Pins the boundary (-5% exact)
+   and the contract that blocked candidates always get score 0
+   and the FALLING tag. */
+
+test('scoreGemCandidate — falling-trend gate blocks coins with c < -5%', () => {
+  const tHyper = { p: 0.1, c: -6.8, v: 1e6, h: 0.12, l: 0.09 };
+  const out = scoreGemCandidate(tHyper, { vx: 1.6, timing: 'early' }, null);
+  assert.equal(out.blocked, true, 'HYPER-shaped (-6.8%) must be blocked');
+  assert.equal(out.score, 0);
+  assert.deepEqual(out.tags, ['🔻FALLING']);
+});
+
+test('scoreGemCandidate — falling-trend gate boundary (-5% exact PASSES)', () => {
+  /* Strict `< -5`: -5% exact does NOT block (lets bounce candidates
+     at the boundary survive for downstream evaluation). */
+  const t = { p: 1, c: -5, v: 1e6, h: 1.1, l: 0.95 };
+  const out = scoreGemCandidate(t, { vx: 2, timing: 'early' }, null);
+  assert.notEqual(out.blocked, true, '-5% exact should not block (strict <)');
+  assert.equal(out.tags.indexOf('🔻FALLING'), -1);
+});
+
+test('scoreGemCandidate — falling-trend gate at -5.01% DOES block', () => {
+  const t = { p: 1, c: -5.01, v: 1e6, h: 1.1, l: 0.95 };
+  const out = scoreGemCandidate(t, { vx: 2, timing: 'early' }, null);
+  assert.equal(out.blocked, true, '-5.01% is just over the boundary, must block');
+});
+
+test('scoreGemCandidate — positive c values unaffected by trend gate', () => {
+  /* Regression guard — the gate must only fire on the negative
+     extreme, not on any positive change. */
+  const t = { p: 1, c: 2, v: 1e6, h: 1.1, l: 0.95 };
+  const out = scoreGemCandidate(t, { vx: 2, timing: 'early' }, null);
+  assert.notEqual(out.blocked, true);
+  assert.ok(out.score > 0, 'positive c with vx and timing should score');
+});
+
+test('scoreGemCandidate — c null (missing data) does NOT block', () => {
+  /* Defensive: missing ticker.c is not the same as known-negative.
+     A coin where we have no 24h change reading should fall through
+     to the rest of the scoring formula, not get auto-blocked. */
+  const t = { p: 1, c: null, v: 1e6, h: 1.1, l: 0.95 };
+  const out = scoreGemCandidate(t, { vx: 2, timing: 'early' }, null);
+  assert.notEqual(out.blocked, true);
+});
+
 test('scoreGemCandidate — ICEBERG_SELL does NOT trigger the buy boost', () => {
   /* Defensive: only ICEBERG_BUY is bullish; SELL must not be rewarded. */
   const t = { p: 1, c: 0, v: 1e6, h: 1, l: 1 };

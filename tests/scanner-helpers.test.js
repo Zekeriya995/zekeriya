@@ -760,6 +760,22 @@ test('GEM_CONFIG.STABLES includes XUSD (explicit allow-list entry)', () => {
   assert.ok(GEM_CONFIG.STABLES.indexOf('XUSD') !== -1);
 });
 
+test('GEM_CONFIG scan funnel — score pool is wider than the render cap', () => {
+  /* The scan funnel is prefilter -> score -> render. Two invariants keep
+     the surge-weighted score doing real selection work; this is the
+     regression guard for the 2026-05-24 selection fix, where
+     SCORE_LIMIT(25) barely exceeded RENDER_LIMIT(20) so the score culled
+     only ~5 candidates and selection collapsed to "top-N by raw volume". */
+  assert.ok(
+    GEM_CONFIG.SCORE_LIMIT <= GEM_CONFIG.PREFILTER_LIMIT,
+    'SCORE_LIMIT must not exceed PREFILTER_LIMIT (never score beyond the shortlist)'
+  );
+  assert.ok(
+    GEM_CONFIG.RENDER_LIMIT < GEM_CONFIG.SCORE_LIMIT,
+    'RENDER_LIMIT must be strictly < SCORE_LIMIT so score-ranking actually selects'
+  );
+});
+
 /* ─── isValidGemSymbol ────────────────────────────────────────────── */
 
 test('isValidGemSymbol — accepts uppercase alphanumeric tickers', () => {

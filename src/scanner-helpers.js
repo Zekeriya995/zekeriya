@@ -414,8 +414,17 @@ const GEM_CONFIG = Object.freeze({
 
   /* Slice caps */
   PREFILTER_LIMIT: 50 /* survivors of pre-filter sorted by 24h vol */,
-  SCORE_LIMIT: 25 /* of those, top N actually fetched + scored */,
-  RENDER_LIMIT: 20 /* top N rendered as cards */,
+  SCORE_LIMIT: 50 /* of those, top N fetched + scored. Set equal to
+     PREFILTER_LIMIT so EVERY cheap-filter survivor gets a real,
+     surge-weighted score. With the old value of 25 the renderer's
+     top-RENDER_LIMIT (20) was drawn from only 25 scored candidates,
+     so scoreGemCandidate culled just ~5 — selection was effectively
+     "top-25 by raw 24h volume", structurally excluding quiet-but-
+     surging coins (the actual pre-pump gems). Scoring all 50 lets the
+     volume-spike/timing weighting pick the best 20 from a 2x-wider
+     pool. Cost is one extra klines fetch per added candidate; 50
+     parallel calls stay well within Binance rate limits. 2026-05-24. */,
+  RENDER_LIMIT: 20 /* top N (by score) rendered as cards, drawn from the SCORE_LIMIT pool */,
 
   /* Caching (orchestrator side) */
   KLINE_TTL_MS: 90000 /* per-symbol 1h klines TTL */,

@@ -53,9 +53,38 @@ was missing); `renderSmallCaps` then shows an amber
 "❔ سيولة غير مؤكدة (Liquidity unverified)" pill instead of green —
 mirroring the existing MC-unknown treatment.
 
+### 4. Selection no longer collapses to "top-N by raw volume"
+
+The scan funnel is prefilter → score → render with caps
+`PREFILTER_LIMIT=50`, `SCORE_LIMIT=25`, `RENDER_LIMIT=20`. The defect:
+the renderer shows the top **20** by score but only **25** were ever
+scored — so `scoreGemCandidate`'s strong volume-spike/timing weighting
+culled just ~5 candidates, and selection effectively degraded to
+"the 25 highest-volume coins under \$20, minus the 5 worst". Quiet but
+*surging* coins — the actual pre-pump gems — were never in the pool
+because the pool was ranked purely by absolute 24h volume.
+
+Fix: `SCORE_LIMIT` raised 25 → 50 (= `PREFILTER_LIMIT`), so **every**
+cheap-filter survivor is scored and the surge-weighted ranker picks the
+best 20 from a 2×-wider pool. Cost is one extra `klines` fetch per added
+candidate; 50 parallel calls stay well within Binance rate limits. No
+new data sources. A new `GEM_CONFIG` funnel invariant test guards
+against regressing to a shallow score pool
+(`RENDER_LIMIT < SCORE_LIMIT <= PREFILTER_LIMIT`).
+
+Deliberately **not** chased here: computing real micro-cap market caps
+(CoinGecko top-250 never reaches the 1M–50M band, so the MC filter is
+inert and cards honestly show `MC ?`) and fetching V3 iceberg/VPIN/CVD
+on demand for gems (a one-shot `aggTrades` snapshot yields thin, noisy
+signals masquerading as strong data — the streamed stores only cover the
+top ~275 coins). The honest display is already correct: V3 chips render
+only when real data exists, and MC shows `?` rather than a fabricated
+number. Forcing those numbers would trade *honest* data for *fragile,
+rate-limited* data — the wrong call.
+
 ### Validation
 
-809 tests pass (7 new in `tests/scanner-helpers.test.js`), ESLint and
+810 tests pass (8 new in `tests/scanner-helpers.test.js`), ESLint and
 Prettier clean. Also carries forward the 2026-05-22 momentum-gate fix
 (below), which was committed but not yet merged to `main` / deployed.
 

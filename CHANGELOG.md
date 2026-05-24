@@ -1,5 +1,64 @@
 # NEXUS PRO V10 — التسليم النهائي الشامل
 
+## [Gem Hunter — deep audit, round 2 fixes] — 2026-05-24
+
+**Scope: Gem Hunter (`صيد الجواهر`) tab only.** A deeper second-pass
+audit (two-engineer review) surfaced three "wrong/misleading data"
+defects in the survivor-scoring + render path. Three safe, tested
+fixes shipped here (the larger root-cause items — volume-ranked
+selection bias, dead market-cap coverage in the 1M–50M band, and the
+V3 stack having no data for true micro-caps — are tracked separately
+as they need design decisions).
+
+### 1. Bearish spike no longer surfaces as "Early — Enter!"
+
+`classifyGemTiming` collapses **every** gain below `EARLY_MAX` (3%) to
+`'early'` — including NEGATIVE gains. So a volume spike on a *falling*
+price (distribution) was classified `early`, earning the full +30
+early bonus, a green entry badge, and a +30% target. The only existing
+guard (`scoreGemCandidate` blocks 24h change < -5%) misses an
+intra-spike drop when the 24h change is mild.
+
+Fix: the survivor gate in `loadSmallCaps2` is now delegated to a new
+pure, unit-tested helper `gemEntryGate(vx, timing, gain)` in
+`src/scanner-helpers.js`, which requires `gain >= 0` (a bullish spike)
+**in addition to** the existing momentum rule
+(`vx>=1.5 & timing∈{early,still}` OR `vx>=1.2 & early`; `late` always
+rejected). Strictly more restrictive — no positive-gain candidate is
+newly blocked. 8 boundary tests.
+
+### 2. Structural stablecoin guard (the XUSD leak)
+
+XUSD ($1.00, 0.0% 24h) surfaced as a gem because it wasn't on the
+`GEM_CONFIG.STABLES` allow-list — the same failure mode previously seen
+with USD1 and RLUSD. Two layers: XUSD added to the list, **and** a new
+conservative pure helper `isLikelyStablecoin(symbol, price, change)`
+now runs in the pre-filter. It flags a coin only when ALL hold: the
+symbol carries a `USD` marker, the price is within 1% of $1.00, and the
+24h change is essentially flat (|change| < 0.5%). Requiring marker AND
+flat-near-$1 together keeps false positives near zero (a volatile $1
+utility token fails the flat test; a non-USD symbol fails the marker
+test). 3 tests.
+
+### 3. Honest safety pill — no more false "🛡 آمن"
+
+`getRugPullRisk` needs the Binance-futures `bookTicker` (spread/depth)
+to assess liquidity. For most futures-less micro-caps that data is
+absent, and `fetchBinanceAdvanced` (its only loader) never runs on the
+scanner page — so the risk score caps at 50, below the 70 rejection
+threshold, and the card showed a green "🛡 آمن (Safe)" by default. That
+is false reassurance: it means "we couldn't check", not "verified
+safe". Each result now carries `rugLimited` (true when `bookTickers[s]`
+was missing); `renderSmallCaps` then shows an amber
+"❔ سيولة غير مؤكدة (Liquidity unverified)" pill instead of green —
+mirroring the existing MC-unknown treatment.
+
+### Validation
+
+809 tests pass (7 new in `tests/scanner-helpers.test.js`), ESLint and
+Prettier clean. Also carries forward the 2026-05-22 momentum-gate fix
+(below), which was committed but not yet merged to `main` / deployed.
+
 ## [Gem Hunter — quality audit fixes] — 2026-05-22
 
 **Scope: Gem Hunter (`صيد الجواهر`) tab only.** Four coordinated

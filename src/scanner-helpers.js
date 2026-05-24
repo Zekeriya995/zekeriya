@@ -386,6 +386,7 @@ const GEM_CONFIG = Object.freeze({
     'AUSD',
     'DOLA',
     'SUSD',
+    'XUSD',
     'AEUR',
     'EURT',
     'EURS',
@@ -773,6 +774,64 @@ function getRugPullRisk(d, fr, bookTicker) {
   if (fr === null) risk += 10;
   if (risk > 100) risk = 100;
   return risk;
+}
+
+/* Gem entry gate — the final admission decision for an already-scored
+   candidate, extracted from loadSmallCaps2 so it can be unit-tested.
+   Pure. Two independent requirements, BOTH necessary:
+
+     1. Bullish spike — gainFromSpike >= 0. The price must be at or
+        above where the volume spike began. classifyGemTiming collapses
+        EVERY gain < EARLY_MAX (including NEGATIVE ones) to 'early', so
+        without this guard a volume spike on a FALLING price
+        (distribution / a bearish spike) surfaces as "Early — Enter!"
+        with a full +30 early bonus and a +30% target. A negative
+        gain-from-spike means the spike has so far produced a LOSS —
+        the opposite of a pre-pump entry. (2026-05-24 audit fix.)
+        `!(g >= 0)` also rejects NaN defensively.
+
+     2. Momentum — a real volume spike paired with usable timing:
+          (vx >= 1.5 AND timing in {early, still})  OR
+          (vx >= 1.2 AND timing === 'early')
+        The second clause tolerates a clearly-early candidate whose
+        spike hasn't fully exploded yet. 'late' is always rejected —
+        the move has already played out. (2026-05-22 fix, preserved.)
+
+   Returns true only when both hold. */
+function gemEntryGate(vx, timing, gainFromSpike) {
+  if (!(gainFromSpike >= 0)) return false;
+  if (vx >= 1.5 && (timing === 'early' || timing === 'still')) return true;
+  if (vx >= 1.2 && timing === 'early') return true;
+  return false;
+}
+
+/* Structural USD-peg detector — a safety net layered on top of the
+   GEM_CONFIG.STABLES allow-list. New pegs keep shipping (USD1, RLUSD,
+   AUSD, and now XUSD) and each one masquerades as a gem until someone
+   hand-adds it to STABLES. This catches them structurally and
+   conservatively: a coin is treated as a peg only when ALL hold:
+
+     - the symbol carries a USD marker (contains 'USD'),
+     - the price sits within `tol` of the $1.00 peg (default 1%),
+     - the 24h change is essentially flat (|change| < `flatPct`,
+       default 0.5%) — a genuine mover is never this flat.
+
+   Requiring the fiat marker AND the flat-near-$1 behaviour together
+   keeps false positives near zero: a volatile $1 utility token fails
+   the flat test, and a non-USD symbol fails the marker test. EUR and
+   other non-dollar pegs stay on the explicit STABLES list (this guard
+   only knows the $1 peg). `change` may be null/undefined (data not
+   loaded) — then the flat test is skipped and marker+price decide.
+   Returns boolean. */
+function isLikelyStablecoin(symbol, price, change, tol, flatPct) {
+  var s = String(symbol || '').toUpperCase();
+  if (s.indexOf('USD') === -1) return false;
+  if (!(price > 0)) return false;
+  var _tol = tol == null ? 0.01 : tol;
+  var _flat = flatPct == null ? 0.5 : flatPct;
+  if (Math.abs(price - 1) > _tol) return false;
+  if (change != null && Math.abs(change) >= _flat) return false;
+  return true;
 }
 
 /* Evaluate a signal's outcome by comparing entry price to current

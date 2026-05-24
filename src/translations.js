@@ -142,6 +142,7 @@ const TR = {
   gem_safe_pill: { ar: '🛡 آمن', en: '🛡 Safe' },
   gem_medium_pill: { ar: '⚠ متوسط', en: '⚠ Medium' },
   gem_risk_pill: { ar: '🚨 خطر', en: '🚨 Risk' },
+  gem_risk_unknown: { ar: '❔ سيولة غير مؤكدة', en: '❔ Liquidity unverified' },
   /* Gem Hunter — card labels */
   gem_mc_label: { ar: 'سوق:', en: 'MC:' },
   gem_mc_unknown: { ar: 'MC ?', en: 'MC ?' },

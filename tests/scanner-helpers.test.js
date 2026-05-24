@@ -683,6 +683,99 @@ test('classifyGemTiming — non-finite input collapses to early (most permissive
   assert.equal(classifyGemTiming(Infinity), 'early');
 });
 
+/* ─── gemEntryGate ────────────────────────────────────────────────── */
+
+test('gemEntryGate — admits a bullish spike with strong momentum', () => {
+  /* vx>=1.5 + early + gain>=0 */
+  assert.equal(gemEntryGate(2.0, 'early', 1.5), true);
+  /* vx>=1.5 + still + gain>=0 */
+  assert.equal(gemEntryGate(1.5, 'still', 5), true);
+  /* relaxed clause: 1.2<=vx<1.5 + early */
+  assert.equal(gemEntryGate(1.3, 'early', 0.5), true);
+  /* gain exactly 0 is still bullish enough (price at spike start) */
+  assert.equal(gemEntryGate(1.5, 'early', 0), true);
+});
+
+test('gemEntryGate — rejects a bearish spike (negative gain) even with strong momentum', () => {
+  /* This is the 2026-05-24 fix: classifyGemTiming maps negative gains
+     to "early", so a volume spike on a FALLING price would otherwise
+     surface as "Early — Enter!". The gate must veto it. */
+  assert.equal(gemEntryGate(5.0, 'early', -0.5), false);
+  assert.equal(gemEntryGate(2.0, 'still', -3), false);
+  assert.equal(gemEntryGate(10, 'early', -0.01), false);
+  /* NaN gain is rejected defensively. */
+  assert.equal(gemEntryGate(2.0, 'early', NaN), false);
+});
+
+test('gemEntryGate — rejects weak momentum and late timing', () => {
+  /* vx below the relaxed 1.2 floor */
+  assert.equal(gemEntryGate(1.0, 'early', 1), false);
+  assert.equal(gemEntryGate(0.3, 'early', 1), false);
+  /* "still" needs the full 1.5x — the 1.2 relaxation is early-only */
+  assert.equal(gemEntryGate(1.3, 'still', 1), false);
+  /* late is always rejected, however strong the spike */
+  assert.equal(gemEntryGate(5.0, 'late', 1), false);
+});
+
+/* ─── isLikelyStablecoin ──────────────────────────────────────────── */
+
+test('isLikelyStablecoin — flags a flat $1 USD peg (the XUSD case)', () => {
+  assert.equal(isLikelyStablecoin('XUSD', 1.0, 0.0), true);
+  assert.equal(isLikelyStablecoin('XUSD', 0.999, 0.1), true);
+  assert.equal(isLikelyStablecoin('USD1', 1.001, -0.2), true);
+  /* change may be missing (feed not loaded) — marker + near-$1 decide */
+  assert.equal(isLikelyStablecoin('XUSD', 1.0, null), true);
+  assert.equal(isLikelyStablecoin('XUSD', 1.0, undefined), true);
+});
+
+test('isLikelyStablecoin — does NOT flag movers, off-peg, or non-USD symbols', () => {
+  /* a real mover at $1 is not flat → not a peg */
+  assert.equal(isLikelyStablecoin('XUSD', 1.0, 5), false);
+  assert.equal(isLikelyStablecoin('XUSD', 1.0, -0.5), false); // |0.5| >= flat floor
+  /* off the $1 peg */
+  assert.equal(isLikelyStablecoin('XUSD', 0.5, 0), false);
+  assert.equal(isLikelyStablecoin('XUSD', 1.5, 0), false);
+  /* no USD marker → never a USD peg, even if flat at $1 */
+  assert.equal(isLikelyStablecoin('PEPE', 1.0, 0.0), false);
+  assert.equal(isLikelyStablecoin('HIVE', 1.0, 0.0), false);
+  /* missing / invalid price */
+  assert.equal(isLikelyStablecoin('XUSD', 0, 0), false);
+  assert.equal(isLikelyStablecoin('', 1.0, 0), false);
+});
+
+test('isLikelyStablecoin — boundary tolerances', () => {
+  /* comfortably within the 1% price band (kept off the exact 0.01 edge,
+     which is float-sensitive: 1.01 - 1 === 0.01000000000000009) */
+  assert.equal(isLikelyStablecoin('XUSD', 1.009, 0), true);
+  assert.equal(isLikelyStablecoin('XUSD', 0.991, 0), true);
+  /* clearly outside the 1% band */
+  assert.equal(isLikelyStablecoin('XUSD', 1.02, 0), false);
+  assert.equal(isLikelyStablecoin('XUSD', 0.98, 0), false);
+  /* change exactly at the flat floor (0.5) is treated as a mover */
+  assert.equal(isLikelyStablecoin('XUSD', 1.0, 0.5), false);
+  assert.equal(isLikelyStablecoin('XUSD', 1.0, 0.49), true);
+});
+
+test('GEM_CONFIG.STABLES includes XUSD (explicit allow-list entry)', () => {
+  assert.ok(GEM_CONFIG.STABLES.indexOf('XUSD') !== -1);
+});
+
+test('GEM_CONFIG scan funnel — score pool is wider than the render cap', () => {
+  /* The scan funnel is prefilter -> score -> render. Two invariants keep
+     the surge-weighted score doing real selection work; this is the
+     regression guard for the 2026-05-24 selection fix, where
+     SCORE_LIMIT(25) barely exceeded RENDER_LIMIT(20) so the score culled
+     only ~5 candidates and selection collapsed to "top-N by raw volume". */
+  assert.ok(
+    GEM_CONFIG.SCORE_LIMIT <= GEM_CONFIG.PREFILTER_LIMIT,
+    'SCORE_LIMIT must not exceed PREFILTER_LIMIT (never score beyond the shortlist)'
+  );
+  assert.ok(
+    GEM_CONFIG.RENDER_LIMIT < GEM_CONFIG.SCORE_LIMIT,
+    'RENDER_LIMIT must be strictly < SCORE_LIMIT so score-ranking actually selects'
+  );
+});
+
 /* ─── isValidGemSymbol ────────────────────────────────────────────── */
 
 test('isValidGemSymbol — accepts uppercase alphanumeric tickers', () => {

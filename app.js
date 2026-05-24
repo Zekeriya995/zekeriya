@@ -2003,6 +2003,10 @@ async function loadSmallCaps2(){
     var s=e[0],d=e[1];
     if(!isValidGemSymbol(s))return false;
     if(STABLES.indexOf(s)!==-1)return false;
+    /* Structural peg guard — catches NEW USD pegs (e.g. XUSD) not yet
+       on the STABLES list, so a $1 stablecoin never masquerades as a
+       gem. See isLikelyStablecoin in scanner-helpers.js. */
+    if(isLikelyStablecoin(s,d.p,d.c))return false;
     if(TIER1.has(s))return false;
     if(!d.p||d.p<=0||d.p>GEM_CONFIG.PRICE_MAX)return false;
     if(d.v<GEM_CONFIG.VOL_MIN)return false;
@@ -2076,9 +2080,16 @@ async function loadSmallCaps2(){
          tolerates vx down to 1.2x — early but not yet exploding).
          'late' timing is always rejected because the spike has
          already played out by definition. */
-      var hasMomentum=(vx>=1.5&&(timing==='early'||timing==='still'))||(vx>=1.2&&timing==='early');
+      /* Gate now delegated to the pure, unit-tested gemEntryGate —
+         which ALSO rejects bearish spikes (gain<0 classified 'early'
+         by classifyGemTiming). 2026-05-24 audit fix. */
+      var hasMomentum=gemEntryGate(vx,timing,gain);
       if(sc>=GEM_CONFIG.SCORE_MIN&&hasMomentum){
-        res.push({s:s,p:d.p,c:d.c,v:d.v,mc:mc,rugRisk:rugRisk,vx:vx,gain:gain,timing:timing,tBadge:tBadge,sc:sc,tags:tags,target:target,stop:stop});
+        /* rugLimited: bookTicker (spread/depth) was unavailable, so
+           getRugPullRisk could not assess liquidity — a low score then
+           means "unverified", not "safe". The renderer surfaces this
+           instead of a green Safe pill. */
+        res.push({s:s,p:d.p,c:d.c,v:d.v,mc:mc,rugRisk:rugRisk,rugLimited:!bookTickers[s],vx:vx,gain:gain,timing:timing,tBadge:tBadge,sc:sc,tags:tags,target:target,stop:stop});
       }
     }).catch(function(){});
   });
@@ -2127,9 +2138,21 @@ function renderSmallCaps(res){
        parsed, so esc alone would not protect the inline-handler path
        if the regex were ever loosened — keep both guards in lockstep. */
     var sSafe=esc(g.s);
-    /* Rug-risk pill: visible reassurance that we filtered, not just guessed. */
-    var rugCol=g.rugRisk<30?'var(--up)':g.rugRisk<60?'var(--warn)':'var(--dn)';
-    var rugTxt=g.rugRisk<30?t('gem_safe_pill'):g.rugRisk<60?t('gem_medium_pill'):t('gem_risk_pill');
+    /* Rug-risk pill: visible reassurance that we filtered, not just
+       guessed. Honesty rule (2026-05-24 audit): when bookTicker
+       liquidity data was absent (g.rugLimited — true for most
+       futures-less micro-caps, and whenever fetchBinanceAdvanced
+       hasn't run on this page), getRugPullRisk can't see spread/depth,
+       so a low score means "unverified", NOT "safe". Show the
+       unverified state in amber instead of a misleading green Safe
+       pill — same posture as the MC-unknown badge below. */
+    var rugCol,rugTxt;
+    if(g.rugLimited&&g.rugRisk<60){
+      rugCol='var(--warn)';rugTxt=t('gem_risk_unknown');
+    }else{
+      rugCol=g.rugRisk<30?'var(--up)':g.rugRisk<60?'var(--warn)':'var(--dn)';
+      rugTxt=g.rugRisk<30?t('gem_safe_pill'):g.rugRisk<60?t('gem_medium_pill'):t('gem_risk_pill');
+    }
     var mcKnown=g.mc>0;
     var mcDisplay=mcKnown?fmt(g.mc):t('gem_mc_unknown');
     /* MC unknown → amber warning color so the user knows the

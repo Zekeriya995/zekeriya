@@ -3210,6 +3210,19 @@ function renderAcc(id){var a=getAcc();var el=document.getElementById(id);if(!el)
 /* ═══ 📊 TRADE MANAGER — Entry/Exit System ═══ */
 function openTrade(sym,price,type,score,extra){
   if(activeTrades.some(function(t){return t.sym===sym&&t.status==='OPEN'}))return;
+  /* Freshness gate — T[sym].t is stamped by both the /api/all poll and
+     the WS price stream (src/price-stream.js:73), so a stale .t means the
+     feed is quiet (proxy + WS down) or the tab was backgrounded. Entering
+     on a frozen price skews paper-trade PnL / win-rate stats. 30s matches
+     /api/health's ticker stale window; the user can still override. */
+  var _tk=T[sym];
+  if(_tk&&_tk.t&&Date.now()-_tk.t>30000){
+    var _ageS=Math.round((Date.now()-_tk.t)/1000);
+    var _warn=lang==='ar'
+      ?'⚠️ السعر متأخّر '+_ageS+' ثانية — البيانات غير محدّثة. قد يكون الدخول على سعر خاطئ. متابعة؟'
+      :'⚠️ Price is '+_ageS+'s stale — feed not fresh, entry may use a wrong price. Continue?';
+    if(typeof confirm==='function'&&!confirm(_warn))return;
+  }
   var se=extra&&extra.smartEntry?extra.smartEntry:null;
   var tgts={ultra:{t1:1.05,t2:1.08,sl:0.97},whale:{t1:1.04,t2:1.07,sl:0.965},gem:{t1:1.08,t2:1.15,sl:0.95},breakout:{t1:1.03,t2:1.06,sl:0.96}};
   var t=tgts[type]||tgts.breakout;

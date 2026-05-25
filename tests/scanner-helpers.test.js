@@ -1721,3 +1721,37 @@ test('topTraderLatestLong — boundary at the 0.55 / 0.58 thresholds both formul
      loadTrading tier — that's a runtime concern, not a helper one,
      but worth documenting here so tests catch any boundary drift. */
 });
+
+/* ─── capConfidenceForServerFlags ─────────────────────────────────── */
+
+test('capConfidenceForServerFlags — non-array / empty / irrelevant tags pass conf through', () => {
+  assert.equal(capConfidenceForServerFlags(90, null), 90);
+  assert.equal(capConfidenceForServerFlags(90, undefined), 90);
+  assert.equal(capConfidenceForServerFlags(90, 'nope'), 90);
+  assert.equal(capConfidenceForServerFlags(90, []), 90);
+  assert.equal(capConfidenceForServerFlags(90, ['📈RISING', '🐋WHALE']), 90);
+});
+
+test('capConfidenceForServerFlags — a plain server demotion caps ULTRA confidence at 84', () => {
+  assert.equal(capConfidenceForServerFlags(92, ['🛑SRV_DEMOTE']), 84);
+  assert.equal(capConfidenceForServerFlags(85, ['🛑SRV_DEMOTE']), 84);
+  /* Never raises: an already-lower conf is left untouched. */
+  assert.equal(capConfidenceForServerFlags(70, ['🛑SRV_DEMOTE']), 70);
+});
+
+test('capConfidenceForServerFlags — hard-risk flags cap below the enter verdict (69)', () => {
+  assert.equal(capConfidenceForServerFlags(95, ['🚨MANIP_HIGH']), 69);
+  assert.equal(capConfidenceForServerFlags(80, ['🔪FALLING']), 69);
+  /* P&D_RISK carries a count suffix, so it is matched by prefix. */
+  assert.equal(capConfidenceForServerFlags(88, ['🚨P&D_RISK:3/5']), 69);
+  /* Already below the cap → unchanged. */
+  assert.equal(capConfidenceForServerFlags(50, ['🚨MANIP_HIGH']), 50);
+});
+
+test('capConfidenceForServerFlags — hard risk wins over a plain demotion', () => {
+  assert.equal(capConfidenceForServerFlags(95, ['🛑SRV_DEMOTE', '🚨MANIP_HIGH']), 69);
+});
+
+test('capConfidenceForServerFlags — non-string entries are ignored, not thrown on', () => {
+  assert.equal(capConfidenceForServerFlags(90, [null, 42, {}, '🛑SRV_DEMOTE']), 84);
+});

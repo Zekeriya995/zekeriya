@@ -513,9 +513,13 @@ function scoreSymbol(sym, ctx) {
   /* Pump & Dump risk detector (Phase 1.1). Mirrors the client-side
      detector at app.js:2459-2476 so the server never publishes an
      ULTRA push on a coin that the client would have suppressed.
-     Today only FR_EXTREME and LS_RETAIL_LONG are reachable on the
-     server — see src/scanner-pd-detector.js header for why
-     VERTICAL / SMART_VS_RETAIL / THIN_PUMP are dormant in this PR.
+     Reachable flags on the server: FR_EXTREME, LS_RETAIL_LONG, and
+     SMART_VS_RETAIL — the latter is live because runScannerPass wires
+     both globalLs and topTraders into ctx (see the scoreSymbol call
+     site below) and fetchGlobalLs populates cache.globalLs by default
+     (SCANNER_RETAIL_LS_ENABLED). VERTICAL and THIN_PUMP stay dormant
+     because the d.change >= 8 overheat reject above returns null
+     before this detector runs — see src/scanner-pd-detector.js header.
      Behind PD_DETECTOR_ENABLED so we can roll back instantly via
      SCANNER_SERVER_PD_ENABLED=false. */
   if (PD_DETECTOR_ENABLED) {

@@ -1082,3 +1082,34 @@ function topTraderLatestLong(topTradersEntry, field) {
   if (!latest || typeof latest.long !== 'number') return null;
   return latest.long;
 }
+
+/* capConfidenceForServerFlags(conf, tags) — lower a client-computed
+   confidence so it can't advertise a stronger tier than the server's
+   protective flags allow. The scanner overlay (getScanResults) demotes
+   the TIER when the server catches manipulation / pump-and-dump / a
+   falling knife, but the client conf% is built from client-side signals
+   only — so a flagged coin could still display ULTRA-level confidence
+   and lure an entry the server distrusts. This closes that gap. Pure;
+   only ever lowers conf, never raises it.
+
+   Hard-risk flags (🚨MANIP_HIGH / 🔪FALLING / 🚨P&D_RISK:*) cap at 69 so
+   the card drops below the "enter" verdict (conf >= 70). A plain server
+   demotion (🛑SRV_DEMOTE — e.g. 🚫MANIP_CAP downgrading ULTRA→STRONG)
+   caps at 84 so it can't claim the ULTRA "enter with confidence" verdict
+   (conf >= 85) while still reading as a valid STRONG setup. */
+function capConfidenceForServerFlags(conf, tags) {
+  if (!Array.isArray(tags)) return conf;
+  var hardRisk = false;
+  var demoted = false;
+  for (var i = 0; i < tags.length; i++) {
+    var t = tags[i];
+    if (typeof t !== 'string') continue;
+    if (t === '🚨MANIP_HIGH' || t === '🔪FALLING' || t.indexOf('🚨P&D_RISK') === 0) {
+      hardRisk = true;
+    }
+    if (t === '🛑SRV_DEMOTE') demoted = true;
+  }
+  if (hardRisk) return Math.min(conf, 69);
+  if (demoted) return Math.min(conf, 84);
+  return conf;
+}

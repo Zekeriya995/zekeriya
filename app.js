@@ -1530,6 +1530,12 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
     var btcBonus=T.BTC?(T.BTC.c>1?5:T.BTC.c<-2?-8:0):0;
     var rawConf=earlyBonus+latePenalty+cvdBonus+takerBonus+obBonus+lsBonus+smartMoney+vpinB+exchangeDiv+cbPremB+checkBonus+frBonus+whaleBonus+btcBonus;
     var conf=Math.min(95,Math.max(20,Math.round(rawConf)));
+    /* Honor the server's protective demotion in the displayed conf% so a
+       coin the server flagged (manip / P&D / falling-knife) can't show
+       ULTRA-level confidence the client computed in isolation. Pure
+       helper in scanner-helpers.js; only ever lowers conf. Behind
+       nxScannerFix_conf_demote_cap (default on) for instant rollback. */
+    if(typeof capConfidenceForServerFlags==='function'&&localStorage.getItem('nxScannerFix_conf_demote_cap')!=='off'){conf=capConfidenceForServerFlags(conf,x.tags)}
     var sec=getCoinSector(x.s);
     /* Classify the setup so the user can filter by trade pattern. */
     var _btcChg=T.BTC?T.BTC.c:0;

@@ -406,11 +406,17 @@ test('Part 3 — tagless rule with no ctx anywhere is still skipped', () => {
 /* ─── compareWeightProfiles — champion/challenger A/B ──────────── */
 
 /* Deterministic fake: the registry scoreDelta is whatever the entry's ctx
-   carries for the chosen profile, so tests control champion/challenger
-   scores exactly without depending on real rule conditions. */
+   carries for the chosen profile, so tests control champion/challenger/trend
+   scores exactly without depending on real rule conditions. Reads opts.profile
+   ('legacy'|'v2'|'trend') with the legacy opts.weightsV2 alias still honoured. */
 function fakeApply(ctx, opts) {
-  const v2 = !!(opts && opts.weightsV2);
-  return { scoreDelta: v2 ? ctx._v2 || 0 : ctx._legacy || 0, tagsDelta: [] };
+  let p = 'legacy';
+  if (opts && opts.profile) p = opts.profile;
+  else if (opts && opts.weightsV2) p = 'v2';
+  let delta = ctx._legacy || 0;
+  if (p === 'v2') delta = ctx._v2 || 0;
+  else if (p === 'trend') delta = ctx._trend || 0;
+  return { scoreDelta: delta, tagsDelta: [] };
 }
 const TH = { STRONG: 70 };
 
@@ -519,4 +525,21 @@ test('compareWeightProfiles — integration: real rules drop a Top-100-only sign
   assert.equal(out.champion.surfaced, 1);
   assert.equal(out.challenger.surfaced, 0);
   assert.equal(out.dropped.count, 1);
+  assert.equal(out.challengerTrend.surfaced, 0); // trend also neutralises TIER1
+  assert.equal(out.droppedTrend.count, 1);
+});
+
+test('compareWeightProfiles — measures the trend profile independently of V2', () => {
+  /* A coin the trend profile would KEEP but V2 would DROP (trend rewards a tag
+     V2 zeroes). Confirms the third column is computed from 'trend' weights, not
+     aliased to V2. */
+  const hist = [abEntry({ score: 72, pctChange: 6, ctx: { _legacy: 5, _v2: 0, _trend: 25 } })];
+  const out = compareWeightProfiles(hist, fakeApply, TH, { now: NOW });
+  // base = 72 - 5 = 67 → champion 72 (surfaced), V2 67 (dropped), trend 92 (kept)
+  assert.equal(out.champion.surfaced, 1);
+  assert.equal(out.challenger.surfaced, 0);
+  assert.equal(out.dropped.count, 1);
+  assert.equal(out.challengerTrend.surfaced, 1);
+  assert.equal(out.challengerTrend.avgNetGain, 5.8);
+  assert.equal(out.droppedTrend.count, 0);
 });

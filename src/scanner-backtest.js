@@ -415,25 +415,35 @@ function compareWeightProfiles(history, applyRules, thresholds, opts) {
   const champion = [];
   const challengerKept = [];
   const challengerDropped = [];
+  const trendKept = [];
+  const trendDropped = [];
 
   for (const h of evaluated) {
-    let liveDelta, legacyDelta, v2Delta;
+    let liveDelta, legacyDelta, v2Delta, trendDelta;
     try {
-      liveDelta = applyRules(h.ctx, { weightsV2: h.weightsProfile === 'v2' }).scoreDelta;
-      legacyDelta = applyRules(h.ctx, { weightsV2: false }).scoreDelta;
-      v2Delta = applyRules(h.ctx, { weightsV2: true }).scoreDelta;
+      /* Recover the base score under the profile that was ACTUALLY live when
+         the entry was scored ('legacy' | 'v2' | 'trend'), so the base is exact
+         even after the regime flips the live profile to trend. Then re-score
+         under all three profiles — apples-to-apples on the same outcome. */
+      liveDelta = applyRules(h.ctx, { profile: h.weightsProfile || 'legacy' }).scoreDelta;
+      legacyDelta = applyRules(h.ctx, { profile: 'legacy' }).scoreDelta;
+      v2Delta = applyRules(h.ctx, { profile: 'v2' }).scoreDelta;
+      trendDelta = applyRules(h.ctx, { profile: 'trend' }).scoreDelta;
     } catch (_e) {
       continue; /* a malformed ctx must not break the whole comparison */
     }
     const base = h.score - liveDelta;
     const championScore = base + legacyDelta;
     const challengerScore = base + v2Delta;
+    const trendScore = base + trendDelta;
     const netGain = h.pctChange - feePct;
 
     const inChampion = championScore >= surfaceMin;
     if (inChampion) champion.push(netGain);
     if (challengerScore >= surfaceMin) challengerKept.push(netGain);
     else if (inChampion) challengerDropped.push(netGain);
+    if (trendScore >= surfaceMin) trendKept.push(netGain);
+    else if (inChampion) trendDropped.push(netGain);
   }
 
   return {
@@ -446,6 +456,11 @@ function compareWeightProfiles(history, applyRules, thresholds, opts) {
     dropped: {
       count: challengerDropped.length,
       avgNetGain: _round2(_mean(challengerDropped)),
+    },
+    challengerTrend: _profileStats('trend', trendKept),
+    droppedTrend: {
+      count: trendDropped.length,
+      avgNetGain: _round2(_mean(trendDropped)),
     },
   };
 }

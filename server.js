@@ -18,6 +18,13 @@
  * ═══════════════════════════════════════════════════════════════
  */
 
+/* Load .env BEFORE any module that reads process.env at import time.
+   src/scanner-engine.js reads its SCANNER_* flags at module scope, so if
+   dotenv ran after these requires the opt-in flags (e.g. SCANNER_WEIGHTS_V2,
+   default OFF) would always read undefined → false. Default-ON flags masked
+   this for a long time; the first opt-in flag exposed it. */
+require('dotenv').config();
+
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
@@ -37,7 +44,6 @@ const pushCooldown = require('./src/scanner-push-cooldown');
 const scannerTagStats = require('./src/scanner-tag-stats');
 const scannerBacktest = require('./src/scanner-backtest');
 const scoringRules = require('./src/scoring-rules');
-require('dotenv').config();
 
 const {
   isAllowedFetchUrl,

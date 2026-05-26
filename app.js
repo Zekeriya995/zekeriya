@@ -1482,7 +1482,7 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
   for(var i=0;i<Math.min(r.length,7);i++){var x=r[i];var d=T[x.s];if(!d)continue;
     var type=(d.c>=-3&&d.c<=0&&d.v>1e8)?'fast':'daily';var entry,target,stop,dur;
     if(x.smartEntry&&type!=='fast'){entry=x.smartEntry.entry;target=x.smartEntry.target1;stop=x.smartEntry.stop;dur=_tfHold}
-    else if(type==='fast'){entry=d.p;target=d.p*1.015;stop=d.p*0.995;dur=scannerTimeframe==='15m'?_tfHold:(lang==='ar'?'10-30 دقيقة':'10-30 min')}else{entry=d.p*0.995;target=x.ultra?d.p*1.08:d.p*1.06;stop=d.p*0.97;dur=_tfHold}
+    else if(type==='fast'){entry=d.p;target=d.p*1.015;/* ATR-aware stop (≥0.5% floor): a fixed −0.5% is noise-width on a fast mover and gets stopped out before the +1.5% target; widening to the 15m ATR lets the rr<1.5 gate below drop scalps whose volatility can't support the target. */stop=d.p-Math.max(d.p*0.005,(x.atr15m>0?x.atr15m:0));dur=scannerTimeframe==='15m'?_tfHold:(lang==='ar'?'10-30 دقيقة':'10-30 min')}else{entry=d.p*0.995;target=x.ultra?d.p*1.08:d.p*1.06;stop=d.p*0.97;dur=_tfHold}
     var risk=Math.abs(entry-stop);var rr=risk>0?+((target-entry)/risk).toFixed(1):0;if(rr<1.5)continue;
     var reasons=[];var ww=whaleWaves[x.s];if(ww&&ww.engine&&ww.engine.confidence>=30)reasons.push({ic:'🐋',t:lang==='ar'?'حوت مؤكد '+ww.engine.confidence+'%':'Whale '+ww.engine.confidence+'%'});
     var cvd=analyzeCVD(x.s);if(cvd.divergence==='BULLISH')reasons.push({ic:'📈',t:lang==='ar'?'CVD صاعد — تجميع صامت':'CVD rising — accumulation'});
@@ -3140,9 +3140,16 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,100);
     var _priceAtDet=sigInfo&&sigInfo.priceAtDetection?sigInfo.priceAtDetection:c.p;
     var _ageMins=sigInfo&&sigInfo.firstSeen?Math.floor((Date.now()-sigInfo.firstSeen)/60000):0;
     var _changeDet=_priceAtDet>0?((c.p-_priceAtDet)/_priceAtDet)*100:0;
+    /* Freshness gates scale to the setup type. A "fast" scalp targets +1.5%
+       with a sub-1% stop, so the daily 2%/5% drift tolerance would call a
+       scalp that has already blown past its whole target "ideal entry".
+       Scalp gates track the scalp's own geometry (≈half-target = warm,
+       ≈full-target = stale); daily setups keep the original wider gates. */
+    var _isScalp=(c.c>=-3&&c.c<=0&&c.v>1e8);
+    var _drOld=_isScalp?1.5:5,_drWarm=_isScalp?0.75:2,_agOld=_isScalp?30:60,_agWarm=_isScalp?10:15;
     var _freshness='fresh';
-    if(_ageMins>60||Math.abs(_changeDet)>5)_freshness='old';
-    else if(_ageMins>15||Math.abs(_changeDet)>2)_freshness='warm';
+    if(_ageMins>_agOld||Math.abs(_changeDet)>_drOld)_freshness='old';
+    else if(_ageMins>_agWarm||Math.abs(_changeDet)>_drWarm)_freshness='warm';
     results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,pdFlags:c.pdFlags||0,proven:_proven,coinWinRate:_coinWinRate,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}catch(_perCoinErr){/* one coin's analysis blew up — skip it so the whole scan doesn't fail. Symbol-tagged warn so a recurring bug on the same coin surfaces in DevTools. */ _scWarn('deepAnalyze:'+(top[ci]&&top[ci].s||'?'),_perCoinErr); continue}}
   return results.sort(function(a,b){return b.score-a.score})}
 /* ═══ QUALITY FILTER v3 — strict gate before rendering ═══

@@ -93,6 +93,7 @@ export default [
         coinbasePremiumPct: 'readonly',
         topTraderLatestLong: 'readonly',
         capConfidenceForServerFlags: 'readonly',
+        regimeConfAdjustment: 'readonly',
         /* Declared in src/monitor-step.js */
         monitorTradeDecision: 'readonly',
         /* Declared in src/visibility-pause.js */
@@ -365,6 +366,7 @@ export default [
         coinbasePremiumPct: 'readonly',
         topTraderLatestLong: 'readonly',
         capConfidenceForServerFlags: 'readonly',
+        regimeConfAdjustment: 'readonly',
         /* From src/monitor-step.js */
         monitorTradeDecision: 'readonly',
         /* From src/visibility-pause.js */

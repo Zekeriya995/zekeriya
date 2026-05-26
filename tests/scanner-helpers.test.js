@@ -1755,3 +1755,45 @@ test('capConfidenceForServerFlags — hard risk wins over a plain demotion', () 
 test('capConfidenceForServerFlags — non-string entries are ignored, not thrown on', () => {
   assert.equal(capConfidenceForServerFlags(90, [null, 42, {}, '🛑SRV_DEMOTE']), 84);
 });
+
+/* ─── regimeConfAdjustment — market-direction alignment ───────────── */
+
+const RANGING = { regime: 'ranging', inputs: { btcAgreement: 'mixed' } };
+const TREND_DOWN = { regime: 'trending', inputs: { btcAgreement: 'bearish' } };
+const TREND_UP = { regime: 'trending', inputs: { btcAgreement: 'bullish' } };
+
+test('regimeConfAdjustment — ranging regime never adjusts (contrarian edge intact)', () => {
+  assert.equal(regimeConfAdjustment(RANGING, ['📉BOTTOM']), 0);
+  assert.equal(regimeConfAdjustment(RANGING, ['📈RISING', '🎯AT_HIGH']), 0);
+});
+
+test('regimeConfAdjustment — downtrend penalises trend-fighting longs, spares bounces', () => {
+  /* momentum/plain long fighting the downtrend → heavy penalty (falling knife) */
+  assert.equal(regimeConfAdjustment(TREND_DOWN, ['📈RISING']), -12);
+  assert.equal(regimeConfAdjustment(TREND_DOWN, []), -12);
+  /* capitulation / reversal bounce → only a light penalty */
+  assert.equal(regimeConfAdjustment(TREND_DOWN, ['🔄REVERSAL']), -3);
+  assert.equal(regimeConfAdjustment(TREND_DOWN, ['📉RSI_OS']), -3);
+  assert.equal(regimeConfAdjustment(TREND_DOWN, ['🩳SHORTS']), -3);
+});
+
+test('regimeConfAdjustment — uptrend rewards trend-aligned momentum only', () => {
+  assert.equal(regimeConfAdjustment(TREND_UP, ['🎯AT_HIGH']), 8);
+  assert.equal(regimeConfAdjustment(TREND_UP, ['📊MACD_BULL']), 8);
+  assert.equal(regimeConfAdjustment(TREND_UP, ['📉BOTTOM']), 0); // contrarian → no boost
+});
+
+test('regimeConfAdjustment — trending-but-mixed bias is neutral', () => {
+  assert.equal(
+    regimeConfAdjustment({ regime: 'trending', inputs: { btcAgreement: 'mixed' } }, []),
+    0
+  );
+});
+
+test('regimeConfAdjustment — malformed regime / tags degrade to 0', () => {
+  assert.equal(regimeConfAdjustment(null, ['📈RISING']), 0);
+  assert.equal(regimeConfAdjustment({}, ['📈RISING']), 0);
+  assert.equal(regimeConfAdjustment(RANGING, 'oops'), 0);
+  /* trending-down with non-array tags → treated as no reversal → heavy penalty */
+  assert.equal(regimeConfAdjustment(TREND_DOWN, null), -12);
+});

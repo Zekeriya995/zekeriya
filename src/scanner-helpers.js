@@ -1113,3 +1113,53 @@ function capConfidenceForServerFlags(conf, tags) {
   if (demoted) return Math.min(conf, 84);
   return conf;
 }
+
+/* regimeConfAdjustment(regime, tags) — nudge a (long-biased) scalp signal's
+   confidence to align it with the market DIRECTION, so the trading tab stops
+   surfacing trades that fight the tape (the biggest source of losing scalps:
+   buying into a downtrend = catching a falling knife).
+
+   Pure; returns a delta to add to conf (the caller clamps the result).
+   - ranging  → 0. No directional view; the contrarian setups the scanner
+                already favours are the validated edge here, so don't touch.
+   - trending + bearish (downtrend) → penalise momentum/strength longs that
+                fight the trend, but SPARE capitulation/reversal longs
+                (oversold / bottom / reversal / crowded-short / very-neg
+                funding) — those are the bounce plays that win.
+   - trending + bullish (uptrend) → reward trend-aligned momentum longs.
+
+   ⚠️ The trending branch is an UNCALIBRATED v0 default (no trending regime
+   observed yet to validate against) — same caveat as WEIGHTS_TREND. It is
+   inert in the current ranging market; validate via /api/scanner/ab when a
+   trend first appears. */
+function regimeConfAdjustment(regime, tags) {
+  if (!regime || typeof regime !== 'object' || regime.regime !== 'trending') return 0;
+  var bias = regime.inputs && regime.inputs.btcAgreement;
+  var list = Array.isArray(tags) ? tags : [];
+  var reversal = false;
+  var momentum = false;
+  for (var i = 0; i < list.length; i++) {
+    var t = list[i];
+    if (typeof t !== 'string') continue;
+    if (
+      t.indexOf('REVERSAL') >= 0 ||
+      t.indexOf('RSI_OS') >= 0 ||
+      t.indexOf('BOTTOM') >= 0 ||
+      t.indexOf('SHORTS') >= 0 ||
+      t.indexOf('FR⬇') >= 0
+    ) {
+      reversal = true;
+    }
+    if (
+      t.indexOf('RISING') >= 0 ||
+      t.indexOf('AT_HIGH') >= 0 ||
+      t.indexOf('MTF_BULL') >= 0 ||
+      t.indexOf('MACD_BULL') >= 0
+    ) {
+      momentum = true;
+    }
+  }
+  if (bias === 'bearish') return reversal ? -3 : -12;
+  if (bias === 'bullish') return momentum ? 8 : 0;
+  return 0;
+}

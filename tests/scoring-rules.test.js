@@ -18,6 +18,7 @@ const {
   THRESHOLDS,
   applyRules,
   WEIGHTS_V2,
+  WEIGHTS_TREND,
   effectiveWeight,
 } = require('../src/scoring-rules');
 
@@ -1094,4 +1095,65 @@ test('applyRules — a Top-100-only coin loses its +10 under V2', () => {
   assert.deepEqual(legacy.tagsDelta, ['🏆TOP100']);
   assert.equal(legacy.scoreDelta, 10);
   assert.equal(v2.scoreDelta, 0);
+});
+
+/* ─── WEIGHTS_TREND + regime profile selection ────────────────────── */
+
+test('WEIGHTS_TREND — frozen, every key a real rule id, numeric', () => {
+  assert.ok(Object.isFrozen(WEIGHTS_TREND));
+  const ids = new Set(RULES.map((r) => r.id));
+  for (const key of Object.keys(WEIGHTS_TREND)) {
+    assert.ok(ids.has(key), `${key} must be a real rule id`);
+    assert.equal(typeof WEIGHTS_TREND[key], 'number');
+  }
+});
+
+test('WEIGHTS_TREND — neutralises structural losers, rewards trend, reduces contrarian', () => {
+  for (const id of ['TIER1_BONUS', 'SILENT_ACCUMULATION', 'COINALYZE_OI', 'VOL_NORMAL']) {
+    assert.equal(WEIGHTS_TREND[id], 0, `${id} stays neutralised in any regime`);
+  }
+  /* trend-confirmation rewarded (>= native), the inverse of V2's stance */
+  const nativeMtfBull = RULES.find((r) => r.id === 'MTF_BULL_FULL').weight;
+  assert.ok(WEIGHTS_TREND.MTF_BULL_FULL >= nativeMtfBull);
+  /* mean-revert boosters reduced vs the ranging (V2) profile */
+  assert.ok(WEIGHTS_TREND.LS_SHORTS < WEIGHTS_V2.LS_SHORTS);
+  assert.ok(WEIGHTS_TREND.RSI_OS < WEIGHTS_V2.RSI_OS);
+});
+
+test('effectiveWeight — resolves v2 / trend / legacy (+ boolean alias)', () => {
+  const tier1 = RULES.find((r) => r.id === 'TIER1_BONUS');
+  const mtf = RULES.find((r) => r.id === 'MTF_BULL_FULL');
+  assert.equal(effectiveWeight(tier1, 'legacy'), tier1.weight);
+  assert.equal(effectiveWeight(tier1, null), tier1.weight);
+  assert.equal(effectiveWeight(tier1, false), tier1.weight);
+  assert.equal(effectiveWeight(tier1, 'v2'), 0);
+  assert.equal(effectiveWeight(tier1, true), 0); // boolean alias preserved
+  assert.equal(effectiveWeight(mtf, 'trend'), WEIGHTS_TREND.MTF_BULL_FULL);
+  assert.equal(effectiveWeight(mtf, 'v2'), WEIGHTS_V2.MTF_BULL_FULL);
+});
+
+test('applyRules — opts.profile selects the map; weightsV2 alias + precedence', () => {
+  const ctx = { isTier1: true, volume: 1, change: 0 }; // fires TIER1_BONUS only
+  assert.equal(applyRules(ctx, { profile: 'legacy' }).scoreDelta, 10);
+  assert.equal(applyRules(ctx, { profile: 'v2' }).scoreDelta, 0);
+  assert.equal(applyRules(ctx, { profile: 'trend' }).scoreDelta, 0);
+  assert.deepEqual(applyRules(ctx, { weightsV2: true }), applyRules(ctx, { profile: 'v2' }));
+  /* explicit profile wins over the weightsV2 alias */
+  assert.equal(applyRules(ctx, { profile: 'legacy', weightsV2: true }).scoreDelta, 10);
+});
+
+test('applyRules — trend profile scoreDelta equals sum of effectiveWeight over fired rules', () => {
+  const ctxs = [
+    { isTier1: true, volume: 6e7, change: 1.5 },
+    { isTier1: false, volume: 1e8, change: -8 },
+    { mtfStrength: 'full', mtfBias: 'bullish', volume: 1, change: 0 },
+  ];
+  for (const ctx of ctxs) {
+    const out = applyRules(ctx, { profile: 'trend' });
+    let expected = 0;
+    for (const rule of RULES) {
+      if (rule.condition(ctx)) expected += effectiveWeight(rule, 'trend');
+    }
+    assert.equal(out.scoreDelta, expected);
+  }
 });

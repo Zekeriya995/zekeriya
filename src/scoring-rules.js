@@ -592,33 +592,77 @@ const WEIGHTS_V2 = Object.freeze({
   FR_VERY_NEG: 14,
 });
 
-/* effectiveWeight(rule, useV2) — the weight applied for a rule under the
-   selected profile. When useV2 is on and the rule id has a V2 override,
-   that override wins; otherwise the rule's native weight is used. */
-function effectiveWeight(rule, useV2) {
-  if (useV2 && Object.prototype.hasOwnProperty.call(WEIGHTS_V2, rule.id)) {
-    return WEIGHTS_V2[rule.id];
+/* WEIGHTS_TREND — momentum / trend-following profile for the 'trending'
+   regime (selected by the adaptive engine; see src/scanner-regime.js).
+
+   ⚠️ UNCALIBRATED v0 DEFAULT. Unlike WEIGHTS_V2 (validated on real
+   mean-revert history), this profile has NOT been validated — no sustained
+   trending regime has been observed to measure against yet. It encodes the
+   PRINCIPLE (in a trend, reward trend-confirmation and stop fading the move)
+   so the adaptive engine has a sane non-contrarian profile to switch to the
+   moment the regime flips, instead of applying mean-revert weights to a trend
+   (the failure mode that inverted the legacy scanner). Calibrate it against
+   trend-regime data via compareWeightProfiles before trusting it. Only active
+   when SCANNER_REGIME_ADAPTIVE is on AND detectRegime() returns 'trending'.
+
+   Structural miscalibrations (TIER1 / ACC / OI / VOL_NORMAL) stay neutralised
+   — they lose in ANY regime. The mean-revert boosters are reduced (not zeroed)
+   and trend-confirmation is rewarded — the inverse of WEIGHTS_V2's stance. */
+const WEIGHTS_TREND = Object.freeze({
+  TIER1_BONUS: 0,
+  SILENT_ACCUMULATION: 0,
+  COINALYZE_OI: 0,
+  VOL_NORMAL: 0,
+  MTF_BULL_FULL: 18,
+  MTF_BULL_PARTIAL: 10,
+  MACD_BULL_CROSS: 12,
+  AT_HIGH: 10,
+  CHANGE_RISING: 10,
+  LS_SHORTS: 6,
+  RSI_OS: 5,
+  BOTTOM: 5,
+  REVERSAL: 6,
+  FR_VERY_NEG: 6,
+});
+
+/* effectiveWeight(rule, profile) — the weight applied for a rule under the
+   selected profile. profile may be:
+     true | 'v2' → WEIGHTS_V2 override (if any)
+     'trend'     → WEIGHTS_TREND override (if any)
+     false | null | 'legacy' | undefined → the rule's native weight
+   Un-overridden rules always fall back to their native weight. */
+function _profileMap(profile) {
+  if (profile === true || profile === 'v2') return WEIGHTS_V2;
+  if (profile === 'trend') return WEIGHTS_TREND;
+  return null;
+}
+function effectiveWeight(rule, profile) {
+  const map = _profileMap(profile);
+  if (map && Object.prototype.hasOwnProperty.call(map, rule.id)) {
+    return map[rule.id];
   }
   return rule.weight;
 }
 
-/* applyRules(ctx) — pure function. Runs every rule against the ctx
-   and returns { scoreDelta, tagsDelta }. The consumer adds the
-   deltas to its running score / tags. Rules are evaluated in array
-   order, but since each rule's condition is independent, order
-   doesn't affect the result (so long as the tag list is later
-   sorted or its insertion order is treated as canonical).
+/* applyRules(ctx, opts) — pure function. Runs every rule against the ctx
+   and returns { scoreDelta, tagsDelta }. The consumer adds the deltas to its
+   running score / tags. Rule conditions are independent, so evaluation order
+   doesn't affect the result.
 
-   opts.weightsV2 (default false) selects the evidence-based weight
-   profile above. Backward compatible: applyRules(ctx) with no opts
-   behaves exactly as before. */
+   opts.profile ('v2' | 'trend' | 'legacy' | null) selects the weight profile.
+   opts.weightsV2:true is kept as a backward-compatible alias for profile:'v2'.
+   No opts → native (legacy) weights, byte-identical to the original. */
 function applyRules(ctx, opts) {
-  const useV2 = !!(opts && opts.weightsV2);
+  let profile = null;
+  if (opts) {
+    if (opts.profile !== undefined) profile = opts.profile;
+    else if (opts.weightsV2) profile = 'v2';
+  }
   let scoreDelta = 0;
   const tagsDelta = [];
   for (const rule of RULES) {
     if (rule.condition(ctx)) {
-      scoreDelta += effectiveWeight(rule, useV2);
+      scoreDelta += effectiveWeight(rule, profile);
       if (rule.tag) tagsDelta.push(rule.tag);
     }
   }
@@ -631,7 +675,14 @@ function applyRules(ctx, opts) {
    module check goes first because the server's `require` runtime
    does NOT define `window`. */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { RULES, THRESHOLDS, applyRules, WEIGHTS_V2, effectiveWeight };
+  module.exports = { RULES, THRESHOLDS, applyRules, WEIGHTS_V2, WEIGHTS_TREND, effectiveWeight };
 } else if (typeof window !== 'undefined') {
-  window.SCORING_RULES = { RULES, THRESHOLDS, applyRules, WEIGHTS_V2, effectiveWeight };
+  window.SCORING_RULES = {
+    RULES,
+    THRESHOLDS,
+    applyRules,
+    WEIGHTS_V2,
+    WEIGHTS_TREND,
+    effectiveWeight,
+  };
 }

@@ -22,6 +22,7 @@ const pdDetector = require('./scanner-pd-detector');
 const atrZonesModule = require('./scanner-atr-zones');
 const scoringRules = require('./scoring-rules');
 const scannerHistory = require('./scanner-history');
+const regimeDetector = require('./scanner-regime');
 
 /* Server-side P&D detector kill-switch. Default ON; set
    SCANNER_SERVER_PD_ENABLED=false in the env for instant rollback
@@ -71,6 +72,16 @@ const MANIP_HARD_CAP_ENABLED = process.env.SCANNER_MANIP_HARD_CAP !== 'false';
    forward data — it must run as a champion/challenger A/B against the legacy
    weights before it becomes the default. */
 const WEIGHTS_V2_ENABLED = process.env.SCANNER_WEIGHTS_V2 === 'true';
+
+/* Regime-adaptive scoring (P0 — the "governing principle"). When ON, each
+   pass classifies the market (detectRegime) and picks the weight profile by
+   regime: 'ranging' → the validated WEIGHTS_V2, 'trending' → WEIGHTS_TREND
+   (uncalibrated v0 default — see scoring-rules.js). Default OFF; when off the
+   profile falls back to the static SCANNER_WEIGHTS_V2 switch, so this changes
+   nothing until explicitly enabled. In the current (ranging) market, enabling
+   it resolves to WEIGHTS_V2 anyway — the trend profile only activates on a
+   regime flip, protecting against the very failure that inverted legacy. */
+const REGIME_ADAPTIVE_ENABLED = process.env.SCANNER_REGIME_ADAPTIVE === 'true';
 
 const STABLE_SET = new Set([
   /* Established stablecoins */
@@ -376,7 +387,12 @@ function scoreSymbol(sym, ctx) {
     rsi: _ind && typeof _ind.rsi === 'number' ? _ind.rsi : undefined,
     macdCross: _macd && typeof _macd.cross === 'string' ? _macd.cross : undefined,
   };
-  const registryResult = scoringRules.applyRules(_ruleCtx, { weightsV2: WEIGHTS_V2_ENABLED });
+  /* Weight profile for this signal: the per-pass profile threaded in via
+     ctx._weightProfile (regime-adaptive or static V2) wins; direct callers
+     (tests) with no profile fall back to the static SCANNER_WEIGHTS_V2 flag. */
+  let _wp = WEIGHTS_V2_ENABLED ? 'v2' : null;
+  if (ctx._weightProfile !== undefined) _wp = ctx._weightProfile;
+  const registryResult = scoringRules.applyRules(_ruleCtx, { profile: _wp });
   score += registryResult.scoreDelta;
   for (const t of registryResult.tagsDelta) tags.push(t);
 
@@ -638,7 +654,7 @@ function scoreSymbol(sym, ctx) {
     /* Which weight profile scored this signal — lets the retrospective
        champion/challenger A/B (compareWeightProfiles) recover each entry's
        profile-independent base score correctly even after V2 goes live. */
-    weightsProfile: WEIGHTS_V2_ENABLED ? 'v2' : 'legacy',
+    weightsProfile: _wp || 'legacy',
     /* Phase 4 Part 2: the registry input ctx captured at scoring
        time. scanner-history.recordSignal persists it (subject to
        bounded-size guards) so the backtest harness can later
@@ -690,6 +706,28 @@ function runScannerPass(cache) {
     washTrade: 0,
     lowScore: 0,
   };
+
+  /* Market-regime classification (P0). Computed once per pass from BTC
+     multi-timeframe agreement + market breadth. Returned for observability
+     (/api/all, [REGIME] log) AND used to pick the weight profile when
+     SCANNER_REGIME_ADAPTIVE is on. When adaptive is off, the profile falls
+     back to the static SCANNER_WEIGHTS_V2 switch — so this is inert unless
+     explicitly enabled. Breadth uses a tiny pre-loop scan of tickers. */
+  let _up = 0;
+  let _tot = 0;
+  for (const _s in tickers) {
+    const _t = tickers[_s];
+    if (!_t || !(+_t.price > 0)) continue;
+    _tot++;
+    if ((typeof _t.change === 'number' ? _t.change : 0) > 0) _up++;
+  }
+  const regime = regimeDetector.detectRegime({
+    btcMtf: indicatorsMtf.BTC ? indicatorsMtf.BTC.agreement : null,
+    bullishPct: _tot > 0 ? (_up / _tot) * 100 : 50,
+  });
+  let passProfile = WEIGHTS_V2_ENABLED ? 'v2' : null;
+  if (REGIME_ADAPTIVE_ENABLED) passProfile = regime.regime === 'trending' ? 'trend' : 'v2';
+
   for (const sym in tickers) {
     rejections.total++;
     if (STABLE_SET.has(sym)) {
@@ -699,6 +737,7 @@ function runScannerPass(cache) {
     const mtfEntry = indicatorsMtf[sym];
     const r = scoreSymbol(sym, {
       _rejectionSink: rejections,
+      _weightProfile: passProfile,
       ticker: tickers[sym],
       fr: cache.fr ? cache.fr[sym] : null,
       ls: cache.ls ? cache.ls[sym] : null,
@@ -737,6 +776,7 @@ function runScannerPass(cache) {
     signals: results,
     top3: results.slice(0, 3),
     rejections: rejections,
+    regime: regime,
     ts: Date.now(),
   };
 }

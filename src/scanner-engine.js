@@ -63,6 +63,15 @@ const TIER_AWARE_ATR_ENABLED = process.env.SCANNER_TIER_AWARE_ATR_ZONES !== 'fal
    SCANNER_MANIP_HARD_CAP=false to roll back. */
 const MANIP_HARD_CAP_ENABLED = process.env.SCANNER_MANIP_HARD_CAP !== 'false';
 
+/* Evidence-based scoring weight profile (P0). When ON, applyRules uses
+   scoring-rules.js WEIGHTS_V2 — re-weighted from the 30d backtest
+   attribution (neutralise the Top-100/ACC/OI losers, boost the proven
+   contrarian predictors). Default OFF (opt-in via SCANNER_WEIGHTS_V2=true)
+   because, unlike the other switches, this profile is NOT yet validated on
+   forward data — it must run as a champion/challenger A/B against the legacy
+   weights before it becomes the default. */
+const WEIGHTS_V2_ENABLED = process.env.SCANNER_WEIGHTS_V2 === 'true';
+
 const STABLE_SET = new Set([
   /* Established stablecoins */
   'USDT',
@@ -367,7 +376,7 @@ function scoreSymbol(sym, ctx) {
     rsi: _ind && typeof _ind.rsi === 'number' ? _ind.rsi : undefined,
     macdCross: _macd && typeof _macd.cross === 'string' ? _macd.cross : undefined,
   };
-  const registryResult = scoringRules.applyRules(_ruleCtx);
+  const registryResult = scoringRules.applyRules(_ruleCtx, { weightsV2: WEIGHTS_V2_ENABLED });
   score += registryResult.scoreDelta;
   for (const t of registryResult.tagsDelta) tags.push(t);
 

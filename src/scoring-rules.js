@@ -543,18 +543,82 @@ const RULES = Object.freeze([
   }),
 ]);
 
+/* Evidence-based weight profile (P0 — 2026-05-26). Derived from the
+   /api/scanner/backtest per-rule attribution over 841 evaluated signals
+   (30d). delta = firedAvgGain − absentAvgGain; a positive delta means the
+   rule's presence correlated with BETTER realized outcomes.
+
+   Three measured corrections:
+   1) Structural miscalibrations NEUTRALISED — rules that add large score
+      yet correlate with LOSSES: TIER1_BONUS (Top-100 focus won 2% vs 36%
+      when absent, δ−1.18), SILENT_ACCUMULATION (δ−1.14 at weight 25),
+      COINALYZE_OI (δ−1.86, worst), AT_HIGH (δ−0.33), VOL_NORMAL (δ−0.43).
+   2) Proven contrarian predictors BOOSTED — capitulation / fade-the-crowd
+      entries that hold across regimes: LS_SHORTS (win 57%, δ+3.85),
+      NEW_BONUS (win 50%, δ+2.74, was weight 2), REVERSAL (δ+2.53), BOTTOM
+      (δ+1.51), RSI_OS (δ+1.11), FR_VERY_NEG (δ+1.02). Over-weighted but
+      only mildly predictive rules trimmed (VOL_MEGA 25→12, EARLY_ENTRY
+      20→12, TAKER_SKEW 15→8).
+   3) Regime-sensitive trend rules NEUTRALISED, not inverted — MTF_BULL/BEAR
+      and MACD_BULL: their correct sign depends on whether the market is
+      trending or mean-reverting, so a static weight would overfit the
+      current mean-revert window. The regime-detection layer (P0 next step)
+      will set these directionally.
+
+   Overfit guard: only 'sufficient'-sample rules are re-weighted, and boosts
+   on small-but-sufficient samples (LS_SHORTS n=37) are moderated. Gated by
+   SCANNER_WEIGHTS_V2 (default OFF) so the legacy profile stays live until
+   forward data validates this one. Rules absent from this map keep their
+   RULES weight. */
+const WEIGHTS_V2 = Object.freeze({
+  TIER1_BONUS: 0,
+  SILENT_ACCUMULATION: 0,
+  COINALYZE_OI: 0,
+  AT_HIGH: 0,
+  VOL_NORMAL: 0,
+  VOL_MEGA: 12,
+  EARLY_ENTRY: 12,
+  TAKER_SKEW: 8,
+  MTF_BULL_FULL: 0,
+  MTF_BULL_PARTIAL: 0,
+  MTF_BEAR_FULL: 0,
+  MTF_BEAR_PARTIAL: 0,
+  MACD_BULL_CROSS: 0,
+  LS_SHORTS: 20,
+  NEW_BONUS: 15,
+  REVERSAL: 18,
+  BOTTOM: 16,
+  RSI_OS: 14,
+  FR_VERY_NEG: 14,
+});
+
+/* effectiveWeight(rule, useV2) — the weight applied for a rule under the
+   selected profile. When useV2 is on and the rule id has a V2 override,
+   that override wins; otherwise the rule's native weight is used. */
+function effectiveWeight(rule, useV2) {
+  if (useV2 && Object.prototype.hasOwnProperty.call(WEIGHTS_V2, rule.id)) {
+    return WEIGHTS_V2[rule.id];
+  }
+  return rule.weight;
+}
+
 /* applyRules(ctx) — pure function. Runs every rule against the ctx
    and returns { scoreDelta, tagsDelta }. The consumer adds the
    deltas to its running score / tags. Rules are evaluated in array
    order, but since each rule's condition is independent, order
    doesn't affect the result (so long as the tag list is later
-   sorted or its insertion order is treated as canonical). */
-function applyRules(ctx) {
+   sorted or its insertion order is treated as canonical).
+
+   opts.weightsV2 (default false) selects the evidence-based weight
+   profile above. Backward compatible: applyRules(ctx) with no opts
+   behaves exactly as before. */
+function applyRules(ctx, opts) {
+  const useV2 = !!(opts && opts.weightsV2);
   let scoreDelta = 0;
   const tagsDelta = [];
   for (const rule of RULES) {
     if (rule.condition(ctx)) {
-      scoreDelta += rule.weight;
+      scoreDelta += effectiveWeight(rule, useV2);
       if (rule.tag) tagsDelta.push(rule.tag);
     }
   }
@@ -567,7 +631,7 @@ function applyRules(ctx) {
    module check goes first because the server's `require` runtime
    does NOT define `window`. */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { RULES, THRESHOLDS, applyRules };
+  module.exports = { RULES, THRESHOLDS, applyRules, WEIGHTS_V2, effectiveWeight };
 } else if (typeof window !== 'undefined') {
-  window.SCORING_RULES = { RULES, THRESHOLDS, applyRules };
+  window.SCORING_RULES = { RULES, THRESHOLDS, applyRules, WEIGHTS_V2, effectiveWeight };
 }

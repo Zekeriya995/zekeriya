@@ -374,6 +374,15 @@ test('runScannerPass — empty cache yields empty signals', () => {
   assert.ok(typeof out.ts === 'number');
 });
 
+test('runScannerPass — exposes the pass weight profile (observability)', () => {
+  const out = runScannerPass({ tickers: {} });
+  /* The field must always be present (consumed by the [REGIME] log and
+     /api/all activeProfile). With no env flags set it resolves to null
+     (legacy); the adaptive/V2 switches turn it into 'trend'/'v2'. */
+  assert.ok('profile' in out);
+  assert.ok(out.profile === null || typeof out.profile === 'string');
+});
+
 test('runScannerPass — stablecoins are filtered out', () => {
   const cache = {
     tickers: {

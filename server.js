@@ -662,12 +662,13 @@ async function runScannerOnServer() {
      pass's verdict on /api/all and log it. */
   cache.regime = pass.regime;
   cache.regimeTs = pass.ts;
+  cache.regimeProfile = pass.profile || null;
 
   console.log(
     `[SCANNER] ${pass.signals.length} signals (${pass.signals.filter((r) => r.tier === 'ULTRA').length} ULTRA), top3=${pass.top3.map((r) => r.s).join(',') || '∅'} in ${Date.now() - t0}ms`
   );
   console.log(
-    `[REGIME] ${cache.regime.regime} (score=${cache.regime.trendScore}, btc=${cache.regime.inputs.btcStrength}, breadth=${cache.regime.inputs.bullishPct}%)`
+    `[REGIME] ${cache.regime.regime} (score=${cache.regime.trendScore}, btc=${cache.regime.inputs.btcStrength}, breadth=${cache.regime.inputs.bullishPct}%) profile=${cache.regimeProfile || 'legacy'}`
   );
 
   if (!PUSH_ENABLED || !cache.pushSubs.length) return;
@@ -1738,10 +1739,15 @@ function buildApiAllSnapshot() {
        5 minutes. Keys: totalEvaluated, winRate, avgGain, byTier. */
     scannerStats: { ...cache.scannerStats },
     scannerStatsTs: cache.scannerStatsTs || 0,
-    /* Market regime (P0 — observability). { regime, trendScore, inputs }.
-       Surfaced for the UI/operator; does not yet drive scoring. */
+    /* Market regime + the weight profile it selected. regime is
+       { regime, trendScore, inputs }. When SCANNER_REGIME_ADAPTIVE is on the
+       regime DRIVES weight-profile selection (trending→trend, ranging→v2);
+       activeProfile is the profile actually scoring live signals this pass
+       ('trend' | 'v2' | 'legacy'), so the live profile is observable at a
+       glance without inspecting individual signals. */
     regime: cache.regime || null,
     regimeTs: cache.regimeTs || 0,
+    activeProfile: cache.regimeProfile || null,
     meta: {
       coins: Object.keys(cache.tickers).length,
       lastUpdate: { ...cache.lastUpdate },

@@ -777,6 +777,10 @@ function runScannerPass(cache) {
     top3: results.slice(0, 3),
     rejections: rejections,
     regime: regime,
+    /* The weight profile this pass actually scored with (regime-adaptive
+       selection, or the static V2/legacy fallback) — surfaced for the
+       [REGIME] log and /api/all so the live profile is observable. */
+    profile: passProfile,
     ts: Date.now(),
   };
 }

@@ -150,6 +150,29 @@ function buildReport(all, abList) {
   if (v2Meaningful === 0 && trMeaningful === 0) {
     lines.push('Verdict: no window has a meaningful sample yet — keep accumulating.');
   }
+
+  /* Forward (gold-standard): actual net performance of signals really surfaced
+     under each profile, from the longest window that carries a `live` block.
+     This is THE confirmation of the live trend profile — once its sample grows
+     past the noise floor and beats V2, the trend profile is validated. */
+  let liveSrc = null;
+  for (const a of abList) if (a && a.live) liveSrc = a;
+  if (liveSrc) {
+    const L = liveSrc.live;
+    const lc = (p, name) =>
+      name + ' ' + _pct(p.avgNetGain) + '/' + (p.netWinRate || 0) + '% (' + (p.surfaced || 0) + ')';
+    lines.push('');
+    lines.push('Live (actual signals surfaced under each profile, ' + L.windowDays + 'd):');
+    lines.push(
+      '  ' + lc(L.legacy, 'legacy') + '   ' + lc(L.v2, 'V2') + '   ' + lc(L.trend, 'trend')
+    );
+    if ((L.trend.surfaced || 0) < MIN_MEANINGFUL) {
+      lines.push(
+        '  (trend sample < ' + MIN_MEANINGFUL + ' — not yet conclusive; keep accumulating.)'
+      );
+    }
+  }
+
   lines.push(
     '(Small-sample windows are noise — weight the larger ones. Forward data is the judge.)'
   );

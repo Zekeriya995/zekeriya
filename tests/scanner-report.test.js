@@ -84,3 +84,30 @@ test('buildReport — degrades gracefully on missing regime and unavailable wind
   assert.match(out, /Regime: \(not available\)/);
   assert.match(out, /14d.*\(unavailable\)/);
 });
+
+test('buildReport — renders the Live (actual stamped) section from the longest window', () => {
+  const withLive = ab(30, -0.85, 0.2, 80, -1.11, { trendNet: 1.1, trN: 75 });
+  withLive.live = {
+    windowDays: 30,
+    feePct: 0.2,
+    legacy: { surfaced: 200, netWinRate: 25, avgNetGain: -0.9 },
+    v2: { surfaced: 40, netWinRate: 60, avgNetGain: 0.3 },
+    trend: { surfaced: 25, netWinRate: 68, avgNetGain: 1.2 },
+  };
+  const out = buildReport(ALL, [withLive]);
+  assert.match(out, /Live \(actual signals surfaced under each profile, 30d\):/);
+  assert.match(out, /trend \+1\.20%\/68% \(25\)/);
+});
+
+test('buildReport — flags a still-small live trend sample as not conclusive', () => {
+  const withLive = ab(30, -0.85, 0.2, 80, -1.11, { trendNet: 1.1, trN: 75 });
+  withLive.live = {
+    windowDays: 30,
+    feePct: 0.2,
+    legacy: { surfaced: 200, netWinRate: 25, avgNetGain: -0.9 },
+    v2: { surfaced: 40, netWinRate: 60, avgNetGain: 0.3 },
+    trend: { surfaced: 5, netWinRate: 60, avgNetGain: 1.2 }, // < MIN_MEANINGFUL
+  };
+  const out = buildReport(ALL, [withLive]);
+  assert.match(out, /trend sample < 20 — not yet conclusive/);
+});

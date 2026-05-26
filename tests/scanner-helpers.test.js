@@ -1760,6 +1760,11 @@ test('capConfidenceForServerFlags — non-string entries are ignored, not thrown
 
 const RANGING = { regime: 'ranging', inputs: { btcAgreement: 'mixed' } };
 const TREND_DOWN = { regime: 'trending', inputs: { btcAgreement: 'bearish' } };
+const TREND_DOWN_STRONG = {
+  regime: 'trending',
+  trendScore: 3,
+  inputs: { btcAgreement: 'bearish' },
+};
 const TREND_UP = { regime: 'trending', inputs: { btcAgreement: 'bullish' } };
 
 test('regimeConfAdjustment — ranging regime never adjusts (contrarian edge intact)', () => {
@@ -1767,14 +1772,18 @@ test('regimeConfAdjustment — ranging regime never adjusts (contrarian edge int
   assert.equal(regimeConfAdjustment(RANGING, ['📈RISING', '🎯AT_HIGH']), 0);
 });
 
-test('regimeConfAdjustment — downtrend penalises trend-fighting longs, spares bounces', () => {
-  /* momentum/plain long fighting the downtrend → heavy penalty (falling knife) */
+test('regimeConfAdjustment — downtrend scales the dip-buy penalty with trend strength', () => {
+  /* momentum/plain long fighting the downtrend → heavy penalty regardless of strength */
   assert.equal(regimeConfAdjustment(TREND_DOWN, ['📈RISING']), -12);
   assert.equal(regimeConfAdjustment(TREND_DOWN, []), -12);
-  /* capitulation / reversal bounce → only a light penalty */
-  assert.equal(regimeConfAdjustment(TREND_DOWN, ['🔄REVERSAL']), -3);
-  assert.equal(regimeConfAdjustment(TREND_DOWN, ['📉RSI_OS']), -3);
-  assert.equal(regimeConfAdjustment(TREND_DOWN, ['🩳SHORTS']), -3);
+  assert.equal(regimeConfAdjustment(TREND_DOWN_STRONG, ['📈RISING']), -12);
+  /* dip-buy / reversal: lighter in a moderate downtrend (−5)… */
+  assert.equal(regimeConfAdjustment(TREND_DOWN, ['🔄REVERSAL']), -5);
+  assert.equal(regimeConfAdjustment(TREND_DOWN, ['📉RSI_OS']), -5);
+  assert.equal(regimeConfAdjustment(TREND_DOWN, ['🩳SHORTS']), -5);
+  /* …but near-momentum in a strong downtrend (−10): a "dip" is the next leg down */
+  assert.equal(regimeConfAdjustment(TREND_DOWN_STRONG, ['🔄REVERSAL']), -10);
+  assert.equal(regimeConfAdjustment(TREND_DOWN_STRONG, ['📉RSI_OS']), -10);
 });
 
 test('regimeConfAdjustment — uptrend rewards trend-aligned momentum only', () => {

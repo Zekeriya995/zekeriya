@@ -1123,15 +1123,18 @@ function capConfidenceForServerFlags(conf, tags) {
    - ranging  → 0. No directional view; the contrarian setups the scanner
                 already favours are the validated edge here, so don't touch.
    - trending + bearish (downtrend) → penalise momentum/strength longs that
-                fight the trend, but SPARE capitulation/reversal longs
-                (oversold / bottom / reversal / crowded-short / very-neg
-                funding) — those are the bounce plays that win.
+                fight the trend (−12). Dip-buy / capitulation longs (oversold
+                / bottom / reversal / crowded-short / very-neg funding) scale
+                with trend STRENGTH: −5 in a moderate downtrend, −10 in a
+                strong one (trendScore ≥ 3 = full-bearish BTC + extreme
+                breadth) — because the stronger the trend, the more a "dip"
+                is just the next leg down (a falling knife).
    - trending + bullish (uptrend) → reward trend-aligned momentum longs.
 
-   ⚠️ The trending branch is an UNCALIBRATED v0 default (no trending regime
-   observed yet to validate against) — same caveat as WEIGHTS_TREND. It is
-   inert in the current ranging market; validate via /api/scanner/ab when a
-   trend first appears. */
+   ⚠️ The trending branch began as an UNCALIBRATED v0 default. The dip-buy
+   penalties above were tightened from the original blanket −3 after the
+   first observed downtrend showed the contrarian profile catching knives;
+   keep validating the exact deltas via /api/scanner/ab + the live report. */
 function regimeConfAdjustment(regime, tags) {
   if (!regime || typeof regime !== 'object' || regime.regime !== 'trending') return 0;
   var bias = regime.inputs && regime.inputs.btcAgreement;
@@ -1159,7 +1162,16 @@ function regimeConfAdjustment(regime, tags) {
       momentum = true;
     }
   }
-  if (bias === 'bearish') return reversal ? -3 : -12;
+  if (bias === 'bearish') {
+    /* Dip-buys ('reversal') were spared (−3) on the hypothesis that bounce
+       plays win in downtrends — early forward data refuted that (the
+       contrarian profile caught falling knives). Scale with trend STRENGTH:
+       in a strong downtrend (trendScore ≥ 3 = full-bearish BTC + extreme
+       breadth) a dip-buy IS a knife, so penalise it nearly like a momentum
+       long; in a moderate downtrend keep a lighter touch. */
+    if (reversal) return (regime.trendScore || 0) >= 3 ? -10 : -5;
+    return -12;
+  }
   if (bias === 'bullish') return momentum ? 8 : 0;
   return 0;
 }

@@ -1530,6 +1530,13 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
     var btcBonus=T.BTC?(T.BTC.c>1?5:T.BTC.c<-2?-8:0):0;
     var rawConf=earlyBonus+latePenalty+cvdBonus+takerBonus+obBonus+lsBonus+smartMoney+vpinB+exchangeDiv+cbPremB+checkBonus+frBonus+whaleBonus+btcBonus;
     var conf=Math.min(95,Math.max(20,Math.round(rawConf)));
+    /* Align the scalp signal with the market direction (regime). In a
+       downtrend, penalise trend-fighting long setups (falling knives) while
+       sparing capitulation/reversal bounces; in an uptrend, reward momentum.
+       Inert in the current ranging market. Applied BEFORE the demote cap so
+       the cap stays the final safety. window.__marketRegime is captured in
+       loadTk from /api/all. Behind nxScannerFix_regime_align (default on). */
+    if(typeof regimeConfAdjustment==='function'&&localStorage.getItem('nxScannerFix_regime_align')!=='off'){conf=Math.max(20,Math.min(95,conf+regimeConfAdjustment(window.__marketRegime,x.tags)))}
     /* Honor the server's protective demotion in the displayed conf% so a
        coin the server flagged (manip / P&D / falling-knife) can't show
        ULTRA-level confidence the client computed in isolation. Pure
@@ -2267,6 +2274,9 @@ async function loadTk(){
       window.__serverSignals=_srv;
       window.__serverSignalsTs=+all.scannerTs||Date.now();
     }
+    /* Server-classified market regime — feeds the regime-aware scalp
+       alignment (regimeConfAdjustment) in the trading tab. */
+    if(all.regime&&typeof all.regime==='object')window.__marketRegime=all.regime;
     /* — tickers — */
     if(all.tickers){Object.keys(all.tickers).forEach(function(s){var d=all.tickers[s];if(!d)return;var chg=d.change!==undefined?+d.change:(d.c!==undefined?+d.c:0);var price=+d.price||+d.p||0;if(!(price>0))return;/* Skip zero/negative prices — better to omit than to render $0 as live data. */ T[s]={p:price,c:isNaN(chg)?0:chg,v:+d.volume||+d.v||0,h:+d.high||+d.h||0,l:+d.low||+d.l||0,src:d.src||'PROXY',loaded:true,t:Date.now()};if(d.by)T[s].by=+d.by})}
     /* — funding rates — `loaded` distinguishes a real 0% (rare but

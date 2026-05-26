@@ -43,7 +43,6 @@ const scannerSectors = require('./src/scanner-sectors');
 const pushCooldown = require('./src/scanner-push-cooldown');
 const scannerTagStats = require('./src/scanner-tag-stats');
 const scannerBacktest = require('./src/scanner-backtest');
-const scannerRegime = require('./src/scanner-regime');
 const scoringRules = require('./src/scoring-rules');
 
 const {
@@ -658,24 +657,10 @@ async function runScannerOnServer() {
   cache.sectorHeatmap = scannerSectors.aggregateBySector(pass.signals);
   cache.sectorHeatmapTs = Date.now();
 
-  /* Market-regime classification (P0 — observability step). Derived from BTC
-     multi-timeframe agreement + market breadth; surfaced on /api/all and
-     logged so we can confirm it tracks reality before it is allowed to drive
-     weight selection (next step). Does NOT change scoring yet. */
-  let _up = 0;
-  let _tot = 0;
-  for (const _s in cache.tickers) {
-    const _t = cache.tickers[_s];
-    if (!_t || !(+_t.price > 0)) continue;
-    _tot++;
-    if ((typeof _t.change === 'number' ? _t.change : 0) > 0) _up++;
-  }
-  const _btcMtf =
-    cache.indicatorsMtf && cache.indicatorsMtf.BTC ? cache.indicatorsMtf.BTC.agreement : null;
-  cache.regime = scannerRegime.detectRegime({
-    btcMtf: _btcMtf,
-    bullishPct: _tot > 0 ? (_up / _tot) * 100 : 50,
-  });
+  /* Market regime is classified inside runScannerPass (it drives weight-
+     profile selection there when SCANNER_REGIME_ADAPTIVE is on). Surface the
+     pass's verdict on /api/all and log it. */
+  cache.regime = pass.regime;
   cache.regimeTs = pass.ts;
 
   console.log(

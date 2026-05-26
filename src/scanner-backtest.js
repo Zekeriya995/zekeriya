@@ -465,10 +465,44 @@ function compareWeightProfiles(history, applyRules, thresholds, opts) {
   };
 }
 
+/* liveProfilePerformance(history, opts) — the FORWARD (gold-standard) measure:
+   the ACTUAL net-of-fees performance of the signals that were surfaced LIVE
+   under each weight profile, grouped by the entry's recorded `weightsProfile`.
+   Unlike compareWeightProfiles (which re-scores history retrospectively), this
+   reads real outcomes of really-surfaced signals — so once the regime has been
+   trending long enough to accumulate a meaningful `trend` group, this confirms
+   (or refutes) the live trend profile directly: trend group net-positive AND
+   beating the v2 group on ≥ MIN_DEFAULT_SAMPLES signals = confirmed. Pure. */
+function liveProfilePerformance(history, opts) {
+  const o = opts || {};
+  const days = Number.isFinite(o.daysBack) && o.daysBack > 0 ? o.daysBack : DEFAULT_DAYS_BACK;
+  const ts = o.now || Date.now();
+  const cutoff = ts - days * 24 * 60 * 60 * 1000;
+  const feePct = Number.isFinite(o.feePct) && o.feePct >= 0 ? o.feePct : 0.2;
+
+  const groups = { legacy: [], v2: [], trend: [] };
+  for (const h of history || []) {
+    if (!h || !h.evaluated || !h.outcome || h.recordedAt < cutoff) continue;
+    if (typeof h.pctChange !== 'number') continue;
+    let p = 'legacy';
+    if (h.weightsProfile === 'v2') p = 'v2';
+    else if (h.weightsProfile === 'trend') p = 'trend';
+    groups[p].push(h.pctChange - feePct);
+  }
+  return {
+    windowDays: days,
+    feePct,
+    legacy: _profileStats('legacy', groups.legacy),
+    v2: _profileStats('v2', groups.v2),
+    trend: _profileStats('trend', groups.trend),
+  };
+}
+
 module.exports = {
   computeRuleAttribution,
   computeBacktestSummary,
   compareWeightProfiles,
+  liveProfilePerformance,
   MIN_DEFAULT_SAMPLES,
   DEFAULT_DAYS_BACK,
 };

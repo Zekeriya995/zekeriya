@@ -2268,6 +2268,13 @@ app.get('/api/scanner/ab', (req, res) => {
     scoringRules.THRESHOLDS,
     { daysBack: days, feePct, now: Date.now() }
   );
+  /* Forward (gold-standard) view: actual net performance of the signals that
+     were surfaced LIVE under each profile, grouped by recorded weightsProfile. */
+  out.live = scannerBacktest.liveProfilePerformance(cache.scannerHistory || [], {
+    daysBack: days,
+    feePct,
+    now: Date.now(),
+  });
   res.json(out);
 });
 

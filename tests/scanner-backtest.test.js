@@ -12,6 +12,7 @@ const {
   computeRuleAttribution,
   computeBacktestSummary,
   compareWeightProfiles,
+  liveProfilePerformance,
   MIN_DEFAULT_SAMPLES,
   DEFAULT_DAYS_BACK,
 } = require('../src/scanner-backtest');
@@ -542,4 +543,46 @@ test('compareWeightProfiles — measures the trend profile independently of V2',
   assert.equal(out.challengerTrend.surfaced, 1);
   assert.equal(out.challengerTrend.avgNetGain, 5.8);
   assert.equal(out.droppedTrend.count, 0);
+});
+
+/* ─── liveProfilePerformance — forward (actual stamped) measure ────── */
+
+test('liveProfilePerformance — groups real outcomes by recorded weightsProfile', () => {
+  const e = (wp, pct) => ({
+    evaluated: true,
+    outcome: 'win',
+    recordedAt: NOW,
+    pctChange: pct,
+    weightsProfile: wp,
+  });
+  const hist = [
+    e('legacy', 1),
+    e('legacy', -3),
+    e('v2', 5),
+    e('v2', 3),
+    e('trend', 8),
+    /* unstamped (pre-field) → counted as legacy */
+    { evaluated: true, outcome: 'win', recordedAt: NOW, pctChange: 2 },
+  ];
+  const out = liveProfilePerformance(hist, { now: NOW, feePct: 0.2 });
+  assert.equal(out.legacy.surfaced, 3); // 2 legacy + 1 unstamped
+  assert.equal(out.v2.surfaced, 2);
+  assert.equal(out.trend.surfaced, 1);
+  assert.equal(out.trend.avgNetGain, 7.8); // 8 − 0.2
+  assert.equal(out.v2.avgNetGain, 3.8); // (4.8 + 2.8) / 2
+});
+
+test('liveProfilePerformance — excludes entries outside the window', () => {
+  const hist = [
+    { evaluated: true, outcome: 'win', recordedAt: NOW, pctChange: 5, weightsProfile: 'trend' },
+    {
+      evaluated: true,
+      outcome: 'win',
+      recordedAt: NOW - 40 * 86400000,
+      pctChange: 9,
+      weightsProfile: 'trend',
+    },
+  ];
+  const out = liveProfilePerformance(hist, { now: NOW, daysBack: 30, feePct: 0.2 });
+  assert.equal(out.trend.surfaced, 1); // the 40-day-old entry is excluded
 });

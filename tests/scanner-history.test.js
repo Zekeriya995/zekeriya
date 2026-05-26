@@ -128,6 +128,20 @@ test('recordSignal — tags array is independent (slice, not reference)', () => 
   assert.deepEqual(h[0].tags, ['A', 'B'], 'recorded tags should not see post-record mutation');
 });
 
+test('recordSignal — stamps weightsProfile, passing through v2 and trend verbatim', () => {
+  const h = [];
+  recordSignal(h, { ...ultra('LEG') }, NOW); /* no profile → legacy */
+  recordSignal(h, { ...ultra('VEE'), weightsProfile: 'v2' }, NOW + 60_000);
+  recordSignal(h, { ...ultra('TRN'), weightsProfile: 'trend' }, NOW + 120_000);
+  recordSignal(h, { ...ultra('JNK'), weightsProfile: 'bogus' }, NOW + 180_000);
+  assert.equal(h[0].weightsProfile, 'legacy');
+  assert.equal(h[1].weightsProfile, 'v2');
+  /* trend is the LIVE profile in a trending regime — it must survive,
+     or liveProfilePerformance's forward trend bucket is always empty. */
+  assert.equal(h[2].weightsProfile, 'trend');
+  assert.equal(h[3].weightsProfile, 'legacy'); /* unknown → legacy */
+});
+
 /* ─── evaluateOpenSignals ─────────────────────────────────────────── */
 
 test('evaluateOpenSignals — entries inside the 24h window stay open', () => {

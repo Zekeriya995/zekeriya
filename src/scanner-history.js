@@ -170,10 +170,15 @@ function recordSignal(history, sig, now) {
     tags: Array.isArray(sig.tags) ? sig.tags.slice(0, MAX_TAGS) : [],
     recordedAt: ts,
     evaluated: false,
-    /* Weight profile live at scoring time — consumed by the
-       champion/challenger A/B (compareWeightProfiles). Defaults to
-       'legacy' for any signal scored before the field existed. */
-    weightsProfile: sig.weightsProfile === 'v2' ? 'v2' : 'legacy',
+    /* Weight profile live at scoring time — consumed by the A/B
+       (compareWeightProfiles) and the forward live-profile measure
+       (liveProfilePerformance), which groups real outcomes by this
+       field. Must pass through every non-legacy profile verbatim:
+       'trend' is the LIVE profile in a trending regime, so collapsing
+       it to 'legacy' would empty the forward trend bucket and pollute
+       legacy. Anything unrecognised (incl. pre-field signals) → 'legacy'. */
+    weightsProfile:
+      sig.weightsProfile === 'v2' || sig.weightsProfile === 'trend' ? sig.weightsProfile : 'legacy',
   };
   if (persistedCtx) entry.ctx = persistedCtx;
   history.push(entry);

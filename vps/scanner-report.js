@@ -83,50 +83,72 @@ function buildReport(all, abList) {
   }
 
   lines.push('');
-  lines.push('A/B — legacy (champion) vs V2 (challenger), net of fees:');
+  lines.push('A/B — net of fees. champion=legacy; challengers=V2 & Trend:');
   lines.push(
-    '  ' + _pad('window', 8) + _pad('champion', 17) + _pad('V2', 17) + _pad('dropped', 11) + 'V2 n'
+    '  ' + _pad('window', 7) + _pad('legacy', 15) + _pad('V2', 15) + _pad('Trend', 15) + 'n V2/Tr'
   );
-  let better = 0;
-  let meaningful = 0;
+  const cell = (p) => (p ? _pct(p.avgNetGain) + '/' + (p.netWinRate || 0) + '%' : '—');
+  let v2Better = 0;
+  let v2Meaningful = 0;
+  let trBeatsLegacy = 0;
+  let trBeatsV2 = 0;
+  let trMeaningful = 0;
   for (const ab of abList) {
     const label = ab && ab.windowDays ? ab.windowDays + 'd' : '?';
     if (!ab || !ab.champion || !ab.challenger) {
-      lines.push('  ' + _pad(label, 8) + '(unavailable)');
+      lines.push('  ' + _pad(label, 7) + '(unavailable)');
       continue;
     }
     const c = ab.champion;
     const v = ab.challenger;
-    const d = ab.dropped || {};
-    const champ = _pct(c.avgNetGain) + ' / ' + (c.netWinRate || 0) + '%';
-    const chal = _pct(v.avgNetGain) + ' / ' + (v.netWinRate || 0) + '%';
-    const n = v.surfaced || 0;
+    const tr = ab.challengerTrend; /* absent on older API responses → '—' */
+    const vN = v.surfaced || 0;
+    const trN = tr ? tr.surfaced || 0 : 0;
+    const lowFlag = vN >= MIN_MEANINGFUL && (!tr || trN >= MIN_MEANINGFUL) ? '' : ' (low)';
     lines.push(
       '  ' +
-        _pad(label, 8) +
-        _pad(champ, 17) +
-        _pad(chal, 17) +
-        _pad(_pct(d.avgNetGain), 11) +
-        n +
-        (n >= MIN_MEANINGFUL ? '' : ' (low)')
+        _pad(label, 7) +
+        _pad(cell(c), 15) +
+        _pad(cell(v), 15) +
+        _pad(cell(tr), 15) +
+        vN +
+        '/' +
+        trN +
+        lowFlag
     );
-    if (n >= MIN_MEANINGFUL) {
-      meaningful++;
-      if (v.avgNetGain > c.avgNetGain) better++;
+    if (vN >= MIN_MEANINGFUL) {
+      v2Meaningful++;
+      if (v.avgNetGain > c.avgNetGain) v2Better++;
+    }
+    if (tr && trN >= MIN_MEANINGFUL) {
+      trMeaningful++;
+      if (tr.avgNetGain > c.avgNetGain) trBeatsLegacy++;
+      if (tr.avgNetGain > v.avgNetGain) trBeatsV2++;
     }
   }
 
   lines.push('');
-  if (meaningful === 0) {
-    lines.push('Verdict: no window has a meaningful V2 sample yet — keep accumulating.');
-  } else if (better === meaningful) {
+  if (v2Meaningful > 0) {
     lines.push(
-      'Verdict: ✅ V2 beats legacy on all ' + meaningful + ' meaningful-sample window(s).'
+      'V2 vs legacy: beats on ' + v2Better + '/' + v2Meaningful + ' meaningful window(s).'
     );
-  } else {
+  }
+  if (trMeaningful > 0) {
+    /* Trend is the LIVE profile in a trending regime — the key read now. */
     lines.push(
-      'Verdict: ⚠️ V2 beats legacy on ' + better + '/' + meaningful + ' meaningful window(s).'
+      'Trend (live in trends): beats V2 on ' +
+        trBeatsV2 +
+        '/' +
+        trMeaningful +
+        ', beats legacy on ' +
+        trBeatsLegacy +
+        '/' +
+        trMeaningful +
+        ' meaningful window(s).'
     );
+  }
+  if (v2Meaningful === 0 && trMeaningful === 0) {
+    lines.push('Verdict: no window has a meaningful sample yet — keep accumulating.');
   }
   lines.push(
     '(Small-sample windows are noise — weight the larger ones. Forward data is the judge.)'

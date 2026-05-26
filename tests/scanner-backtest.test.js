@@ -11,9 +11,11 @@ const assert = require('node:assert/strict');
 const {
   computeRuleAttribution,
   computeBacktestSummary,
+  compareWeightProfiles,
   MIN_DEFAULT_SAMPLES,
   DEFAULT_DAYS_BACK,
 } = require('../src/scanner-backtest');
+const scoringRules = require('../src/scoring-rules');
 
 /* ─── Helpers ───────────────────────────────────────────────── */
 
@@ -399,4 +401,122 @@ test('Part 3 — tagless rule with no ctx anywhere is still skipped', () => {
   ];
   const out = computeRuleAttribution(hist, RULES_WITH_CONDITIONS, { now: NOW, minSamples: 1 });
   assert.ok(!('TAGLESS_PENALTY' in out.perRule), 'unattributable tagless rule must be omitted');
+});
+
+/* ─── compareWeightProfiles — champion/challenger A/B ──────────── */
+
+/* Deterministic fake: the registry scoreDelta is whatever the entry's ctx
+   carries for the chosen profile, so tests control champion/challenger
+   scores exactly without depending on real rule conditions. */
+function fakeApply(ctx, opts) {
+  const v2 = !!(opts && opts.weightsV2);
+  return { scoreDelta: v2 ? ctx._v2 || 0 : ctx._legacy || 0, tagsDelta: [] };
+}
+const TH = { STRONG: 70 };
+
+function abEntry(over) {
+  return Object.assign(
+    {
+      s: 'X',
+      evaluated: true,
+      outcome: 'win',
+      recordedAt: NOW,
+      pctChange: 0,
+      score: 75,
+      weightsProfile: 'legacy',
+      ctx: { _legacy: 0, _v2: 0 },
+    },
+    over
+  );
+}
+
+test('compareWeightProfiles — keeps winners, drops losers (net of fees)', () => {
+  const hist = [
+    /* legacy-surfaced loser that V2 de-ranks below STRONG (75→45) */
+    abEntry({ score: 75, ctx: { _legacy: 30, _v2: 0 }, pctChange: -5, outcome: 'loss' }),
+    /* winner V2 keeps (80→95) */
+    abEntry({ score: 80, ctx: { _legacy: 10, _v2: 25 }, pctChange: 8 }),
+    /* neutral both keep (72→72) */
+    abEntry({ score: 72, ctx: { _legacy: 5, _v2: 5 }, pctChange: 1 }),
+  ];
+  const out = compareWeightProfiles(hist, fakeApply, TH, { now: NOW });
+  assert.equal(out.feePct, 0.2);
+  assert.equal(out.champion.surfaced, 3);
+  assert.equal(out.champion.netWinRate, 67); // 2/3 net-positive
+  assert.equal(out.champion.avgNetGain, 1.13); // (-5.2 + 7.8 + 0.8)/3
+  assert.equal(out.challenger.surfaced, 2);
+  assert.equal(out.challenger.netWinRate, 100);
+  assert.equal(out.challenger.avgNetGain, 4.3); // (7.8 + 0.8)/2
+  assert.equal(out.dropped.count, 1);
+  assert.equal(out.dropped.avgNetGain, -5.2);
+  /* The whole point: challenger beats champion AND the dropped set is the worst. */
+  assert.ok(out.challenger.avgNetGain > out.champion.avgNetGain);
+  assert.ok(out.dropped.avgNetGain < out.challenger.avgNetGain);
+});
+
+test('compareWeightProfiles — recovers base score when V2 was the live profile', () => {
+  /* entry.score was produced under V2 (weightsProfile:v2), so the live delta
+     is the V2 delta — base must still come out right. */
+  const hist = [
+    abEntry({
+      weightsProfile: 'v2',
+      score: 60,
+      ctx: { _legacy: 25, _v2: 5 },
+      pctChange: 2,
+    }),
+  ];
+  const out = compareWeightProfiles(hist, fakeApply, TH, { now: NOW });
+  // base = 60 - 5 = 55 → champion 55+25=80 (surfaced), challenger 55+5=60 (dropped)
+  assert.equal(out.champion.surfaced, 1);
+  assert.equal(out.challenger.surfaced, 0);
+  assert.equal(out.dropped.count, 1);
+});
+
+test('compareWeightProfiles — feePct is configurable and applied to gains', () => {
+  const hist = [abEntry({ score: 72, ctx: { _legacy: 5, _v2: 5 }, pctChange: 1 })];
+  const zero = compareWeightProfiles(hist, fakeApply, TH, { now: NOW, feePct: 0 });
+  assert.equal(zero.champion.avgNetGain, 1); // no fee deducted
+  const high = compareWeightProfiles(hist, fakeApply, TH, { now: NOW, feePct: 1 });
+  assert.equal(high.champion.avgNetGain, 0); // 1 - 1
+});
+
+test('compareWeightProfiles — entries outside the window are excluded', () => {
+  const hist = [
+    abEntry({ score: 75, ctx: { _legacy: 10, _v2: 10 }, recordedAt: NOW - 40 * 86400000 }),
+  ];
+  const out = compareWeightProfiles(hist, fakeApply, TH, { now: NOW, daysBack: 30 });
+  assert.equal(out.champion.surfaced, 0);
+  assert.equal(out.sampleSize, 'low');
+});
+
+test('compareWeightProfiles — a throwing applyRules skips the entry, never crashes', () => {
+  const boom = () => {
+    throw new Error('bad ctx');
+  };
+  const hist = [abEntry({ score: 80, ctx: { _legacy: 10, _v2: 10 }, pctChange: 5 })];
+  let out;
+  assert.doesNotThrow(() => {
+    out = compareWeightProfiles(hist, boom, TH, { now: NOW });
+  });
+  assert.equal(out.champion.surfaced, 0);
+});
+
+test('compareWeightProfiles — integration: real rules drop a Top-100-only signal', () => {
+  /* ctx fires TIER1_BONUS only (legacy +10 / V2 0). base = 75-10 = 65, so the
+     champion surfaces it (75) while V2 drops it (65 < 70) — the measured
+     Top-100 de-ranking, end-to-end through the real registry. */
+  const hist = [
+    abEntry({
+      score: 75,
+      pctChange: -3,
+      outcome: 'loss',
+      ctx: { isTier1: true, volume: 1, change: 0 },
+    }),
+  ];
+  const out = compareWeightProfiles(hist, scoringRules.applyRules, scoringRules.THRESHOLDS, {
+    now: NOW,
+  });
+  assert.equal(out.champion.surfaced, 1);
+  assert.equal(out.challenger.surfaced, 0);
+  assert.equal(out.dropped.count, 1);
 });

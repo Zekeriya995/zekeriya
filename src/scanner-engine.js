@@ -635,6 +635,10 @@ function scoreSymbol(sym, ctx) {
     tp2: tp2,
     rr: Math.round(rr * 100) / 100,
     ts: Date.now(),
+    /* Which weight profile scored this signal — lets the retrospective
+       champion/challenger A/B (compareWeightProfiles) recover each entry's
+       profile-independent base score correctly even after V2 goes live. */
+    weightsProfile: WEIGHTS_V2_ENABLED ? 'v2' : 'legacy',
     /* Phase 4 Part 2: the registry input ctx captured at scoring
        time. scanner-history.recordSignal persists it (subject to
        bounded-size guards) so the backtest harness can later

@@ -351,9 +351,109 @@ function computeBacktestSummary(history, rules, opts) {
   };
 }
 
+function _mean(arr) {
+  return arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : 0;
+}
+
+/* _profileStats(label, gains) — net-of-fees summary for one profile's
+   surfaced set. A "net win" is a profitable trade AFTER fees (gain > 0),
+   which is a far more honest bar than the legacy +5% absolute threshold. */
+function _profileStats(label, gains) {
+  const n = gains.length;
+  const netWins = gains.filter((g) => g > 0).length;
+  return {
+    label,
+    surfaced: n,
+    netWinRate: n ? Math.round((netWins / n) * 100) : 0,
+    avgNetGain: _round2(_mean(gains)),
+    medianNetGain: _round2(_median(gains)),
+  };
+}
+
+/* compareWeightProfiles(history, applyRules, thresholds, opts) —
+   retrospective champion (legacy) vs challenger (V2) A/B on the RECORDED
+   signal set, net of round-trip fees.
+
+   The history only contains signals the LIVE profile surfaced (score above
+   the STRONG threshold), so this answers the precision question: of those,
+   which would the challenger KEEP vs DROP, and how does each subset perform
+   net of fees? A healthy challenger keeps winners and drops losers, i.e.
+   dropped.avgNetGain < challenger.avgNetGain, and challenger beats champion.
+
+   It cannot see signals the challenger would ADD that the live profile never
+   surfaced (never recorded) — that needs forward shadow-recording.
+
+   Pure: scoring fns + thresholds are injected, no I/O, no global state. Each
+   entry's profile-independent base score (the inline, non-registry part) is
+   recovered as entry.score − registryDelta(live profile), then re-scored
+   under both profiles so the comparison is apples-to-apples on identical
+   outcomes. entry.weightsProfile records which profile was live ('legacy'
+   for entries recorded before the field existed). */
+function compareWeightProfiles(history, applyRules, thresholds, opts) {
+  const o = opts || {};
+  const days = Number.isFinite(o.daysBack) && o.daysBack > 0 ? o.daysBack : DEFAULT_DAYS_BACK;
+  const ts = o.now || Date.now();
+  const cutoff = ts - days * 24 * 60 * 60 * 1000;
+  /* Round-trip taker fee assumption (%) — entry + exit. Default 0.2%
+     (~0.1% per side) so avgNetGain reflects what actually lands. */
+  const feePct = Number.isFinite(o.feePct) && o.feePct >= 0 ? o.feePct : 0.2;
+  const surfaceMin = Number.isFinite(o.surfaceMin)
+    ? o.surfaceMin
+    : (thresholds && thresholds.STRONG) || 70;
+
+  const evaluated = (history || []).filter(
+    (h) =>
+      h &&
+      h.evaluated &&
+      h.outcome &&
+      h.recordedAt >= cutoff &&
+      typeof h.pctChange === 'number' &&
+      typeof h.score === 'number' &&
+      h.ctx
+  );
+
+  const champion = [];
+  const challengerKept = [];
+  const challengerDropped = [];
+
+  for (const h of evaluated) {
+    let liveDelta, legacyDelta, v2Delta;
+    try {
+      liveDelta = applyRules(h.ctx, { weightsV2: h.weightsProfile === 'v2' }).scoreDelta;
+      legacyDelta = applyRules(h.ctx, { weightsV2: false }).scoreDelta;
+      v2Delta = applyRules(h.ctx, { weightsV2: true }).scoreDelta;
+    } catch (_e) {
+      continue; /* a malformed ctx must not break the whole comparison */
+    }
+    const base = h.score - liveDelta;
+    const championScore = base + legacyDelta;
+    const challengerScore = base + v2Delta;
+    const netGain = h.pctChange - feePct;
+
+    const inChampion = championScore >= surfaceMin;
+    if (inChampion) champion.push(netGain);
+    if (challengerScore >= surfaceMin) challengerKept.push(netGain);
+    else if (inChampion) challengerDropped.push(netGain);
+  }
+
+  return {
+    windowDays: days,
+    feePct,
+    surfaceMin,
+    sampleSize: champion.length >= MIN_DEFAULT_SAMPLES ? 'sufficient' : 'low',
+    champion: _profileStats('legacy', champion),
+    challenger: _profileStats('v2', challengerKept),
+    dropped: {
+      count: challengerDropped.length,
+      avgNetGain: _round2(_mean(challengerDropped)),
+    },
+  };
+}
+
 module.exports = {
   computeRuleAttribution,
   computeBacktestSummary,
+  compareWeightProfiles,
   MIN_DEFAULT_SAMPLES,
   DEFAULT_DAYS_BACK,
 };

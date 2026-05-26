@@ -2233,6 +2233,25 @@ app.get('/api/scanner/backtest', (req, res) => {
   res.json(summary);
 });
 
+/* Retrospective champion/challenger A/B: how would the WEIGHTS_V2 profile
+   have re-ranked the recorded signal set vs the live (legacy) weights, net
+   of fees. Lets the V2 profile be validated on real outcomes BEFORE it is
+   switched on live. ?days=30 &fee=0.2 (round-trip %). */
+app.get('/api/scanner/ab', (req, res) => {
+  if (!BACKTEST_ENABLED) return res.status(503).json({ error: 'backtest_disabled' });
+  const daysRaw = parseInt(req.query.days, 10);
+  const days = Number.isFinite(daysRaw) && daysRaw > 0 && daysRaw <= 90 ? daysRaw : 30;
+  const feeRaw = parseFloat(req.query.fee);
+  const feePct = Number.isFinite(feeRaw) && feeRaw >= 0 && feeRaw <= 5 ? feeRaw : 0.2;
+  const out = scannerBacktest.compareWeightProfiles(
+    cache.scannerHistory || [],
+    scoringRules.applyRules,
+    scoringRules.THRESHOLDS,
+    { daysBack: days, feePct, now: Date.now() }
+  );
+  res.json(out);
+});
+
 app.post('/api/alerts/create', (req, res) => {
   if (!PUSH_ENABLED) return res.status(503).json({ error: 'push_disabled' });
   const b = req.body || {};

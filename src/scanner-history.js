@@ -170,6 +170,10 @@ function recordSignal(history, sig, now) {
     tags: Array.isArray(sig.tags) ? sig.tags.slice(0, MAX_TAGS) : [],
     recordedAt: ts,
     evaluated: false,
+    /* Weight profile live at scoring time — consumed by the
+       champion/challenger A/B (compareWeightProfiles). Defaults to
+       'legacy' for any signal scored before the field existed. */
+    weightsProfile: sig.weightsProfile === 'v2' ? 'v2' : 'legacy',
   };
   if (persistedCtx) entry.ctx = persistedCtx;
   history.push(entry);

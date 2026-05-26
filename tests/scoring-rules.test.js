@@ -13,7 +13,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { RULES, THRESHOLDS, applyRules } = require('../src/scoring-rules');
+const {
+  RULES,
+  THRESHOLDS,
+  applyRules,
+  WEIGHTS_V2,
+  effectiveWeight,
+} = require('../src/scoring-rules');
 
 /* ─── Shape & integrity ───────────────────────────────────────── */
 
@@ -1001,4 +1007,91 @@ test('FALLING_KNIFE — does not interfere with a recovering coin at -8%', () =>
   const ctx = { isTier1: false, volume: 1e8, change: -8 };
   const out = applyRules(ctx);
   assert.ok(!out.tagsDelta.includes('🔪FALLING'));
+});
+
+/* ─── WEIGHTS_V2 — evidence-based weight profile (P0) ──────────────── */
+
+test('WEIGHTS_V2 — is frozen and every key maps to a real rule id', () => {
+  assert.ok(Object.isFrozen(WEIGHTS_V2));
+  const ids = new Set(RULES.map((r) => r.id));
+  for (const key of Object.keys(WEIGHTS_V2)) {
+    assert.ok(ids.has(key), `${key} must be a real rule id (typo guard)`);
+    assert.equal(typeof WEIGHTS_V2[key], 'number', `${key} weight must be numeric`);
+  }
+});
+
+test('WEIGHTS_V2 — neutralises the measured structural losers to 0', () => {
+  for (const id of [
+    'TIER1_BONUS',
+    'SILENT_ACCUMULATION',
+    'COINALYZE_OI',
+    'AT_HIGH',
+    'VOL_NORMAL',
+  ]) {
+    assert.equal(WEIGHTS_V2[id], 0, `${id} should be neutralised`);
+  }
+});
+
+test('WEIGHTS_V2 — boosts the proven contrarian predictors above native weight', () => {
+  for (const id of ['LS_SHORTS', 'NEW_BONUS', 'REVERSAL', 'BOTTOM', 'RSI_OS', 'FR_VERY_NEG']) {
+    const native = RULES.find((r) => r.id === id).weight;
+    assert.ok(WEIGHTS_V2[id] > native, `${id} should be boosted above its native weight ${native}`);
+  }
+});
+
+test('effectiveWeight — legacy path returns the native weight', () => {
+  const tier1 = RULES.find((r) => r.id === 'TIER1_BONUS');
+  assert.equal(effectiveWeight(tier1, false), tier1.weight);
+  assert.equal(effectiveWeight(tier1, false), 10);
+});
+
+test('effectiveWeight — V2 path returns the override when present', () => {
+  const tier1 = RULES.find((r) => r.id === 'TIER1_BONUS');
+  const shorts = RULES.find((r) => r.id === 'LS_SHORTS');
+  assert.equal(effectiveWeight(tier1, true), 0);
+  assert.equal(effectiveWeight(shorts, true), 20);
+});
+
+test('effectiveWeight — V2 path falls back to native weight for un-overridden rules', () => {
+  const knife = RULES.find((r) => r.id === 'FALLING_KNIFE');
+  assert.ok(!Object.prototype.hasOwnProperty.call(WEIGHTS_V2, 'FALLING_KNIFE'));
+  assert.equal(effectiveWeight(knife, true), knife.weight);
+});
+
+test('applyRules — no opts and weightsV2:false are identical (backward compatible)', () => {
+  const ctx = { isTier1: true, volume: 6e7, change: 1.5 };
+  assert.deepEqual(applyRules(ctx, { weightsV2: false }), applyRules(ctx));
+});
+
+test('applyRules — V2 changes weights but never which rules fire', () => {
+  /* The same conditions fire under both profiles — only the summed
+     weight differs. Verified across a spread of ctx shapes so the
+     invariant can't silently break when a future rule is added. */
+  const ctxs = [
+    { isTier1: true, volume: 1, change: 0 },
+    { isTier1: true, volume: 6e7, change: 1.5 },
+    { isTier1: false, volume: 1e8, change: -8 },
+    { isTier1: false, volume: 5e7, change: 2, frRate: -0.03, lsRatio: 0.5 },
+  ];
+  for (const ctx of ctxs) {
+    const legacy = applyRules(ctx);
+    const v2 = applyRules(ctx, { weightsV2: true });
+    assert.deepEqual(v2.tagsDelta, legacy.tagsDelta);
+    let expected = 0;
+    for (const rule of RULES) {
+      if (rule.condition(ctx)) expected += effectiveWeight(rule, true);
+    }
+    assert.equal(v2.scoreDelta, expected);
+  }
+});
+
+test('applyRules — a Top-100-only coin loses its +10 under V2', () => {
+  /* isTier1 with sub-threshold volume/change fires TIER1_BONUS alone:
+     +10 on the legacy profile, 0 under V2 (Top-100 bias removed). */
+  const ctx = { isTier1: true, volume: 1, change: 0 };
+  const legacy = applyRules(ctx);
+  const v2 = applyRules(ctx, { weightsV2: true });
+  assert.deepEqual(legacy.tagsDelta, ['🏆TOP100']);
+  assert.equal(legacy.scoreDelta, 10);
+  assert.equal(v2.scoreDelta, 0);
 });

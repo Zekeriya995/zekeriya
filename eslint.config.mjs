@@ -173,6 +173,8 @@ export default [
         saveSupervisor: 'readonly',
         /* Declared in src/market-summary.js (UMD: window.MarketSummary) */
         MarketSummary: 'readonly',
+        /* Declared in src/microstructure.js (UMD: window.Microstructure) */
+        Microstructure: 'readonly',
         /* Declared in src/notifications.js */
         notifiedSet: 'writable',
         notifHist: 'writable',
@@ -300,6 +302,7 @@ export default [
       'src/market-summary-store.js',
       'src/market-aggregate.js',
       'src/market-direction.js',
+      'src/microstructure.js',
       'vps/*.js',
       'ecosystem.config.cjs',
     ],

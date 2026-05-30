@@ -3501,16 +3501,15 @@ function updateIceberg(sym,price,qty,isBuyerMaker,time){
   icebergData[sym].push({p:price,q:qty,buy:!isBuyerMaker,t:time||Date.now(),v:price*qty});
   var cutoff=Date.now()-180000;icebergData[sym]=icebergData[sym].filter(function(t){return t.t>cutoff})}
 function detectIceberg(sym){
-  var trades=icebergData[sym];if(!trades||trades.length<10)return{score:0,signal:'NO_ICEBERG'};
-  var levels={};trades.forEach(function(t){var k=Math.round(t.p*10000)/10000;if(!levels[k])levels[k]=[];levels[k].push(t)});
-  var sc=0,icebergs=[];
-  Object.entries(levels).forEach(function(e){var p=+e[0],lt=e[1];
-    if(lt.length>=8){var span=lt[lt.length-1].t-lt[0].t;
-      if(span<=120000){var vol=lt.reduce(function(s,t){return s+t.v},0);var buyPct=lt.filter(function(t){return t.buy}).length/lt.length;
-        var sizes=lt.map(function(t){return t.v});var avg=vol/lt.length;var variance=sizes.reduce(function(s,v){return s+Math.pow(v-avg,2)},0)/sizes.length;
-        var uniform=Math.sqrt(variance)/avg<0.5;sc+=uniform?12:6;
-        icebergs.push({price:p,count:lt.length,vol:vol,side:buyPct>0.7?'BUY':'SELL',uniform:uniform})}}});
-  return{score:Math.min(20,sc),icebergs:icebergs,signal:icebergs.length?icebergs[0].side==='BUY'?'ICEBERG_BUY':'ICEBERG_SELL':'NO_ICEBERG',count:icebergs.length}}
+  /* Group D fix — delegate to the pure detector in src/microstructure.js,
+     which buckets trades by a RELATIVE price band (price * 0.05%) so it
+     works across all price ranges. The old absolute 0.0001 bucket put
+     almost every BTC/ETH fill in its own bucket, so the "8+ fills at one
+     level" rule never fired — the detector was effectively dead at $74k. */
+  if(typeof Microstructure==='undefined')return{score:0,signal:'NO_ICEBERG',count:0,icebergs:[]};
+  var d=T[sym];
+  return Microstructure.detectIceberg(icebergData[sym],{curP:d&&d.p?d.p:0});
+}
 
 /* 🧠 TECHNIQUE 3: Absorption Detection */
 function detectAbsorption(sym){

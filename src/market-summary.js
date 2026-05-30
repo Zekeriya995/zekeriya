@@ -342,10 +342,18 @@ function buildMovementSummary(series, opts) {
     const lastFlip = m.flips[m.flips.length - 1];
     const when = clock(lastFlip.at);
     if (m.flips.length > 1) {
+      const times =
+        lang === 'en'
+          ? m.flips.length === 2
+            ? 'twice'
+            : `${m.flips.length} times`
+          : m.flips.length === 2
+            ? 'مرّتين'
+            : `${m.flips.length} مرات`;
       parts.push(
         lang === 'en'
-          ? `and direction flipped ${m.flips.length} times, last from ${L[lastFlip.from]} to ${L[lastFlip.to]} at ${when}`
-          : `وانقلب الاتجاه ${m.flips.length} مرات، آخرها من ${L[lastFlip.from]} إلى ${L[lastFlip.to]} عند ${when}`
+          ? `and direction flipped ${times}, last from ${L[lastFlip.from]} to ${L[lastFlip.to]} at ${when}`
+          : `وانقلب الاتجاه ${times}، آخرها من ${L[lastFlip.from]} إلى ${L[lastFlip.to]} عند ${when}`
       );
     } else {
       parts.push(
@@ -392,7 +400,11 @@ function buildMovementSummary(series, opts) {
   return { enough: true, text, headline, deltas: m, flips: m.flips };
 }
 
-module.exports = {
+/* UMD-lite loader (mirrors src/scoring-rules.js). Node / tests get the
+   module exports; the browser (<script src=".../market-summary.js">) gets a
+   window.MarketSummary global with the same shape. The module check goes
+   first because Node's require runtime does not define window. */
+const MARKET_SUMMARY_API = {
   classifyDirection,
   sampleBucket,
   detectFlips,
@@ -404,3 +416,8 @@ module.exports = {
   FLAT_NET_PCT,
   _clock: clock, // exported for deterministic time-format tests
 };
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = MARKET_SUMMARY_API;
+} else if (typeof window !== 'undefined') {
+  window.MarketSummary = MARKET_SUMMARY_API;
+}

@@ -171,6 +171,8 @@ export default [
         saveMonitor: 'readonly',
         saveFactorLog: 'readonly',
         saveSupervisor: 'readonly',
+        /* Declared in src/market-summary.js (UMD: window.MarketSummary) */
+        MarketSummary: 'readonly',
         /* Declared in src/notifications.js */
         notifiedSet: 'writable',
         notifHist: 'writable',

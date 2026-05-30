@@ -127,7 +127,7 @@ test('buildMovementSummary — V-shape with flips + full context (ar)', () => {
   assert.match(r.text, /تراجع البيتكوين/); // net is slightly negative
   assert.ok(r.text.includes('أعلى ارتفاع'));
   assert.ok(r.text.includes('أكبر تراجع'));
-  assert.match(r.text, /انقلب الاتجاه 2 مرات/);
+  assert.match(r.text, /انقلب الاتجاه مرّتين/);
   assert.ok(r.text.includes('محايد')); // last flip target
   assert.ok(r.text.includes('تبريد التمويل'));
   assert.ok(r.text.includes('تقلّص المراكز المفتوحة'));

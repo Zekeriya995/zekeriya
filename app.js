@@ -5200,6 +5200,30 @@ var RPT_COINS=[{s:'BTC',ic:'\u20bf',col:'#f7931a'},{s:'ETH',ic:'\u039e',col:'#62
 var reportHistory=safeGetJSON('nxRptHist',[]);
 var prevReport=safeGetJSON('nxPrevRpt',null);
 var hourlyLog=safeGetJSON('nxHrLog',[]);
+/* Market movement timeseries — feeds the auto-summary panel
+   (src/market-summary.js). Keyed by symbol, capped, one lightweight
+   sample per refresh. Client-side for now (Phase A); server-side
+   continuous capture lands in a later phase. */
+var moveHist=safeGetJSON('nxMoveHist',{});
+function recordMoveSample(sym,data){
+  if((sym!=='BTC'&&sym!=='ETH')||!data||typeof data.price!=='number'||!isFinite(data.price))return;
+  try{
+    if(!moveHist[sym])moveHist[sym]=[];
+    var arr=moveHist[sym];
+    if(arr.length&&Date.now()-arr[arr.length-1].t<600000)return; /* throttle: <=1 sample / 10 min */
+    var srcs=[data.topTraders,data.gLS,data.cbPrem,data.bfxMargin,data.hlFunding,data.frHist,data.oiHist,data.taker,data.iceberg,data.vpinData,data.whalePnL,data.newsScore];
+    var live=0;for(var i=0;i<srcs.length;i++){if(srcs[i]!=null)live++;}
+    var tone=null;
+    if(data.newsScore&&typeof data.newsScore.score==='number')tone=data.newsScore.score>=55?'positive':(data.newsScore.score<=45?'negative':'neutral');
+    arr.push({t:Date.now(),price:data.price,ts:data.ts,
+      funding:(data.fr&&typeof data.fr.rate==='number')?data.fr.rate:null,
+      oiChangePct:(data.oiHist&&typeof data.oiHist.growth==='number')?data.oiHist.growth:null,
+      newsTone:tone,completeness:live/srcs.length});
+    if(arr.length>72)arr=arr.slice(-72);
+    moveHist[sym]=arr;
+    safeSetJSON('nxMoveHist',moveHist);
+  }catch(e){}
+}
 /* Macro calendar — used by getUpcomingEvents() to surface macro
    catalysts in the 7-day horizon. Hardcoded because the platform
    has no feed for these; extend through 2028 so Section 6 keeps
@@ -6169,6 +6193,19 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
 
   /* Footer */
   h+='<div style="text-align:center;font-size:8px;color:var(--t3);margin:8px 0">⚠️ '+(isAr?'تحليل فني — ليس نصيحة مالية':'Technical analysis — not financial advice')+'</div>';
+  /* ════════ Market Movement Summary (auto) — narrative of the up / down
+     legs and the moment the trend flipped over the recent window, from the
+     per-symbol moveHist series via the pure engine in src/market-summary.js.
+     Informational only; client-side for now (Phase A). ════════ */
+  if(typeof MarketSummary!=='undefined'){
+    var mktMoveHist=moveHist[sym]||[];
+    var mktMoveCoin=isAr?(sym==='BTC'?'البيتكوين':sym==='ETH'?'الإيثيريوم':sym):sym;
+    var mktMoveSum=MarketSummary.buildMovementSummary(mktMoveHist,{lang:lang,coinName:mktMoveCoin});
+    h+='<div class="mkt-section"><h3 class="mkt-section-t">📜 '+(isAr?'ملخّص حركة السوق (آلي)':'Market Movement (auto)')+'</h3>';
+    h+='<div style="font-size:12px;line-height:1.8;color:var(--t1);padding:10px;background:rgba(91,156,255,.04);border:1px solid rgba(91,156,255,.1);border-radius:10px">'+esc(mktMoveSum.text)+'</div>';
+    if(!mktMoveSum.enough)h+='<div style="font-size:10px;color:var(--t2);margin-top:6px;line-height:1.6">'+(isAr?'يتراكم السجلّ مع كل تحديث — يظهر السرد بعد عدّة قراءات.':'History builds with each refresh — the narrative appears after a few reads.')+'</div>';
+    h+='</div>';
+  }
   h+=mktSignature();
 
   return h;
@@ -6213,6 +6250,7 @@ async function loadBTCChart(){
   try{
     var data=await analyzeCoinRpt('BTC');
     if(!data){if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u0644\u0627 \u0628\u064a\u0627\u0646\u0627\u062a':'No data')+'</div></div>';return}
+    recordMoveSample('BTC',data);
     var body=buildChartHTML(data,'#f7931a','\u20bf',{ar:'\u0627\u0644\u0628\u064a\u062a\u0643\u0648\u064a\u0646',en:'Bitcoin'});
     body+='<button class="rfr" data-mktrefresh="BTC">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
     btcCache.h=body;
@@ -6238,6 +6276,7 @@ async function loadETHChart(){
   try{
     var data=await analyzeCoinRpt('ETH');
     if(!data){if(el)el.innerHTML='<div class="empty"><div class="empty-ic">\u{1F4CA}</div><div class="empty-tx">'+(lang==='ar'?'\u0644\u0627 \u0628\u064a\u0627\u0646\u0627\u062a':'No data')+'</div></div>';return}
+    recordMoveSample('ETH',data);
     var body=buildChartHTML(data,'#627eea','\u039e',{ar:'\u0627\u0644\u0625\u064a\u062b\u064a\u0631\u064a\u0648\u0645',en:'Ethereum'});
     body+='<button class="rfr" data-mktrefresh="ETH">\u{1F504} '+(lang==='ar'?'\u062a\u062d\u062f\u064a\u062b':'Refresh')+'</button>';
     ethCache.h=body;

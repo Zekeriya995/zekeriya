@@ -1740,6 +1740,10 @@ function buildApiAllSnapshot() {
        5 minutes. Keys: totalEvaluated, winRate, avgGain, byTier. */
     scannerStats: { ...cache.scannerStats },
     scannerStatsTs: cache.scannerStatsTs || 0,
+    /* Movement auto-summary (AR + EN narrative per symbol) from the
+       server-side continuous monitor in market-summary-store. */
+    marketSummary: cache.marketSummary ? cache.marketSummary.summary : {},
+    marketSummaryTs: cache.marketSummary ? cache.marketSummary.lastTickAt || 0 : 0,
     /* Market regime + the weight profile it selected. regime is
        { regime, trendScore, inputs }. When SCANNER_REGIME_ADAPTIVE is on the
        regime DRIVES weight-profile selection (trending→trend, ranging→v2);

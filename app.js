@@ -2277,6 +2277,9 @@ async function loadTk(){
     /* Server-classified market regime — feeds the regime-aware scalp
        alignment (regimeConfAdjustment) in the trading tab. */
     if(all.regime&&typeof all.regime==='object')window.__marketRegime=all.regime;
+    /* Movement auto-summary from the server-side continuous monitor — the
+       BTC/ETH panel prefers this over the local (this-session) render. */
+    if(all.marketSummary&&typeof all.marketSummary==='object')serverMktSummary=all.marketSummary;
     /* — tickers — */
     if(all.tickers){Object.keys(all.tickers).forEach(function(s){var d=all.tickers[s];if(!d)return;var chg=d.change!==undefined?+d.change:(d.c!==undefined?+d.c:0);var price=+d.price||+d.p||0;if(!(price>0))return;/* Skip zero/negative prices — better to omit than to render $0 as live data. */ T[s]={p:price,c:isNaN(chg)?0:chg,v:+d.volume||+d.v||0,h:+d.high||+d.h||0,l:+d.low||+d.l||0,src:d.src||'PROXY',loaded:true,t:Date.now()};if(d.by)T[s].by=+d.by})}
     /* — funding rates — `loaded` distinguishes a real 0% (rare but
@@ -5205,6 +5208,9 @@ var hourlyLog=safeGetJSON('nxHrLog',[]);
    sample per refresh. Client-side for now (Phase A); server-side
    continuous capture lands in a later phase. */
 var moveHist=safeGetJSON('nxMoveHist',{});
+/* Latest server-side movement summaries ({ BTC:{ar,en,enough,dir,...} }),
+   refreshed from /api/all in loadTk(); the panel prefers it over local. */
+var serverMktSummary={};
 function recordMoveSample(sym,data){
   if((sym!=='BTC'&&sym!=='ETH')||!data||typeof data.price!=='number'||!isFinite(data.price))return;
   try{
@@ -6194,16 +6200,22 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   /* Footer */
   h+='<div style="text-align:center;font-size:8px;color:var(--t3);margin:8px 0">⚠️ '+(isAr?'تحليل فني — ليس نصيحة مالية':'Technical analysis — not financial advice')+'</div>';
   /* ════════ Market Movement Summary (auto) — narrative of the up / down
-     legs and the moment the trend flipped over the recent window, from the
-     per-symbol moveHist series via the pure engine in src/market-summary.js.
-     Informational only; client-side for now (Phase A). ════════ */
-  if(typeof MarketSummary!=='undefined'){
-    var mktMoveHist=moveHist[sym]||[];
-    var mktMoveCoin=isAr?(sym==='BTC'?'البيتكوين':sym==='ETH'?'الإيثيريوم':sym):sym;
-    var mktMoveSum=MarketSummary.buildMovementSummary(mktMoveHist,{lang:lang,coinName:mktMoveCoin});
+     legs and the moment the trend flipped. Prefers the server's always-on
+     continuous monitor (/api/all → marketSummary); falls back to the local
+     this-session render via the pure engine. Informational only. ════════ */
+  var mktSrv=(typeof serverMktSummary!=='undefined'&&serverMktSummary)?serverMktSummary[sym]:null;
+  var mktTxt=null,mktEnough=false,mktFromServer=false;
+  if(mktSrv&&mktSrv.enough&&mktSrv[lang]&&mktSrv[lang].text){mktTxt=mktSrv[lang].text;mktEnough=true;mktFromServer=true;}
+  else if(typeof MarketSummary!=='undefined'){
+    var mktCoin=isAr?(sym==='BTC'?'البيتكوين':sym==='ETH'?'الإيثيريوم':sym):sym;
+    var mktLocal=MarketSummary.buildMovementSummary(moveHist[sym]||[],{lang:lang,coinName:mktCoin});
+    mktTxt=mktLocal.text;mktEnough=mktLocal.enough;
+  }
+  if(mktTxt){
     h+='<div class="mkt-section"><h3 class="mkt-section-t">📜 '+(isAr?'ملخّص حركة السوق (آلي)':'Market Movement (auto)')+'</h3>';
-    h+='<div style="font-size:12px;line-height:1.8;color:var(--t1);padding:10px;background:rgba(91,156,255,.04);border:1px solid rgba(91,156,255,.1);border-radius:10px">'+esc(mktMoveSum.text)+'</div>';
-    if(!mktMoveSum.enough)h+='<div style="font-size:10px;color:var(--t2);margin-top:6px;line-height:1.6">'+(isAr?'يتراكم السجلّ مع كل تحديث — يظهر السرد بعد عدّة قراءات.':'History builds with each refresh — the narrative appears after a few reads.')+'</div>';
+    h+='<div style="font-size:12px;line-height:1.8;color:var(--t1);padding:10px;background:rgba(91,156,255,.04);border:1px solid rgba(91,156,255,.1);border-radius:10px">'+esc(mktTxt)+'</div>';
+    if(!mktEnough)h+='<div style="font-size:10px;color:var(--t2);margin-top:6px;line-height:1.6">'+(isAr?'يتراكم السجلّ — يظهر السرد بعد عدّة قراءات.':'History builds — the narrative appears after a few reads.')+'</div>';
+    h+='<div style="font-size:9px;color:var(--t3);margin-top:5px">'+(mktFromServer?(isAr?'المصدر: مراقبة الخادم المستمرة':'source: server continuous monitor'):(isAr?'المصدر: محلّي (هذه الجلسة)':'source: local (this session)'))+'</div>';
     h+='</div>';
   }
   h+=mktSignature();

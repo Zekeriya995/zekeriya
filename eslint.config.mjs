@@ -297,6 +297,7 @@ export default [
       'src/whale-engine.js',
       'src/alerts-engine.js',
       'src/market-summary.js',
+      'src/market-summary-store.js',
       'vps/*.js',
       'ecosystem.config.cjs',
     ],

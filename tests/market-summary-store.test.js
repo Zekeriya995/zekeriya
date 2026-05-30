@@ -79,6 +79,8 @@ test('regenerate — stores AR + EN, direction, and windows out old samples', ()
   assert.match(sm.en.text, /BTC/);
   assert.equal(sm.enough, true);
   assert.ok(!/undefined|NaN/.test(sm.ar.text));
+  /* Accuracy loop is wired into the summary (audit A). */
+  assert.ok(sm.accuracy && sm.accuracy.byHorizon, 'summary carries an accuracy block');
 });
 
 test('shouldRegenerate — never / interval / flip / otherwise', () => {

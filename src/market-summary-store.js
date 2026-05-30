@@ -24,6 +24,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const summary = require('./market-summary');
+const accuracy = require('./accuracy');
 
 const STORE_FILE = path.join(__dirname, '..', 'data', 'market-summary.json');
 const SYMBOLS = ['BTC', 'ETH'];
@@ -151,12 +152,16 @@ function regenerate(state, sym, now) {
   });
   const en = summary.buildMovementSummary(series, { lang: 'en', coinName: sym, sym });
   const dir = series.length ? summary.sampleBucket(series[series.length - 1]) : 'neutral';
+  /* Accuracy loop (audit A) — score the FULL history, not just the 24h
+     narrative window, so older calls can be evaluated against their outcome. */
+  const acc = accuracy.evaluateAccuracy(state.series[sym] || []);
   state.summary[sym] = {
     ar: { text: ar.text, headline: ar.headline },
     en: { text: en.text, headline: en.headline },
     enough: ar.enough,
     flips: ar.flips,
     dir,
+    accuracy: acc,
     at: now,
     samples: series.length,
   };

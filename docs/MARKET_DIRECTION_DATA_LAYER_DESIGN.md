@@ -44,14 +44,14 @@ server and PWA. This doc pins that contract down; everything downstream
 
 ## 2. What the audit established (data-layer implications)
 
-| Audit group | Finding | Data-layer implication |
-| ----------- | ------- | ---------------------- |
-| A | accuracy loop is dead code | server must **persist snapshots + evaluate** them |
-| B | `ts` has structural bull bias | scoring becomes a **pure fn over the snapshot** → unit-testable symmetry |
-| C | `sc` un-normalized (max ≈14, shown `/10`) | normalize against **live configured weights**, not a constant |
-| D | iceberg bucket is absolute (`p*1e4`), dead for BTC | microstructure moves to a **relative-band** detector (and a gated source — see §3) |
-| E | secondary sources fail silently | **health + completeness + confidence** become first-class |
-| F | `bearP` capped at 35%, never displayed | resolved when scenarios are recomputed server-side |
+| Audit group | Finding                                            | Data-layer implication                                                             |
+| ----------- | -------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| A           | accuracy loop is dead code                         | server must **persist snapshots + evaluate** them                                  |
+| B           | `ts` has structural bull bias                      | scoring becomes a **pure fn over the snapshot** → unit-testable symmetry           |
+| C           | `sc` un-normalized (max ≈14, shown `/10`)          | normalize against **live configured weights**, not a constant                      |
+| D           | iceberg bucket is absolute (`p*1e4`), dead for BTC | microstructure moves to a **relative-band** detector (and a gated source — see §3) |
+| E           | secondary sources fail silently                    | **health + completeness + confidence** become first-class                          |
+| F           | `bearP` capped at 35%, never displayed             | resolved when scenarios are recomputed server-side                                 |
 
 ---
 
@@ -60,19 +60,19 @@ server and PWA. This doc pins that contract down; everything downstream
 Pulled against the institutional feed (CoinDesk/CCData) to ground the
 design in what is actually reachable, not assumed:
 
-| Signal | Live value (≈2026-05-30) | Note for design |
-| ------ | ------------------------ | --------------- |
-| Funding (Binance/Bybit BTC) | `0.00506%` vs `0.00473%`/8h; Bybit dipped `-0.0079%` | **multi-venue divergence is real** → aggregate |
-| Open Interest (BTC) | `$7.70B`, **−1.72%/24h** at flat price | deleveraging — single venue would miss it |
-| Taker flow (perp 1h) | `VOLUME_BUY` / `VOLUME_SELL` delivered split | **CVD comes pre-derived** → drop fragile browser reconstruction |
-| Spot venues | 1691 instruments; USD venue buy-skewed vs USDT balanced | **Coinbase-premium proxy** is computable |
-| News | top BTC headline `SENTIMENT: NEGATIVE` + `BENCHMARK_SCORE` | **sentiment pre-classified** → no NLP needed |
-| Order-book metrics | **`error 97: not authorized`** | depth/L2 is **gated** in current package → §7 fallback |
-| Spot/perp price | `~$73,880` | (the audit's `$67k` assumption is stale; band-relative logic matters) |
+| Signal                      | Live value (≈2026-05-30)                                   | Note for design                                                       |
+| --------------------------- | ---------------------------------------------------------- | --------------------------------------------------------------------- |
+| Funding (Binance/Bybit BTC) | `0.00506%` vs `0.00473%`/8h; Bybit dipped `-0.0079%`       | **multi-venue divergence is real** → aggregate                        |
+| Open Interest (BTC)         | `$7.70B`, **−1.72%/24h** at flat price                     | deleveraging — single venue would miss it                             |
+| Taker flow (perp 1h)        | `VOLUME_BUY` / `VOLUME_SELL` delivered split               | **CVD comes pre-derived** → drop fragile browser reconstruction       |
+| Spot venues                 | 1691 instruments; USD venue buy-skewed vs USDT balanced    | **Coinbase-premium proxy** is computable                              |
+| News                        | top BTC headline `SENTIMENT: NEGATIVE` + `BENCHMARK_SCORE` | **sentiment pre-classified** → no NLP needed                          |
+| Order-book metrics          | **`error 97: not authorized`**                             | depth/L2 is **gated** in current package → §7 fallback                |
+| Spot/perp price             | `~$73,880`                                                 | (the audit's `$67k` assumption is stale; band-relative logic matters) |
 
-**Punchline:** multi-source read = *neutral-leaning-bearish* (flat price +
+**Punchline:** multi-source read = _neutral-leaning-bearish_ (flat price +
 shrinking OI + cooling funding + negative news, minus mild US spot bid).
-The current Binance-only read would print *mild bull*. That gap is the
+The current Binance-only read would print _mild bull_. That gap is the
 whole project.
 
 ---
@@ -112,55 +112,74 @@ timestamp, and confidence so the UI and scorer never have to guess.
 {
   "schemaVersion": 1,
   "sym": "BTC",
-  "asOf": 1780161336,            // server build time (unix s)
+  "asOf": 1780161336, // server build time (unix s)
   "price": { "value": 73880.08, "source": "binance.ws", "ts": 1780161336, "confidence": 1.0 },
 
   "signals": {
     "funding": {
-      "value": 0.00000503,        // volume-weighted across venues, per-interval
+      "value": 0.00000503, // volume-weighted across venues, per-interval
       "annualizedPct": 5.5,
-      "trend": "cooling",         // rising | cooling | flat | flipping
+      "trend": "cooling", // rising | cooling | flat | flipping
       "perVenue": { "binance": 0.00005057, "bybit": 0.00004727, "okex": 0.000048 },
-      "agreement": 0.86,          // 0..1 cross-venue concordance (drives confidence)
-      "source": "ccdata.fr", "ts": 1780161303, "confidence": 0.9
+      "agreement": 0.86, // 0..1 cross-venue concordance (drives confidence)
+      "source": "ccdata.fr",
+      "ts": 1780161303,
+      "confidence": 0.9,
     },
     "openInterest": {
-      "valueUsd": 7.695e9, "change24hPct": -1.72,
-      "interpretation": "deleveraging",   // building | deleveraging | flat
+      "valueUsd": 7.695e9,
+      "change24hPct": -1.72,
+      "interpretation": "deleveraging", // building | deleveraging | flat
       "perVenue": { "binance": 7.695e9 },
-      "source": "ccdata.oi", "ts": 1780161336, "confidence": 0.8
+      "source": "ccdata.oi",
+      "ts": 1780161336,
+      "confidence": 0.8,
     },
     "takerFlow": {
-      "buyVol": 318.35, "sellVol": 175.51, "imbalance": 0.29,  // (buy-sell)/(buy+sell)
-      "window": "1h", "source": "ccdata.ohlcv", "ts": 1780160400, "confidence": 0.85
+      "buyVol": 318.35,
+      "sellVol": 175.51,
+      "imbalance": 0.29, // (buy-sell)/(buy+sell)
+      "window": "1h",
+      "source": "ccdata.ohlcv",
+      "ts": 1780160400,
+      "confidence": 0.85,
     },
     "spotPremium": {
-      "usdVsUsdtPct": 0.04, "interpretation": "mild-us-bid",   // Coinbase-premium proxy
-      "source": "ccdata.toplist", "ts": 1780161000, "confidence": 0.7
+      "usdVsUsdtPct": 0.04,
+      "interpretation": "mild-us-bid", // Coinbase-premium proxy
+      "source": "ccdata.toplist",
+      "ts": 1780161000,
+      "confidence": 0.7,
     },
     "news": {
-      "score": 38, "label": "negative", "count24h": 14,
+      "score": 38,
+      "label": "negative",
+      "count24h": 14,
       "topHeadline": "Humpback whales intensify selling…",
-      "source": "ccdata.news", "ts": 1780160551, "confidence": 0.6
+      "source": "ccdata.news",
+      "ts": 1780160551,
+      "confidence": 0.6,
     },
-    "options": { "available": false, "reason": "endpoint_not_authorized" }
+    "options": { "available": false, "reason": "endpoint_not_authorized" },
   },
 
   "health": {
-    "sourcesTotal": 8, "sourcesLive": 6, "completeness": 0.75,   // sourcesLive/Total
+    "sourcesTotal": 8,
+    "sourcesLive": 6,
+    "completeness": 0.75, // sourcesLive/Total
     "degraded": ["options", "orderbook"],
     "perSource": {
-      "ccdata.fr":  { "ok": true,  "lastSuccessTs": 1780161303, "errorRate1h": 0.0 },
-      "orderbook":  { "ok": false, "lastSuccessTs": 0,          "errorRate1h": 1.0, "code": 97 }
-    }
-  }
+      "ccdata.fr": { "ok": true, "lastSuccessTs": 1780161303, "errorRate1h": 0.0 },
+      "orderbook": { "ok": false, "lastSuccessTs": 0, "errorRate1h": 1.0, "code": 97 },
+    },
+  },
 }
 ```
 
 **Confidence ∈ [0,1] per signal** is a function of: (a) source liveness,
-(b) staleness vs the signal's *expected* cadence (funding ~8h, OI ~1m,
+(b) staleness vs the signal's _expected_ cadence (funding ~8h, OI ~1m,
 news ~min), and (c) cross-venue `agreement`. The scorer multiplies each
-factor's contribution by its confidence — a 3/8-source read is *weaker*,
+factor's contribution by its confidence — a 3/8-source read is _weaker_,
 not silently "neutral". This is the direct fix for audit group E.
 
 ---
@@ -209,7 +228,7 @@ The audit's #1 priority. Proposed, pending D2:
   - `dir` neutral → **correct** iff `|move| ≤ θ`
 - Persist `correct` and feed per-factor outcomes to the **existing L2
   calibrator** (`tests/calibrate-weights.test.js`, `vps/`), not a new
-  system. `getAccuracy()` then reports a *real* number.
+  system. `getAccuracy()` then reports a _real_ number.
 
 `H` and `θ` are decisions, not guesses (§10 D2).
 
@@ -217,13 +236,13 @@ The audit's #1 priority. Proposed, pending D2:
 
 ## 9. Phased plan
 
-| Phase | Deliverable | Risk | Closes |
-| ----- | ----------- | ---- | ------ |
-| 1 | server aggregator + `/api/market-direction` (funding+OI multi-venue, health/completeness). **Additive, no UI change.** | very low | E |
-| 2 | extract `scoreDirection()` → `src/market-direction.js` (exported) + unit tests; PWA consumes snapshot | low | **testability** + A |
-| 3 | taker flow via `VOLUME_BUY/SELL`; news sentiment; spot-premium; surface `completeness` in UI | medium | E + signal quality |
-| 4 | de-bias `ts` (symmetry tests), normalize `sc` vs live weights, wire accuracy loop → L2 | medium | B + C + A |
-| 5 | backtest on historical `*_ohlcv`, tune | low | credibility |
+| Phase | Deliverable                                                                                                            | Risk     | Closes              |
+| ----- | ---------------------------------------------------------------------------------------------------------------------- | -------- | ------------------- |
+| 1     | server aggregator + `/api/market-direction` (funding+OI multi-venue, health/completeness). **Additive, no UI change.** | very low | E                   |
+| 2     | extract `scoreDirection()` → `src/market-direction.js` (exported) + unit tests; PWA consumes snapshot                  | low      | **testability** + A |
+| 3     | taker flow via `VOLUME_BUY/SELL`; news sentiment; spot-premium; surface `completeness` in UI                           | medium   | E + signal quality  |
+| 4     | de-bias `ts` (symmetry tests), normalize `sc` vs live weights, wire accuracy loop → L2                                 | medium   | B + C + A           |
+| 5     | backtest on historical `*_ohlcv`, tune                                                                                 | low      | credibility         |
 
 Phases 1–2 deliver the original audit fixes **on a testable footing** —
 no prior work is wasted, it is rebuilt correctly.

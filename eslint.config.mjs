@@ -303,6 +303,7 @@ export default [
       'src/market-aggregate.js',
       'src/market-direction.js',
       'src/microstructure.js',
+      'src/accuracy.js',
       'vps/*.js',
       'ecosystem.config.cjs',
     ],

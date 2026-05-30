@@ -171,6 +171,8 @@ export default [
         saveMonitor: 'readonly',
         saveFactorLog: 'readonly',
         saveSupervisor: 'readonly',
+        /* Declared in src/market-summary.js (UMD: window.MarketSummary) */
+        MarketSummary: 'readonly',
         /* Declared in src/notifications.js */
         notifiedSet: 'writable',
         notifHist: 'writable',
@@ -294,6 +296,8 @@ export default [
       'src/indicator-engine.js',
       'src/whale-engine.js',
       'src/alerts-engine.js',
+      'src/market-summary.js',
+      'src/market-summary-store.js',
       'vps/*.js',
       'ecosystem.config.cjs',
     ],

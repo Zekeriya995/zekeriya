@@ -44,6 +44,7 @@ const pushCooldown = require('./src/scanner-push-cooldown');
 const scannerTagStats = require('./src/scanner-tag-stats');
 const scannerBacktest = require('./src/scanner-backtest');
 const scoringRules = require('./src/scoring-rules');
+const marketSummaryStore = require('./src/market-summary-store');
 
 const {
   isAllowedFetchUrl,
@@ -1739,6 +1740,10 @@ function buildApiAllSnapshot() {
        5 minutes. Keys: totalEvaluated, winRate, avgGain, byTier. */
     scannerStats: { ...cache.scannerStats },
     scannerStatsTs: cache.scannerStatsTs || 0,
+    /* Movement auto-summary (AR + EN narrative per symbol) from the
+       server-side continuous monitor in market-summary-store. */
+    marketSummary: cache.marketSummary ? cache.marketSummary.summary : {},
+    marketSummaryTs: cache.marketSummary ? cache.marketSummary.lastTickAt || 0 : 0,
     /* Market regime + the weight profile it selected. regime is
        { regime, trendScore, inputs }. When SCANNER_REGIME_ADAPTIVE is on the
        regime DRIVES weight-profile selection (trending→trend, ranging→v2);
@@ -2194,6 +2199,11 @@ app.get('/api/alerts', (req, res) => {
    the numbers are inherently fresh — no rolling-window state to
    maintain. */
 const INSIGHTS_ENABLED = process.env.SCANNER_INSIGHTS_ENABLED !== 'false';
+app.get('/api/market-summary', (_req, res) => {
+  res.set('Cache-Control', 'public, max-age=60');
+  res.json((cache.marketSummary && cache.marketSummary.summary) || {});
+});
+
 app.get('/api/scanner/insights', (req, res) => {
   if (!INSIGHTS_ENABLED) return res.status(503).json({ error: 'insights_disabled' });
   if (!cache.scannerRejections) {
@@ -2397,6 +2407,62 @@ app.post('/notify', async (req, res) => {
 
 /* ═══ STARTUP ═══ */
 const refreshTimers = [];
+/* ─── Market movement monitor ─────────────────────────────────────
+   Sample BTC / ETH from the live fetch caches and regenerate the
+   narrative summary on a periodic + on-flip cadence. The pure engine
+   and store live in src/market-summary{,-store}.js. */
+function marketSummaryMd(sym) {
+  const t = cache.tickers[sym];
+  if (!t || typeof t.price !== 'number') return null;
+  const ns = cache.newsSentiment || {};
+  const pos = ns.positive || 0;
+  const neg = ns.negative || 0;
+  let newsTone = null;
+  if (pos > neg * 1.2) newsTone = 'positive';
+  else if (neg > pos * 1.2) newsTone = 'negative';
+  else if (pos || neg) newsTone = 'neutral';
+  const present = [
+    cache.tickers[sym],
+    cache.fr[sym],
+    typeof cache.oi[sym] === 'number' ? cache.oi[sym] : null,
+    cache.taker[sym],
+    cache.ls[sym],
+    cache.globalLs[sym],
+    cache.bitfinex[sym],
+    cache.hyperliquid[sym],
+    cache.depth[sym],
+    cache.news && cache.news.length ? 1 : null,
+    cache.market && cache.market.fgi != null ? 1 : null,
+    cache.market && cache.market.btcDom != null ? 1 : null,
+  ];
+  let live = 0;
+  for (let i = 0; i < present.length; i++) if (present[i] != null) live++;
+  return {
+    price: t.price,
+    funding: cache.fr[sym] && typeof cache.fr[sym].rate === 'number' ? cache.fr[sym].rate : null,
+    oi: typeof cache.oi[sym] === 'number' ? cache.oi[sym] : null,
+    newsTone,
+    sourcesLive: live,
+    sourcesTotal: present.length,
+  };
+}
+function captureMarketSummary() {
+  try {
+    if (!cache.marketSummary) cache.marketSummary = marketSummaryStore.emptyState();
+    const md = {};
+    for (let i = 0; i < marketSummaryStore.SYMBOLS.length; i++) {
+      const sym = marketSummaryStore.SYMBOLS[i];
+      const m = marketSummaryMd(sym);
+      if (m) md[sym] = m;
+    }
+    if (marketSummaryStore.tick(cache.marketSummary, md, Date.now())) {
+      marketSummaryStore.save(cache.marketSummary);
+    }
+  } catch (e) {
+    console.error('[MKT-SUMMARY] tick failed:', e.message);
+  }
+}
+
 async function startDataLoops() {
   console.log('═══ NEXUS PRO Proxy Server V10.1 ═══');
   console.log(`Starting on port ${PORT}...`);
@@ -2406,6 +2472,10 @@ async function startDataLoops() {
      was loaded. */
   cache.scannerHistory = scannerHistory.loadHistory();
   console.log(`[INIT] Loaded ${cache.scannerHistory.length} historical scanner signals`);
+
+  /* Restore the market-movement series + summaries so the narrative
+     survives a restart; the monitor timer appends to whatever loaded. */
+  cache.marketSummary = marketSummaryStore.load();
 
   /* Initial load — sequential to avoid rate limits */
   console.log('[INIT] Loading tickers...');
@@ -2504,7 +2574,10 @@ async function startDataLoops() {
         }
       },
       5 * 60 * 1000
-    )
+    ),
+    /* Market movement monitor — sample + regenerate the BTC/ETH
+       narrative every ~10 min (and on a flip, handled inside tick). */
+    setInterval(captureMarketSummary, jitter(10 * 60 * 1000))
   );
 
   /* First scanner pass — runs once the warm-up fetches above have
@@ -2522,6 +2595,8 @@ async function startDataLoops() {
       runIndicatorsOnServer().catch((e) => console.error('[INDICATORS] init failed:', e.message)),
     5000
   );
+  /* Seed the first movement sample once the warm-up fetches are in. */
+  setTimeout(captureMarketSummary, 8000);
 
   /* Telegram alerts on cache-down / sustained-failure transitions.
      No-op unless ENABLE_TELEGRAM_ALERTS=true and Telegram is wired. */

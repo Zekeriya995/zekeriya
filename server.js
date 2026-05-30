@@ -45,6 +45,7 @@ const scannerTagStats = require('./src/scanner-tag-stats');
 const scannerBacktest = require('./src/scanner-backtest');
 const scoringRules = require('./src/scoring-rules');
 const marketSummaryStore = require('./src/market-summary-store');
+const marketAggregate = require('./src/market-aggregate');
 
 const {
   isAllowedFetchUrl,
@@ -1104,6 +1105,30 @@ async function fetchFundingRates() {
   } catch (err) {
     console.error('[FR] Error:', err.message);
   }
+}
+
+/* Bybit funding — a second 8h-funding venue for the market-direction
+   data layer's multi-venue aggregate. api.bybit.com is already in the
+   egress allowlist. Graceful: a failure just leaves Binance as the sole
+   venue, and the snapshot's confidence reflects the lower venue count. */
+async function fetchBybitFunding() {
+  if (!cache.frVenues) cache.frVenues = {};
+  const map = { BTC: 'BTCUSDT', ETH: 'ETHUSDT' };
+  await Promise.allSettled(
+    Object.keys(map).map(async (sym) => {
+      const d = await safeFetch(
+        CONFIG.BYBIT + '/market/tickers?category=linear&symbol=' + map[sym],
+        'FR-BYBIT-' + sym
+      );
+      const row = d && d.result && d.result.list && d.result.list[0];
+      const rate = row && row.fundingRate !== undefined ? parseFloat(row.fundingRate) : null;
+      if (rate !== null && Number.isFinite(rate)) {
+        if (!cache.frVenues[sym]) cache.frVenues[sym] = {};
+        cache.frVenues[sym].bybit = rate;
+      }
+    })
+  );
+  cache.lastUpdate.frVenues = Date.now();
 }
 
 /* 3. OPEN INTEREST — Binance Futures */
@@ -2199,6 +2224,12 @@ app.get('/api/alerts', (req, res) => {
    the numbers are inherently fresh — no rolling-window state to
    maintain. */
 const INSIGHTS_ENABLED = process.env.SCANNER_INSIGHTS_ENABLED !== 'false';
+app.get('/api/market-direction', (_req, res) => {
+  const now = Date.now();
+  res.set('Cache-Control', 'public, max-age=10');
+  res.json({ BTC: buildMarketDirection('BTC', now), ETH: buildMarketDirection('ETH', now) });
+});
+
 app.get('/api/market-summary', (_req, res) => {
   res.set('Cache-Control', 'public, max-age=60');
   res.json((cache.marketSummary && cache.marketSummary.summary) || {});
@@ -2463,6 +2494,61 @@ function captureMarketSummary() {
   }
 }
 
+/* ─── Market Direction data layer (Phase 1) ──────────────────────────
+   Assemble a normalized MarketDirectionSnapshot per symbol from the
+   server's existing caches: multi-venue funding (binance + bybit), OI,
+   news tone, and real per-source health → completeness → soft confidence
+   (the audit's silent-degradation fix). Pure aggregation lives in
+   src/market-aggregate.js. */
+function buildMarketDirection(sym, now) {
+  const fv = cache.frVenues ? cache.frVenues[sym] : null;
+  const funding = {};
+  if (cache.fr[sym] && typeof cache.fr[sym].rate === 'number') {
+    funding.binance = cache.fr[sym].rate / 100; /* cache.fr is percent → fraction */
+  }
+  if (fv && typeof fv.bybit === 'number') funding.bybit = fv.bybit;
+  const oi = {};
+  if (typeof cache.oi[sym] === 'number') oi.binance = cache.oi[sym];
+  const ns = cache.newsSentiment || {};
+  const pos = ns.positive || 0;
+  const neg = ns.negative || 0;
+  let news = null;
+  if (cache.news && cache.news.length) {
+    news = {
+      label: pos > neg * 1.2 ? 'positive' : neg > pos * 1.2 ? 'negative' : 'neutral',
+      counts: { positive: pos, negative: neg, neutral: ns.neutral || 0 },
+    };
+  }
+  const u = cache.lastUpdate || {};
+  const perSource = {
+    'funding.binance': { ok: !!(cache.fr[sym] && typeof cache.fr[sym].rate === 'number') },
+    'funding.bybit': { ok: !!(fv && typeof fv.bybit === 'number') },
+    openInterest: { ok: typeof cache.oi[sym] === 'number' },
+    news: { ok: !!(cache.news && cache.news.length) },
+    taker: { ok: !!cache.taker[sym] },
+    topTraders: { ok: !!cache.ls[sym] },
+    globalLs: { ok: !!cache.globalLs[sym] },
+    bitfinex: { ok: !!cache.bitfinex[sym] },
+    hyperliquid: { ok: !!cache.hyperliquid[sym] },
+  };
+  return marketAggregate.buildSnapshot({
+    sym,
+    now,
+    price: cache.tickers[sym] ? cache.tickers[sym].price : null,
+    priceTs: u.tickers || now,
+    priceSource: 'binance',
+    funding: Object.keys(funding).length ? funding : null,
+    fundingTs: u.fr || now,
+    fundingTotalVenues: 2,
+    oi: Object.keys(oi).length ? oi : null,
+    oiTs: u.oi || now,
+    oiTotalVenues: 1,
+    news,
+    newsTs: u.news || now,
+    perSource,
+  });
+}
+
 async function startDataLoops() {
   console.log('═══ NEXUS PRO Proxy Server V10.1 ═══');
   console.log(`Starting on port ${PORT}...`);
@@ -2577,7 +2663,9 @@ async function startDataLoops() {
     ),
     /* Market movement monitor — sample + regenerate the BTC/ETH
        narrative every ~10 min (and on a flip, handled inside tick). */
-    setInterval(captureMarketSummary, jitter(10 * 60 * 1000))
+    setInterval(captureMarketSummary, jitter(10 * 60 * 1000)),
+    /* Bybit funding for the market-direction multi-venue aggregate (D3: 5m). */
+    setInterval(fetchBybitFunding, jitter(5 * 60 * 1000))
   );
 
   /* First scanner pass — runs once the warm-up fetches above have
@@ -2595,7 +2683,9 @@ async function startDataLoops() {
       runIndicatorsOnServer().catch((e) => console.error('[INDICATORS] init failed:', e.message)),
     5000
   );
-  /* Seed the first movement sample once the warm-up fetches are in. */
+  /* Prime market-direction venue funding, then seed the first movement
+     sample once the warm-up fetches are in. */
+  setTimeout(fetchBybitFunding, 6000);
   setTimeout(captureMarketSummary, 8000);
 
   /* Telegram alerts on cache-down / sustained-failure transitions.

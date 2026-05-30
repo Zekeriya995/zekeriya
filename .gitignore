@@ -31,3 +31,8 @@ lerna-debug.log*
 .eslintcache
 .prettiercache
 *.tsbuildinfo
+
+# Local scratch / mockup artifacts (not project files)
+.fonts/
+make_mockup.py
+mockup_*.png

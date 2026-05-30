@@ -299,6 +299,7 @@ export default [
       'src/market-summary.js',
       'src/market-summary-store.js',
       'src/market-aggregate.js',
+      'src/market-direction.js',
       'vps/*.js',
       'ecosystem.config.cjs',
     ],

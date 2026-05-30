@@ -294,6 +294,7 @@ export default [
       'src/indicator-engine.js',
       'src/whale-engine.js',
       'src/alerts-engine.js',
+      'src/market-summary.js',
       'vps/*.js',
       'ecosystem.config.cjs',
     ],

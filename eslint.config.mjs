@@ -298,6 +298,7 @@ export default [
       'src/alerts-engine.js',
       'src/market-summary.js',
       'src/market-summary-store.js',
+      'src/market-aggregate.js',
       'vps/*.js',
       'ecosystem.config.cjs',
     ],

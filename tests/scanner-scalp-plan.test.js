@@ -19,8 +19,11 @@ const assert = require('node:assert/strict');
 /* The scalp card calls atrZones from src/scanner-helpers.js — the 5-arg
    form atrZones(price, atr, support, resistance, mults) — NOT the separate
    Node module src/scanner-atr-zones.js, whose 5th arg is isTier1 rather than
-   a mults object. We exercise the exact function the app uses. */
-const { atrZones } = require('../src/scanner-helpers');
+   a mults object. scanner-helpers.js is a browser script with no
+   module.exports, so (like every other helper test) we load it into the
+   global scope via _setup.js and reference the global directly. */
+require('./_setup.js');
+const atrZones = globalThis.atrZones;
 
 /* The exact multipliers the scalp branch passes to atrZones. Mirror of the
    literal in app.js loadTrading — kept here so a change to the scalp's

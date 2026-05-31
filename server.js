@@ -1131,6 +1131,29 @@ async function fetchBybitFunding() {
   cache.lastUpdate.frVenues = Date.now();
 }
 
+/* OKX funding — a third 8h-funding venue (www.okx.com, already in the
+   egress allowlist). Graceful, same contract as Bybit: a failure just
+   leaves the venue absent and confidence/completeness reflect it. */
+async function fetchOkxFunding() {
+  if (!cache.frVenues) cache.frVenues = {};
+  const map = { BTC: 'BTC-USDT-SWAP', ETH: 'ETH-USDT-SWAP' };
+  await Promise.allSettled(
+    Object.keys(map).map(async (sym) => {
+      const d = await safeFetch(
+        'https://www.okx.com/api/v5/public/funding-rate?instId=' + map[sym],
+        'FR-OKX-' + sym
+      );
+      const row = d && d.data && d.data[0];
+      const rate = row && row.fundingRate !== undefined ? parseFloat(row.fundingRate) : null;
+      if (rate !== null && Number.isFinite(rate)) {
+        if (!cache.frVenues[sym]) cache.frVenues[sym] = {};
+        cache.frVenues[sym].okex = rate;
+      }
+    })
+  );
+  cache.lastUpdate.frVenues = Date.now();
+}
+
 /* 3. OPEN INTEREST — Binance Futures */
 async function fetchOpenInterest() {
   try {
@@ -2507,6 +2530,7 @@ function buildMarketDirection(sym, now) {
     funding.binance = cache.fr[sym].rate / 100; /* cache.fr is percent → fraction */
   }
   if (fv && typeof fv.bybit === 'number') funding.bybit = fv.bybit;
+  if (fv && typeof fv.okex === 'number') funding.okex = fv.okex;
   const oi = {};
   if (typeof cache.oi[sym] === 'number') oi.binance = cache.oi[sym];
   const ns = cache.newsSentiment || {};
@@ -2523,6 +2547,7 @@ function buildMarketDirection(sym, now) {
   const perSource = {
     'funding.binance': { ok: !!(cache.fr[sym] && typeof cache.fr[sym].rate === 'number') },
     'funding.bybit': { ok: !!(fv && typeof fv.bybit === 'number') },
+    'funding.okex': { ok: !!(fv && typeof fv.okex === 'number') },
     openInterest: { ok: typeof cache.oi[sym] === 'number' },
     news: { ok: !!(cache.news && cache.news.length) },
     taker: { ok: !!cache.taker[sym] },
@@ -2539,7 +2564,7 @@ function buildMarketDirection(sym, now) {
     priceSource: 'binance',
     funding: Object.keys(funding).length ? funding : null,
     fundingTs: u.fr || now,
-    fundingTotalVenues: 2,
+    fundingTotalVenues: 3,
     oi: Object.keys(oi).length ? oi : null,
     oiTs: u.oi || now,
     oiTotalVenues: 1,
@@ -2664,8 +2689,9 @@ async function startDataLoops() {
     /* Market movement monitor — sample + regenerate the BTC/ETH
        narrative every ~10 min (and on a flip, handled inside tick). */
     setInterval(captureMarketSummary, jitter(10 * 60 * 1000)),
-    /* Bybit funding for the market-direction multi-venue aggregate (D3: 5m). */
-    setInterval(fetchBybitFunding, jitter(5 * 60 * 1000))
+    /* Bybit + OKX funding for the market-direction multi-venue aggregate (D3: 5m). */
+    setInterval(fetchBybitFunding, jitter(5 * 60 * 1000)),
+    setInterval(fetchOkxFunding, jitter(5 * 60 * 1000))
   );
 
   /* First scanner pass — runs once the warm-up fetches above have
@@ -2686,6 +2712,7 @@ async function startDataLoops() {
   /* Prime market-direction venue funding, then seed the first movement
      sample once the warm-up fetches are in. */
   setTimeout(fetchBybitFunding, 6000);
+  setTimeout(fetchOkxFunding, 7000);
   setTimeout(captureMarketSummary, 8000);
 
   /* Telegram alerts on cache-down / sustained-failure transitions.

@@ -29,6 +29,9 @@ const FETCH_HOST_ALLOWLIST = new Set([
   'api-pub.bitfinex.com',
   'api.hyperliquid.xyz',
   'cointelegraph.com',
+  /* OKX public funding-rate endpoint — third venue for the market-direction
+     multi-venue funding aggregate (read-only, no credentials). */
+  'www.okx.com',
 ]);
 
 function isAllowedFetchUrl(url) {

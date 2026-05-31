@@ -21,6 +21,7 @@ test('isAllowedFetchUrl — accepts each upstream we actually use', () => {
   assert.equal(isAllowedFetchUrl('https://api.binance.com/api/v3/ticker/24hr'), true);
   assert.equal(isAllowedFetchUrl('https://fapi.binance.com/fapi/v1/premiumIndex'), true);
   assert.equal(isAllowedFetchUrl('https://api.bybit.com/v5/market/tickers'), true);
+  assert.equal(isAllowedFetchUrl('https://www.okx.com/api/v5/public/funding-rate'), true);
   assert.equal(isAllowedFetchUrl('https://api.coingecko.com/api/v3/global'), true);
   assert.equal(isAllowedFetchUrl('https://api.coinbase.com/v2/prices'), true);
   assert.equal(isAllowedFetchUrl('https://api.alternative.me/fng'), true);

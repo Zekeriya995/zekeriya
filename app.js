@@ -1338,7 +1338,12 @@ function setScanSetup(s,btn){
 }
 function scanTab(idx,btn){curScanTab=idx;document.querySelectorAll('#pg-scan>.big-tabs>.big-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');['scanTrade','scanTrend','scanSmall'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=j===idx?'block':'none'});updateScanSummary(0,Object.keys(T).length);if(idx===0)loadTrading();if(idx===1)loadTrending();if(idx===2)loadSmallCapsUI()}
 /* ═══ TAB 1: SECTOR TRENDING ═══ */
-function analyzeSectors(){var res=[];for(var k in SECTORS){var sec=SECTORS[k];var coins=sec.coins.filter(function(s){return T[s]});if(coins.length<2)continue;var totC=0,rising=0,totV=0,cd=[];coins.forEach(function(s){var d=T[s];totC+=d.c;totV+=d.v;if(d.c>0)rising++;cd.push({s:s,c:d.c,p:d.p,v:d.v})});cd.sort(function(a,b){return b.c-a.c});var avg=totC/coins.length;var rPct=Math.round(rising/coins.length*100);var str=0;if(avg>=8)str=90;else if(avg>=5)str=75;else if(avg>=3)str=60;else if(avg>=1)str=45;else if(avg>=0)str=30;else if(avg>=-3)str=15;else str=5;if(rPct>=80)str+=10;else if(rPct>=60)str+=5;str=Math.min(100,str);var v,vc;if(str>=70){v=lang==='ar'?'🔥 قطاع حامي — فرصة!':'🔥 Hot — Opportunity!';vc='var(--up)'}else if(str>=50){v=lang==='ar'?'📈 صاعد':'📈 Rising';vc='var(--neon)'}else if(str>=30){v=lang==='ar'?'🟡 محايد':'🟡 Neutral';vc='var(--warn)'}else{v=lang==='ar'?'🔴 هابط — تجنب':'🔴 Declining — Avoid';vc='var(--dn)'}
+function analyzeSectors(){var res=[];for(var k in SECTORS){var sec=SECTORS[k];var coins=sec.coins.filter(function(s){return T[s]});if(coins.length<2)continue;var totC=0,rising=0,totV=0,cd=[];coins.forEach(function(s){var d=T[s];totC+=d.c;totV+=d.v;if(d.c>0)rising++;cd.push({s:s,c:d.c,p:d.p,v:d.v})});cd.sort(function(a,b){return b.c-a.c});var avg=totC/coins.length;var rPct=Math.round(rising/coins.length*100);/* Symmetric sector-heat score (T2 audit): the legacy ladder had five bull
+   buckets vs two bear, so it couldn't tell a −2% sector from a −10% one.
+   sectorStrength re-centres on 50=flat and mirrors up/down. Behind
+   nxScannerFix_sector_symmetry (default on) — flip to 'off' for the exact
+   legacy ladder. Pure + unit-tested in tests/sectors-heat.test.js. */
+var _symFix=(typeof sectorStrength==='function'&&localStorage.getItem('nxScannerFix_sector_symmetry')!=='off');var str;if(_symFix){str=sectorStrength(avg,rPct)}else{str=0;if(avg>=8)str=90;else if(avg>=5)str=75;else if(avg>=3)str=60;else if(avg>=1)str=45;else if(avg>=0)str=30;else if(avg>=-3)str=15;else str=5;if(rPct>=80)str+=10;else if(rPct>=60)str+=5;str=Math.min(100,str)}var v,vc;var _tier=_symFix?sectorVerdictTier(str):(str>=70?'hot':str>=50?'rising':str>=30?'neutral':'declining');if(_tier==='hot'){v=lang==='ar'?'🔥 قطاع حامي — فرصة!':'🔥 Hot — Opportunity!';vc='var(--up)'}else if(_tier==='rising'){v=lang==='ar'?'📈 صاعد':'📈 Rising';vc='var(--neon)'}else if(_tier==='neutral'){v=lang==='ar'?'🟡 محايد':'🟡 Neutral';vc='var(--warn)'}else{v=lang==='ar'?'🔴 هابط — تجنب':'🔴 Declining — Avoid';vc='var(--dn)'}
   res.push({k:k,ic:sec.ic,name:sec.n[lang]||sec.n.en,col:sec.col,avg:+avg.toFixed(1),rising:rising,total:coins.length,rPct:rPct,vol:totV,str:str,coins:cd,verdict:v,verdictCol:vc})}res.sort(function(a,b){return b.str-a.str});return res}
 
 /* ═══ Sector Rotation — money-flow tracker ═══
@@ -1408,7 +1413,10 @@ function loadTrending(){
       +'</div></div>';
   }
   rotData.sectors.forEach(function(s){
-    var isHot=s.str>=60;var isMed=s.str>=30&&s.str<60;
+    /* Chip-display tiers track the symmetric scale (T2): hot (≥70) shows 5
+       coins + a Trade button, neutral/rising (44–70) shows 3, bearish shows
+       none. Mirrors the legacy 60/30 cutpoints under the rollback flag. */
+    var _symFix=localStorage.getItem('nxScannerFix_sector_symmetry')!=='off';var isHot=_symFix?s.str>=70:s.str>=60;var isMed=_symFix?(s.str>=44&&s.str<70):(s.str>=30&&s.str<60);
     var flowCol=s.flow==='inflow'?'var(--up)':s.flow==='outflow'?'var(--dn)':'var(--t2)';
     var flowText=s.hasBaseline?(s.flowIc+' '+(s.change1h>=0?'+':'')+s.change1h+'%'):'·';
     h+='<div class="whale-card" style="border-left:3px solid '+s.col+';margin-bottom:8px;padding:10px">'

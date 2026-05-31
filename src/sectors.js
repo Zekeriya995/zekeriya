@@ -119,3 +119,65 @@ function getCoinSector(sym) {
   }
   return null;
 }
+
+/* ─── Sector heat — symmetric strength score (T2 scanner audit) ────────
+   analyzeSectors() in app.js scored sector heat with a structurally
+   bull-biased ladder: FIVE positive buckets (avg ≥0/1/3/5/8 → 30/45/60/
+   75/90) but only TWO negative ones (avg ≥-3 → 15, else 5). A sector down
+   −2% and one down −10% landed in the same bucket — the "money flow"
+   panel was effectively blind to the DEPTH of an outflow, and sorted /
+   coloured every decliner almost identically. Same asymmetry class as the
+   Market-Direction trend-score bias (audit Group B).
+
+   sectorStrength re-centres the scale on 50 = flat and mirrors the bullish
+   ladder onto the bearish side, so an N% drop is exactly as far below 50 as
+   an N% rise is above it. The breadth nudge (share of rising coins) is
+   symmetric too: broad participation lifts, broad weakness drags equally.
+   Pure: numbers in, 0..100 out — unit-tested in tests/sectors-heat.test.js.
+   Wired into app.js behind nxScannerFix_sector_symmetry (default on) so the
+   legacy ladder is one localStorage flip away if a regression surfaces. */
+function sectorStrength(avg, rPct) {
+  var a = +avg;
+  if (!isFinite(a)) a = 0;
+  var s;
+  if (a >= 8) s = 92;
+  else if (a >= 5) s = 82;
+  else if (a >= 3) s = 72;
+  else if (a >= 1) s = 60;
+  else if (a > -1) s = 50; /* flat band (−1, 1) */
+  else if (a > -3) s = 40;
+  else if (a > -5) s = 28;
+  else if (a > -8) s = 18;
+  else s = 8;
+  /* Breadth of participation — symmetric around the no-info case. */
+  var r = +rPct;
+  if (isFinite(r)) {
+    if (r >= 80) s += 8;
+    else if (r >= 60) s += 4;
+    else if (r <= 20) s -= 8;
+    else if (r <= 40) s -= 4;
+  }
+  if (s < 0) s = 0;
+  if (s > 100) s = 100;
+  return s;
+}
+
+/* Map a symmetric strength score to a verdict tier. Bands are symmetric
+   around the flat midpoint (50): 'hot' is as far above neutral as the
+   strong-down edge of 'declining' is below it. Returns a stable key the
+   renderer maps to a localized label + colour, so i18n stays in app.js.
+   Tiers: 'hot' ≥70 · 'rising' ≥56 · 'neutral' ≥44 · 'declining' <44. */
+function sectorVerdictTier(str) {
+  var s = +str;
+  if (!isFinite(s)) s = 50;
+  if (s >= 70) return 'hot';
+  if (s >= 56) return 'rising';
+  if (s >= 44) return 'neutral';
+  return 'declining';
+}
+
+/* Dual-export so Node tests can require() these pure helpers while the
+   browser keeps them as plain globals (script-tag load). */
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { SECTORS, getCoinSector, sectorStrength, sectorVerdictTier };
+}

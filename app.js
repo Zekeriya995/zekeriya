@@ -1373,7 +1373,13 @@ function analyzeSectorRotation(){
       hist.push({time:now,avg:s.avg,str:s.str,rPct:s.rPct});
       if(hist.length>144)sectorHistory[s.k]=hist.slice(-144);
     }
-    /* Find earliest sample at least 1h old as the baseline for delta. */
+    /* Baseline for the 1h delta = the MOST RECENT sample that is still at
+       least 1h old (i.e. the one closest to exactly 1h ago). hist is in
+       ascending time order, so walking forward and overwriting on every
+       match leaves the newest qualifying sample in `baseline`. (The prior
+       comment said "earliest", which contradicted the code — the code was
+       right; a delta measured against the closest-to-1h sample is what the
+       "last hour" reading should be.) */
     var baseline=null;
     for(var i=0;i<hist.length;i++){
       if(now-hist[i].time>=60*60*1000){baseline=hist[i]}

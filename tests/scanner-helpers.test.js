@@ -664,6 +664,42 @@ test('walkbackSpikeStart — vol exactly equals threshold is NOT a spike (strict
 
 /* ─── classifyGemTiming ───────────────────────────────────────────── */
 
+/* ─── gemScore100 — display normalization (G1 scanner audit) ────────── */
+
+test('gemScore100 — the theoretical ceiling maps to exactly 100', () => {
+  assert.equal(GEM_CONFIG.SCORE_MAX, 165); /* contract: denominator is the real max */
+  assert.equal(gemScore100(GEM_CONFIG.SCORE_MAX), 100);
+});
+
+test('gemScore100 — SCORE_MIN floor lands at a sane low band, not near-zero', () => {
+  /* The gate admits raw >= 35; on the true scale that reads ~21/100, which is
+     why the legacy "50+ warn" color tier left almost every gem muted. */
+  assert.equal(gemScore100(GEM_CONFIG.SCORE_MIN), 21); /* round(35/165*100) */
+});
+
+test('gemScore100 — a strong gem reads mid-scale, not "95/100"', () => {
+  /* vx>=4 (45) + early (30) + 24h change (20) = 95 raw -> ~58, where the
+     legacy display showed "95 pts" implying near-max. */
+  assert.equal(gemScore100(95), 58); /* round(95/165*100) */
+});
+
+test('gemScore100 — clamps to [0,100] and rejects junk', () => {
+  assert.equal(gemScore100(0), 0);
+  assert.equal(gemScore100(-10), 0);
+  assert.equal(gemScore100(NaN), 0);
+  assert.equal(gemScore100(undefined), 0);
+  assert.equal(gemScore100(999), 100); /* defensive: never exceeds 100 */
+});
+
+test('gemScore100 — monotonic non-decreasing in raw score', () => {
+  let prev = -1;
+  for (const raw of [0, 15, 35, 60, 95, 120, 140, 165]) {
+    const p = gemScore100(raw);
+    assert.ok(p >= prev, `not monotonic at raw=${raw}: ${p} < ${prev}`);
+    prev = p;
+  }
+});
+
 test('classifyGemTiming — bucket boundaries match scoreGemCandidate semantics', () => {
   /* < EARLY_MAX (3) = early; < STILL_MAX (8) = still; else late. */
   assert.equal(classifyGemTiming(-1), 'early');

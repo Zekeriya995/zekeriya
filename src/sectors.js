@@ -6,7 +6,9 @@ var SECTORS = {
   ai: {
     ic: '🤖',
     n: { ar: 'ذكاء اصطناعي', en: 'AI' },
-    coins: ['FET', 'RNDR', 'TAO', 'WLD', 'AKT', 'ARKM', 'OCEAN', 'AGIX', 'PRIME', 'CTXC', 'NMR'],
+    /* RNDR→RENDER rebrand (2023); AGIX & OCEAN folded into FET in the
+       ASI Alliance merger (2024) — dropped, FET now represents them. */
+    coins: ['FET', 'RENDER', 'TAO', 'WLD', 'AKT', 'ARKM', 'PRIME', 'CTXC', 'NMR'],
     col: '#7c3aed',
   },
   gaming: {
@@ -43,6 +45,8 @@ var SECTORS = {
       'SEI',
       'ICP',
       'FTM',
+      /* Sonic — FTM→S migration; both kept until FTM fully delists. */
+      'S',
       'ALGO',
       'HBAR',
       'TIA',
@@ -52,7 +56,8 @@ var SECTORS = {
   layer2: {
     ic: '🔗',
     n: { ar: 'الطبقة الثانية', en: 'Layer 2' },
-    coins: ['ARB', 'OP', 'MATIC', 'MANTA', 'STRK', 'METIS', 'ZK', 'BLAST'],
+    /* MATIC→POL rebrand (2024). */
+    coins: ['ARB', 'OP', 'POL', 'MANTA', 'STRK', 'METIS', 'ZK', 'BLAST'],
     col: '#8b5cf6',
   },
   defi: {

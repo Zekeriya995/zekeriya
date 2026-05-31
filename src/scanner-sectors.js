@@ -15,20 +15,9 @@
 'use strict';
 
 const SECTOR_COINS = {
-  ai: [
-    'FET',
-    'RNDR',
-    'RENDER',
-    'TAO',
-    'WLD',
-    'AKT',
-    'ARKM',
-    'OCEAN',
-    'AGIX',
-    'PRIME',
-    'CTXC',
-    'NMR',
-  ],
+  /* RNDR→RENDER rebrand (2023); AGIX & OCEAN folded into FET in the ASI
+     Alliance merger (2024) — dead tickers dropped, FET represents them. */
+  ai: ['FET', 'RENDER', 'TAO', 'WLD', 'AKT', 'ARKM', 'PRIME', 'CTXC', 'NMR'],
   gaming: [
     'IMX',
     'GALA',
@@ -68,7 +57,8 @@ const SECTOR_COINS = {
     'XLM',
     'LTC',
   ],
-  layer2: ['ARB', 'OP', 'MATIC', 'METIS', 'STRK', 'MANTA', 'ZK', 'BLAST'],
+  /* MATIC→POL rebrand (2024). */
+  layer2: ['ARB', 'OP', 'POL', 'METIS', 'STRK', 'MANTA', 'ZK', 'BLAST'],
   defi: ['UNI', 'AAVE', 'MKR', 'CRV', 'LDO', 'COMP', 'SUSHI', 'CAKE', 'JUP'],
   meme: ['DOGE', 'SHIB', 'PEPE', 'WIF', 'BONK', 'FLOKI', 'TRUMP'],
   rwa: ['ONDO', 'GFI'],
@@ -77,10 +67,9 @@ const SECTOR_COINS = {
   privacy: ['XMR', 'ZEC', 'SCRT', 'ROSE'],
 };
 
-/* Reverse index — built once at module load. First sector wins for
-   coins that appear in two sectors (e.g. RNDR is both AI and DePIN
-   in the original taxonomy; we surface the AI bucket because that's
-   what the home heatmap also defaults to). */
+/* Reverse index — built once at module load. First sector wins for any
+   coin that appears in two sectors, matching the home heatmap's default
+   bucket for that coin. */
 const COIN_TO_SECTOR = (function () {
   const out = {};
   for (const sec in SECTOR_COINS) {

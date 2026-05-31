@@ -1490,7 +1490,23 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
   for(var i=0;i<Math.min(r.length,7);i++){var x=r[i];var d=T[x.s];if(!d)continue;
     var type=(d.c>=-3&&d.c<=0&&d.v>1e8)?'fast':'daily';var entry,target,stop,dur;
     if(x.smartEntry&&type!=='fast'){entry=x.smartEntry.entry;target=x.smartEntry.target1;stop=x.smartEntry.stop;dur=_tfHold}
-    else if(type==='fast'){entry=d.p;target=d.p*1.015;/* ATR-aware stop (≥0.5% floor): a fixed −0.5% is noise-width on a fast mover and gets stopped out before the +1.5% target; widening to the 15m ATR lets the rr<1.5 gate below drop scalps whose volatility can't support the target. */stop=d.p-Math.max(d.p*0.005,(x.atr15m>0?x.atr15m:0));dur=scannerTimeframe==='15m'?_tfHold:(lang==='ar'?'10-30 دقيقة':'10-30 min')}else{entry=d.p*0.995;target=x.ultra?d.p*1.08:d.p*1.06;stop=d.p*0.97;dur=_tfHold}
+    else if(type==='fast'){
+      /* S1/S5 audit: derive BOTH target and stop from the 15m ATR so a scalp's
+         reward and risk scale together. The old plan fixed the target at +1.5%
+         while only the stop tracked ATR — on a quiet coin that made the target
+         ~5×ATR (unreachable in 10-30min) yet displayed a flattering rr≈3.0, and
+         when atr15m was missing the stop silently fell back to a 0.5% floor so
+         the rr<1.5 gate below could never drop it. atrZones() (pure, tested)
+         returns symmetric ATR zones and NULL when ATR is absent/zero, so a
+         scalp with no volatility data is skipped outright instead of shown with
+         a fabricated rr. Behind nxScannerFix_scalp_atr (default on); 'off'
+         restores the legacy fixed-target plan verbatim. */
+      var _scalpAtr=(typeof atrZones==='function'&&localStorage.getItem('nxScannerFix_scalp_atr')!=='off');
+      if(_scalpAtr){var _sz=atrZones(d.p,x.atr15m,0,0,{stop:1.2,t1:2.4,t2:3.6});if(!_sz)continue;entry=_sz.entry;target=_sz.target1;stop=_sz.stop}
+      else{entry=d.p;target=d.p*1.015;stop=d.p-Math.max(d.p*0.005,(x.atr15m>0?x.atr15m:0))}
+      dur=scannerTimeframe==='15m'?_tfHold:(lang==='ar'?'10-30 دقيقة':'10-30 min');
+    }
+    else{entry=d.p*0.995;target=x.ultra?d.p*1.08:d.p*1.06;stop=d.p*0.97;dur=_tfHold}
     var risk=Math.abs(entry-stop);var rr=risk>0?+((target-entry)/risk).toFixed(1):0;if(rr<1.5)continue;
     var reasons=[];var ww=whaleWaves[x.s];if(ww&&ww.engine&&ww.engine.confidence>=30)reasons.push({ic:'🐋',t:lang==='ar'?'حوت مؤكد '+ww.engine.confidence+'%':'Whale '+ww.engine.confidence+'%'});
     var cvd=analyzeCVD(x.s);if(cvd.divergence==='BULLISH')reasons.push({ic:'📈',t:lang==='ar'?'CVD صاعد — تجميع صامت':'CVD rising — accumulation'});

@@ -2280,6 +2280,10 @@ async function loadTk(){
     /* Movement auto-summary from the server-side continuous monitor — the
        BTC/ETH panel prefers this over the local (this-session) render. */
     if(all.marketSummary&&typeof all.marketSummary==='object')serverMktSummary=all.marketSummary;
+    /* Multi-venue market-direction snapshot (funding across binance/bybit/
+       okex + source completeness) — surfaced in the hero so the data layer
+       is visible (audit E). */
+    if(all.marketDirection&&typeof all.marketDirection==='object')serverMktDir=all.marketDirection;
     /* — tickers — */
     if(all.tickers){Object.keys(all.tickers).forEach(function(s){var d=all.tickers[s];if(!d)return;var chg=d.change!==undefined?+d.change:(d.c!==undefined?+d.c:0);var price=+d.price||+d.p||0;if(!(price>0))return;/* Skip zero/negative prices — better to omit than to render $0 as live data. */ T[s]={p:price,c:isNaN(chg)?0:chg,v:+d.volume||+d.v||0,h:+d.high||+d.h||0,l:+d.low||+d.l||0,src:d.src||'PROXY',loaded:true,t:Date.now()};if(d.by)T[s].by=+d.by})}
     /* — funding rates — `loaded` distinguishes a real 0% (rare but
@@ -5210,6 +5214,9 @@ var moveHist=safeGetJSON('nxMoveHist',{});
 /* Latest server-side movement summaries ({ BTC:{ar,en,enough,dir,...} }),
    refreshed from /api/all in loadTk(); the panel prefers it over local. */
 var serverMktSummary={};
+/* Latest multi-venue market-direction snapshot from /api/all (funding
+   across venues + per-source completeness/confidence); surfaced in the hero. */
+var serverMktDir={};
 function recordMoveSample(sym,data){
   if((sym!=='BTC'&&sym!=='ETH')||!data||typeof data.price!=='number'||!isFinite(data.price))return;
   try{
@@ -5500,12 +5507,15 @@ async function analyzeCoinRpt(sym){
   var cvd=analyzeCVD(sym);
   var ts;
   if(typeof MarketDirection!=='undefined'){
-    ts=MarketDirection.trendScore({
+    /* trendScore is the wide (±29) symmetric raw; scaleTs maps it back onto
+       the legacy ±14 range so the chart's ±2/±4 cut points keep the same
+       sensitivity they were tuned for (calibration fix). */
+    ts=MarketDirection.scaleTs(MarketDirection.trendScore({
       price:price,ema20:ema20,ema50:ema50,macd:macd,rsi:rsi,fr:fr,ls:ls,
       topTraders:topTraders,gLS:gLS,cbPrem:cbPrem,bfxMargin:bfxMargin,hlFunding:hlFunding,
       frHist:frHist,oiHist:oiHist,priceChangePct:d.c,taker:taker,iceberg:iceberg,
       whalePnL:whalePnL,newsScore:newsScore
-    });
+    }));
   }else{
     ts=0;if(price>ema20)ts+=2;else ts-=2;if(price>ema50)ts+=2;else ts-=2;if(ema20>ema50)ts++;else ts--;if(macd.h>0)ts+=2;else ts-=2;if(macd.cross==='bull')ts+=2;if(macd.cross==='bear')ts-=2;if(rsi>55)ts++;else if(rsi<45)ts--;
     if(fr){if(fr.rate<0)ts++;if(fr.rate>0.05)ts--}
@@ -5651,6 +5661,19 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<div class="mkt-hero-price" data-live-mkt="price" data-live-mkt-sym="'+sym+'" dir="ltr">'+rP(data.price)+'</div>';
   h+='<div class="mkt-hero-ch" data-live-mkt="change" data-live-mkt-sym="'+sym+'" style="color:'+(data.ch.h24>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.ch.h24>=0?'+':'')+data.ch.h24.toFixed(1)+'% (24h)</div>';
   h+='<div class="mkt-hero-meta">'+(isAr?'الاتجاه: ':'Direction: ')+data.dIc+' '+data.dir+' · '+(isAr?'القوة: ':'Strength: ')+(data.sc10!=null?data.sc10:data.sc)+'/10</div>';
+  /* Data-layer badge (audit E): multi-venue funding + source completeness
+     from /api/all.marketDirection. Hidden until the server snapshot exists. */
+  var _md=(typeof serverMktDir!=='undefined'&&serverMktDir)?serverMktDir[sym]:null;
+  if(_md&&_md.health&&_md.signals){
+    var _comp=Math.round((_md.health.completeness||0)*100);
+    var _nv=_md.signals.funding&&_md.signals.funding.perVenue?Object.keys(_md.signals.funding.perVenue).length:0;
+    var _compCol=_comp>=80?'var(--up)':_comp>=50?'var(--warn)':'var(--dn)';
+    h+='<div class="mkt-hero-meta" style="font-size:10px;color:var(--t2)">'
+      +(isAr?'اكتمال المصادر: ':'Sources: ')+'<span style="color:'+_compCol+';font-weight:800">'+_md.health.sourcesLive+'/'+_md.health.sourcesTotal+'</span>'
+      +' · '+(isAr?'تمويل ':'Funding ')+_nv+(isAr?' منصّات':'-venue')
+      +(_md.signals.funding&&_md.signals.funding.annualizedPct!=null?' ('+(_md.signals.funding.annualizedPct>=0?'+':'')+_md.signals.funding.annualizedPct+'%/yr)':'')
+      +'</div>';
+  }
   /* Baked-in "Updated: HH:MM" was removed — the freshness badge
      rendered by renderMktFresh() above the hero already shows the
      cache age, using the actual cache timestamp at display time.

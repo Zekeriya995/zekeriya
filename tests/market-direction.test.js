@@ -152,11 +152,29 @@ test('strengthScore — custom (doubled) weights keep score10 ≤ 10', () => {
   assert.equal(r.scMax, 28); // denominator scales with the live weights
 });
 
-test('scoreDirection — returns ts, bucket, and normalized strength together', () => {
+test('scaleTs — maps the raw ±29 range onto the legacy ±14, sign-preserving + symmetric', () => {
+  assert.equal(md.scaleTs(29), 14); // raw max → legacy max
+  assert.equal(md.scaleTs(-29), -14);
+  assert.equal(md.scaleTs(0), 0);
+  assert.equal(md.scaleTs(4), 2); // a mid raw still lands in "Bullish", not "Strong"
+  assert.equal(md.scaleTs(8), 4); // ~strong-bull edge
+  assert.equal(md.scaleTs(10), -1 * md.scaleTs(-10)); // symmetric
+});
+
+test('scoreDirection — ts is scaled (legacy range), tsRaw is the wide score', () => {
   const r = md.scoreDirection(BULL);
-  assert.equal(r.ts, 31);
+  assert.equal(r.tsRaw, 31); // unscaled symmetric raw
+  assert.equal(r.ts, md.scaleTs(31)); // scaled onto the legacy range
+  assert.ok(r.ts <= 15 && r.ts >= -15, 'scaled ts stays in the legacy band');
   assert.equal(r.dir, 'strong_bull');
   assert.ok(r.score10 <= 10);
   assert.equal(r.dir, md.classifyDirection(r.ts));
   assert.ok(Array.isArray(r.scB));
+});
+
+test('scoreDirection — bullish and its mirror give mirrored scaled ts (bias-free, calibrated)', () => {
+  const b = md.scoreDirection(BULL);
+  const s = md.scoreDirection(BEAR);
+  assert.equal(b.ts, -s.ts); // symmetry survives scaling
+  assert.equal(b.tsRaw, -s.tsRaw);
 });

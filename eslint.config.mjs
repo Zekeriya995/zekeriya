@@ -175,6 +175,8 @@ export default [
         MarketSummary: 'readonly',
         /* Declared in src/microstructure.js (UMD: window.Microstructure) */
         Microstructure: 'readonly',
+        /* Declared in src/market-direction.js (UMD: window.MarketDirection) */
+        MarketDirection: 'readonly',
         /* Declared in src/notifications.js */
         notifiedSet: 'writable',
         notifHist: 'writable',

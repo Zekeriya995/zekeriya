@@ -5490,26 +5490,28 @@ async function analyzeCoinRpt(sym){
   var ethBtcRatio=null,btcChange=null,ethChange=null;
   try{if(T.BTC&&T.ETH){ethBtcRatio=T.ETH.p/T.BTC.p;btcChange=T.BTC.c;ethChange=T.ETH.c;}}catch(e){}
 
-  /* ═══ Trend score (original 10 + 12 new) ═══ */
-  var ts=0;if(price>ema20)ts+=2;else ts-=2;if(price>ema50)ts+=2;else ts-=2;if(ema20>ema50)ts++;else ts--;if(macd.h>0)ts+=2;else ts-=2;if(macd.cross==='bull')ts+=2;if(macd.cross==='bear')ts-=2;if(rsi>55)ts++;else if(rsi<45)ts--;if(volT>1.3)ts++;
-  var fr=FR[sym];if(fr){if(fr.rate<0)ts++;if(fr.rate>0.05)ts--}
-  var ls=LS[sym];if(ls){if(ls.ratio>1.5)ts--;if(ls.ratio<0.8)ts++}
-  var ww=whaleWaves[sym];var wConf=ww&&ww.engine?ww.engine.confidence:0;if(wConf>=50)ts++;
+  /* ═══ Trend score — de-biased + symmetric via src/market-direction.js
+     (audit B). volume / VPIN / whale-confidence are direction-neutral and
+     no longer push ts; they count only toward the strength score. Falls
+     back to the legacy inline calc if the module didn't load. ═══ */
+  var fr=FR[sym];
+  var ls=LS[sym];
+  var ww=whaleWaves[sym];var wConf=ww&&ww.engine?ww.engine.confidence:0;
   var cvd=analyzeCVD(sym);
-
-  /* 12 NEW trend score inputs */
-  try{if(topTraders){if(topTraders.long>0.58)ts+=2;else if(topTraders.long>0.53)ts++;else if(topTraders.long<0.42)ts-=2;}}catch(e){}
-  try{if(gLS&&topTraders){if(topTraders.long>0.55&&gLS.long<0.45)ts+=2;}}catch(e){}
-  try{if(cbPrem){if(cbPrem.pct>0.3)ts+=2;else if(cbPrem.pct>0.1)ts++;else if(cbPrem.pct<-0.3)ts--;}}catch(e){}
-  try{if(bfxMargin){if(bfxMargin.longPct>70)ts+=2;else if(bfxMargin.longPct>60)ts++;else if(bfxMargin.shortPct>60)ts--;}}catch(e){}
-  try{if(hlFunding&&fr){if(hlFunding.rate<0&&fr.rate<0)ts++;}}catch(e){}
-  try{if(frHist&&frHist.totalCount>0){if(frHist.negCount>=7)ts+=2;else if(frHist.negCount>=5)ts++;}}catch(e){}
-  try{if(oiHist&&oiHist.growth>15&&Math.abs(d.c)<3)ts+=2;}catch(e){}
-  try{if(taker){if(taker.ratio>1.5)ts++;else if(taker.ratio<0.6)ts--;}}catch(e){}
-  try{if(iceberg){if(iceberg.signal==='ICEBERG_BUY')ts+=2;else if(iceberg.signal==='ICEBERG_SELL')ts-=2;}}catch(e){}
-  try{if(vpinData&&vpinData.vpin>0.6)ts++;}catch(e){}
-  try{if(whalePnL){if(whalePnL.pct>1)ts++;else if(whalePnL.pct<-3)ts-=2;}}catch(e){}
-  try{if(newsScore){if(newsScore.score>70)ts++;else if(newsScore.score<30)ts--;}}catch(e){}
+  var ts;
+  if(typeof MarketDirection!=='undefined'){
+    ts=MarketDirection.trendScore({
+      price:price,ema20:ema20,ema50:ema50,macd:macd,rsi:rsi,fr:fr,ls:ls,
+      topTraders:topTraders,gLS:gLS,cbPrem:cbPrem,bfxMargin:bfxMargin,hlFunding:hlFunding,
+      frHist:frHist,oiHist:oiHist,priceChangePct:d.c,taker:taker,iceberg:iceberg,
+      whalePnL:whalePnL,newsScore:newsScore
+    });
+  }else{
+    ts=0;if(price>ema20)ts+=2;else ts-=2;if(price>ema50)ts+=2;else ts-=2;if(ema20>ema50)ts++;else ts--;if(macd.h>0)ts+=2;else ts-=2;if(macd.cross==='bull')ts+=2;if(macd.cross==='bear')ts-=2;if(rsi>55)ts++;else if(rsi<45)ts--;
+    if(fr){if(fr.rate<0)ts++;if(fr.rate>0.05)ts--}
+    if(ls){if(ls.ratio>1.5)ts--;if(ls.ratio<0.8)ts++}
+    if(wConf>=50)ts++;
+  }
 
   var tf1h=c1h.length>=20?(c1h[c1h.length-1]>calcEMA(c1h,20)?'up':'down'):'neutral';
   var tf4h=price>ema20&&macd.h>0?'up':price<ema20&&macd.h<0?'down':'neutral';
@@ -5557,40 +5559,63 @@ async function analyzeCoinRpt(sym){
   var warning='';if(divRSI==='bearish')warning=lang==='ar'?'⚠️ RSI Divergence على 4H':'⚠️ RSI Div on 4H';
   else if(divRSI1d==='bearish')warning=lang==='ar'?'⚠️ RSI Divergence على اليومي':'⚠️ RSI Div on Daily';
   else if(volT<0.7)warning=lang==='ar'?'حجم ضعيف':'Low volume';
-  /* Scenarios */
-  var bullP=Math.min(80,Math.max(10,50+ts*4+(wConf>=50?5:0)+(bullTFs>=3?5:0)));var bearP=Math.min(35,Math.max(5,100-bullP-15));var neutP=100-bullP-bearP;
+  /* Scenarios — symmetric around the (now de-biased) ts so a bearish read
+     yields a bear-leaning split, mirroring the bull case (audit F: bearP is
+     no longer capped at 35%). ts is bounded well within ±25 in practice;
+     scale it to a tilt and split the remainder evenly. */
+  var _tilt=Math.max(-30,Math.min(30,ts*3));var neutP=Math.max(15,30-Math.abs(_tilt)/2);
+  var bullP=Math.round(Math.max(5,Math.min(85,(100-neutP)/2+_tilt)));
+  var bearP=Math.max(5,100-bullP-Math.round(neutP));neutP=100-bullP-bearP;
   var bullCond=lang==='ar'?'اختراق '+fP(resist)+' بحجم':'Break '+fP(resist)+' with volume';
   var bearCond=lang==='ar'?'كسر '+fP(supp)+' بإغلاق':'Close below '+fP(supp);
   var bullInv=lang==='ar'?'يُلغى لو كسر '+fP(supp):'Invalidated below '+fP(supp);
   var bearInv=lang==='ar'?'يُلغى لو اخترق '+fP(resist):'Invalidated above '+fP(resist);
   var riskPct=ts>=4?5:ts>=2?3:ts<=-2?0:1;
-  /* Score (9 original + 3 new factors) */
+  /* Score — strength (NOT direction), normalized to a true 0..10 against
+     the live-weight max so the displayed "/10" can never overflow (audit
+     C). Computed by src/market-direction.js; scB factor labels are
+     localized for the existing breakdown UI. Legacy fallback if absent. */
   var W=monitorState?monitorState.weights:DEFAULT_WEIGHTS;
-  var sc=0,scB=[];var addSc=function(n,v,k){var wt=W[k]||1;var adj=v*(wt/(DEFAULT_WEIGHTS[k]||1));scB.push({n:n,v:+adj.toFixed(2),k:k,raw:v,wt:+wt.toFixed(2)});sc+=adj};
-  addSc(lang==='ar'?'الاتجاه':'Trend',ts>=4?2:ts>=2?1.5:ts>=0?1:0,'trend');
-  addSc(lang==='ar'?'الحيتان':'Whales',wConf>=60?2:wConf>=40?1:0,'whales');
-  addSc('RSI',rsi>=30&&rsi<=55?1:0.5,'rsi');
-  addSc('FR',fr&&fr.rate<0?1:fr&&fr.rate>0.05?0:0.5,'fr');
-  addSc('OI',OI[sym]?(ch4h>0&&ts>0?1:0.5):0,'oi');
-  addSc(lang==='ar'?'حجم':'Vol',volT>1.3?0.5:0,'vol');
-  addSc('MACD',macd.h>0?0.5:0,'macd');
-  addSc(lang==='ar'?'توافق':'TF',bullTFs>=3?1:bullTFs>=2?0.5:0,'confluence');
-  addSc(lang==='ar'?'هيكل':'Struct',struct==='HH/HL'?1:struct==='LH/LL'?0:0.5,'structure');
-  /* 3 NEW factors */
-  var smartSc=0;
-  if(topTraders&&topTraders.long>0.55)smartSc+=0.6;
-  if(cbPrem&&cbPrem.pct>0.2)smartSc+=0.5;
-  if(bfxMargin&&bfxMargin.longPct>60)smartSc+=0.4;
-  addSc(lang==='ar'?'ذكاء':'Smart',Math.min(1.5,smartSc),'smart');
-  var flowSc=0;
-  if(iceberg&&iceberg.signal==='ICEBERG_BUY')flowSc+=0.6;
-  if(vpinData&&vpinData.vpin>0.6)flowSc+=0.5;
-  if(taker&&taker.ratio>1.3)flowSc+=0.4;
-  addSc(lang==='ar'?'تدفق':'Flow',Math.min(1.5,flowSc),'flow');
-  var moodSc=0;
-  if(typeof fgValue!=='undefined'&&fgValue>=40&&fgValue<=70)moodSc+=0.5;
-  if(newsScore&&newsScore.score>55)moodSc+=0.5;
-  addSc(lang==='ar'?'مزاج':'Mood',Math.min(1.0,moodSc),'mood');
+  var sc,sc10,scB;
+  var _scLabels=lang==='ar'
+    ?{trend:'الاتجاه',whales:'الحيتان',rsi:'RSI',fr:'FR',oi:'OI',vol:'حجم',macd:'MACD',confluence:'توافق',structure:'هيكل',smart:'ذكاء',flow:'تدفق',mood:'مزاج'}
+    :{trend:'Trend',whales:'Whales',rsi:'RSI',fr:'FR',oi:'OI',vol:'Vol',macd:'MACD',confluence:'TF',structure:'Struct',smart:'Smart',flow:'Flow',mood:'Mood'};
+  if(typeof MarketDirection!=='undefined'){
+    var _str=MarketDirection.strengthScore({
+      weights:W,rsi:rsi,fr:fr,oiPresent:!!OI[sym],ch4h:ch4h,volT:volT,macd:macd,
+      bullTFs:bullTFs,struct:struct,wConf:wConf,topTraders:topTraders,cbPrem:cbPrem,
+      bfxMargin:bfxMargin,iceberg:iceberg,vpinData:vpinData,taker:taker,
+      fgValue:typeof fgValue!=='undefined'?fgValue:undefined,newsScore:newsScore
+    },ts);
+    sc=_str.sc;sc10=_str.score10;
+    scB=_str.scB.map(function(b){return{n:_scLabels[b.k]||b.k,v:b.v,k:b.k,raw:b.raw,wt:+(W[b.k]||1).toFixed(2)}});
+  }else{
+    sc=0;scB=[];var addSc=function(n,v,k){var wt=W[k]||1;var adj=v*(wt/(DEFAULT_WEIGHTS[k]||1));scB.push({n:n,v:+adj.toFixed(2),k:k,raw:v,wt:+wt.toFixed(2)});sc+=adj};
+    addSc(_scLabels.trend,ts>=4?2:ts>=2?1.5:ts>=0?1:0,'trend');
+    addSc(_scLabels.whales,wConf>=60?2:wConf>=40?1:0,'whales');
+    addSc(_scLabels.rsi,rsi>=30&&rsi<=55?1:0.5,'rsi');
+    addSc(_scLabels.fr,fr&&fr.rate<0?1:fr&&fr.rate>0.05?0:0.5,'fr');
+    addSc(_scLabels.oi,OI[sym]?(ch4h>0&&ts>0?1:0.5):0,'oi');
+    addSc(_scLabels.vol,volT>1.3?0.5:0,'vol');
+    addSc(_scLabels.macd,macd.h>0?0.5:0,'macd');
+    addSc(_scLabels.confluence,bullTFs>=3?1:bullTFs>=2?0.5:0,'confluence');
+    addSc(_scLabels.structure,struct==='HH/HL'?1:struct==='LH/LL'?0:0.5,'structure');
+    var smartSc=0;
+    if(topTraders&&topTraders.long>0.55)smartSc+=0.6;
+    if(cbPrem&&cbPrem.pct>0.2)smartSc+=0.5;
+    if(bfxMargin&&bfxMargin.longPct>60)smartSc+=0.4;
+    addSc(_scLabels.smart,Math.min(1.5,smartSc),'smart');
+    var flowSc=0;
+    if(iceberg&&iceberg.signal==='ICEBERG_BUY')flowSc+=0.6;
+    if(vpinData&&vpinData.vpin>0.6)flowSc+=0.5;
+    if(taker&&taker.ratio>1.3)flowSc+=0.4;
+    addSc(_scLabels.flow,Math.min(1.5,flowSc),'flow');
+    var moodSc=0;
+    if(typeof fgValue!=='undefined'&&fgValue>=40&&fgValue<=70)moodSc+=0.5;
+    if(newsScore&&newsScore.score>55)moodSc+=0.5;
+    addSc(_scLabels.mood,Math.min(1.0,moodSc),'mood');
+    sc10=Math.min(10,Math.round((sc/14)*10*10)/10);
+  }
 
   /* Technical state summary — informational only. No action verbs,
      no implied entry/exit advice. Mirrors the Arabic-first wording
@@ -5604,7 +5629,7 @@ async function analyzeCoinRpt(sym){
   /* Aggregate liquidation data from coinalyze */
   var aggLiq=null;try{if(typeof coinalyzeLiq!=='undefined'&&coinalyzeLiq[sym])aggLiq={longVol:coinalyzeLiq[sym].longVol||0,shortVol:coinalyzeLiq[sym].shortVol||0};}catch(e){}
 
-  return{sym:sym,price:price,d:d,ts:ts,dir:dir,dCol:dCol,dIc:dIc,rsi:rsi,rsi1d:rsi1d,macd:macd,macd1d:macd1d,ema20:ema20,ema50:ema50,volT:volT,resist:resist,supp:supp,f618U:f618U,f100U:f100U,f618D:f618D,fr:fr,ls:ls,oi:OI[sym],wConf:wConf,cvd:cvd,tf:{h1:tf1h,h4:tf4h,d:tf1d,w:tfW},bullTFs:bullTFs,ch:{h1:ch1h,h4:ch4h,h24:ch24,d7:ch7d},divRSI:divRSI,divRSI1d:divRSI1d,reasons:reasons,warning:warning,bullP:bullP,bearP:bearP,neutP:neutP,bullCond:bullCond,bearCond:bearCond,bullInv:bullInv,bearInv:bearInv,sc:+sc.toFixed(1),scB:scB,rec:rec,recIc:recIc,struct:struct,bos:bos,choch:choch,riskPct:riskPct,orderBlocks:orderBlocks,fvgs:fvgs,histMatch:histMatch,liqZones:liqZones,kl4h:kl4h,kl1d:kl1d,kl1h:kl1h,
+  return{sym:sym,price:price,d:d,ts:ts,dir:dir,dCol:dCol,dIc:dIc,rsi:rsi,rsi1d:rsi1d,macd:macd,macd1d:macd1d,ema20:ema20,ema50:ema50,volT:volT,resist:resist,supp:supp,f618U:f618U,f100U:f100U,f618D:f618D,fr:fr,ls:ls,oi:OI[sym],wConf:wConf,cvd:cvd,tf:{h1:tf1h,h4:tf4h,d:tf1d,w:tfW},bullTFs:bullTFs,ch:{h1:ch1h,h4:ch4h,h24:ch24,d7:ch7d},divRSI:divRSI,divRSI1d:divRSI1d,reasons:reasons,warning:warning,bullP:bullP,bearP:bearP,neutP:neutP,bullCond:bullCond,bearCond:bearCond,bullInv:bullInv,bearInv:bearInv,sc:+sc.toFixed(1),sc10:sc10,scB:scB,rec:rec,recIc:recIc,struct:struct,bos:bos,choch:choch,riskPct:riskPct,orderBlocks:orderBlocks,fvgs:fvgs,histMatch:histMatch,liqZones:liqZones,kl4h:kl4h,kl1d:kl1d,kl1h:kl1h,
     /* NEW return fields */
     topTraders:topTraders,gLS:gLS,cbPrem:cbPrem,bfxMargin:bfxMargin,hlFunding:hlFunding,frHist:frHist,oiHist:oiHist,taker:taker,depth:depth,iceberg:iceberg,vpinData:vpinData,whalePnL:whalePnL,flowRate:flowRate,predArrow:predArrow,absorption:absorption,stableFlow:stableFlow,unlocks:unlocks,newsScore:newsScore,onChain:onChain,ethBtcRatio:ethBtcRatio,btcChange:btcChange,ethChange:ethChange,aggLiq:aggLiq}}
 
@@ -5625,7 +5650,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<h2 class="mkt-hero-title" style="font-size:14px;font-weight:800;color:var(--t0);margin:4px 0">'+cn+' <span style="color:var(--t2);font-size:12px">'+sym+'/USDT</span></h2>';
   h+='<div class="mkt-hero-price" data-live-mkt="price" data-live-mkt-sym="'+sym+'" dir="ltr">'+rP(data.price)+'</div>';
   h+='<div class="mkt-hero-ch" data-live-mkt="change" data-live-mkt-sym="'+sym+'" style="color:'+(data.ch.h24>=0?'var(--up)':'var(--dn)')+';direction:ltr">'+(data.ch.h24>=0?'+':'')+data.ch.h24.toFixed(1)+'% (24h)</div>';
-  h+='<div class="mkt-hero-meta">'+(isAr?'الاتجاه: ':'Direction: ')+data.dIc+' '+data.dir+' · '+(isAr?'التقييم: ':'Score: ')+data.sc+'/10</div>';
+  h+='<div class="mkt-hero-meta">'+(isAr?'الاتجاه: ':'Direction: ')+data.dIc+' '+data.dir+' · '+(isAr?'القوة: ':'Strength: ')+(data.sc10!=null?data.sc10:data.sc)+'/10</div>';
   /* Baked-in "Updated: HH:MM" was removed — the freshness badge
      rendered by renderMktFresh() above the hero already shows the
      cache age, using the actual cache timestamp at display time.

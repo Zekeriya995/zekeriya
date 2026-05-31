@@ -1792,6 +1792,13 @@ function buildApiAllSnapshot() {
        server-side continuous monitor in market-summary-store. */
     marketSummary: cache.marketSummary ? cache.marketSummary.summary : {},
     marketSummaryTs: cache.marketSummary ? cache.marketSummary.lastTickAt || 0 : 0,
+    /* Multi-venue market-direction snapshot (funding across binance/bybit/
+       okex + per-source health/completeness + soft confidence) so the PWA
+       can surface the data layer without a second request. */
+    marketDirection: {
+      BTC: buildMarketDirection('BTC', Date.now()),
+      ETH: buildMarketDirection('ETH', Date.now()),
+    },
     /* Market regime + the weight profile it selected. regime is
        { regime, trendScore, inputs }. When SCANNER_REGIME_ADAPTIVE is on the
        regime DRIVES weight-profile selection (trending→trend, ranging→v2);

@@ -68,6 +68,24 @@ function round1(x) {
   return Math.round(x * 10) / 10;
 }
 
+/* De-biasing (audit B) widened the raw ts range: the legacy inline calc
+   maxed near ±14, but the symmetric two-sided factors here can reach ±29.
+   The chart's direction cut points (±2 / ±4), the strength `trend` factor,
+   and the scenario tilt were all tuned for the ±14 scale — so feeding them
+   the raw ±29 made "Strong Bull/Bear" trigger on far fewer signals and
+   saturated the trend factor. scaleTs maps the raw score back onto the
+   legacy ±14 scale (linear, sign-preserving, symmetric) so every existing
+   threshold keeps the SAME sensitivity it was designed for. Calibration
+   fix, not a behaviour change to the thresholds themselves. */
+const RAW_TS_MAX = 29;
+const LEGACY_TS_MAX = 14;
+function scaleTs(rawTs) {
+  const r = n(rawTs);
+  const scaled = (r / RAW_TS_MAX) * LEGACY_TS_MAX;
+  /* round to nearest integer so bucket edges land cleanly, like the old ts */
+  return Math.round(scaled);
+}
+
 function classifyDirection(ts) {
   if (ts >= TS_STRONG_BULL) return 'strong_bull';
   if (ts >= TS_BULL) return 'bull';
@@ -238,12 +256,16 @@ function strengthScore(i, ts) {
   return { sc: Math.round(sc * 100) / 100, scMax: Math.round(scMax * 100) / 100, score10, scB };
 }
 
-/* Full direction read: de-biased ts + bucket + normalized strength. */
+/* Full direction read: de-biased ts (scaled to the legacy ±14 range so the
+   cut points stay calibrated) + bucket + normalized strength. `tsRaw` is the
+   unscaled symmetric score, exposed for diagnostics. */
 function scoreDirection(input) {
-  const ts = trendScore(input);
+  const tsRaw = trendScore(input);
+  const ts = scaleTs(tsRaw);
   const strength = strengthScore(input, ts);
   return {
     ts,
+    tsRaw,
     dir: classifyDirection(ts),
     sc: strength.sc,
     scMax: strength.scMax,
@@ -257,10 +279,13 @@ const MARKET_DIRECTION_API = {
   TS_BULL,
   TS_BEAR,
   TS_STRONG_BEAR,
+  RAW_TS_MAX,
+  LEGACY_TS_MAX,
   DEFAULT_WEIGHTS,
   MAX_V,
   classifyDirection,
   trendScore,
+  scaleTs,
   strengthScore,
   scoreDirection,
 };

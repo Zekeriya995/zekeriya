@@ -2186,13 +2186,26 @@ function renderSmallCaps(res){
        looked identical bar the volume number, so a 75-point
        candidate and a 35-point one (the SCORE_MIN floor) looked
        equally credible to the user. Surfacing the raw score lets
-       the user calibrate confidence per card. Color ladder
-       matches the existing visual semantics:
-         85+ : green   (var(--up))
-         70+ : neon    (var(--neon))
-         50+ : warn    (var(--warn))
-         else: muted  (var(--t2))  */
-    var scoreCol=g.sc>=85?'var(--up)':g.sc>=70?'var(--neon)':g.sc>=50?'var(--warn)':'var(--t2)';
+       the user calibrate confidence per card.
+
+       G1 audit: the raw score's real ceiling is GEM_CONFIG.SCORE_MAX (165),
+       not 100 — so the legacy "85/70/50" color ladder and the progress bar
+       (width: min(100,sc)) were calibrated against a denominator that didn't
+       exist. Result: every gem from raw 100 to 165 drew a full bar (no
+       resolution across the strong range), and the green band (raw ≥85)
+       swallowed the entire upper half of the achievable 35..165 range, so
+       merely-strong and genuinely exceptional gems looked identical.
+       gemScore100() rescales onto a true 0-100 axis; the color bands and the
+       "/100" badge then mean what they say. Behind nxScannerFix_gem_norm
+       (default on) — 'off' restores the legacy raw "N pts" display verbatim.
+       Normalized color ladder:
+         70+ : green (var(--up))   ·  50+ : neon (var(--neon))
+         35+ : warn  (var(--warn)) ·  else : muted (var(--t2)) */
+    var _gemNorm=(typeof gemScore100==='function'&&localStorage.getItem('nxScannerFix_gem_norm')!=='off');
+    var _gemDisp=_gemNorm?gemScore100(g.sc):g.sc;
+    var scoreCol=_gemNorm
+      ?(_gemDisp>=70?'var(--up)':_gemDisp>=50?'var(--neon)':_gemDisp>=35?'var(--warn)':'var(--t2)')
+      :(g.sc>=85?'var(--up)':g.sc>=70?'var(--neon)':g.sc>=50?'var(--warn)':'var(--t2)');
     /* "Appeared X minutes ago" badge — uses the existing timeBadge() /
        timeAgo() helpers so the format matches the rest of the app
        (الآن / منذ Xم / منذ Xس). g.firstSeen is stamped by
@@ -2226,7 +2239,7 @@ function renderSmallCaps(res){
       h+='</div>';
     }
     if(g.target)h+='<div style="display:flex;gap:8px;font-size:8px;font-family:var(--fm);margin-bottom:4px"><span style="color:var(--up)">🎯 '+fP(g.target)+'</span><span style="color:var(--dn)">🛑 '+fP(g.stop)+'</span></div>';
-    h+='<div style="height:4px;background:var(--bg2);border-radius:2px;overflow:hidden"><div style="width:'+Math.min(100,g.sc)+'%;height:100%;background:'+(g.timing==='early'?'var(--up)':g.timing==='still'?'var(--warn)':'var(--dn)')+';border-radius:2px"></div></div>'
+    h+='<div style="height:4px;background:var(--bg2);border-radius:2px;overflow:hidden"><div style="width:'+Math.min(100,_gemDisp)+'%;height:100%;background:'+(g.timing==='early'?'var(--up)':g.timing==='still'?'var(--warn)':'var(--dn)')+';border-radius:2px"></div></div>'
       +'</div>';
   });
   slEl.innerHTML=h;

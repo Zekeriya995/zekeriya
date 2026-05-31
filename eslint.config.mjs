@@ -72,6 +72,7 @@ export default [
         evaluateProvenStatus: 'readonly',
         pickCardVisualTier: 'readonly',
         scoreGemCandidate: 'readonly',
+        gemScore100: 'readonly',
         getRugPullRisk: 'readonly',
         GEM_CONFIG: 'readonly',
         isValidGemSymbol: 'readonly',
@@ -161,6 +162,8 @@ export default [
         /* Declared in src/sectors.js */
         SECTORS: 'readonly',
         getCoinSector: 'readonly',
+        sectorStrength: 'readonly',
+        sectorVerdictTier: 'readonly',
         /* Declared in src/monitor-state.js */
         MONITOR_VERSION: 'readonly',
         DEFAULT_WEIGHTS: 'readonly',
@@ -357,6 +360,7 @@ export default [
         evaluateProvenStatus: 'readonly',
         pickCardVisualTier: 'readonly',
         scoreGemCandidate: 'readonly',
+        gemScore100: 'readonly',
         getRugPullRisk: 'readonly',
         GEM_CONFIG: 'readonly',
         isValidGemSymbol: 'readonly',

@@ -2240,7 +2240,7 @@ function renderSmallCaps(res){
       +'<span style="font-weight:800;font-size:14px">💎 '+sSafe+'</span>'
       +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+g.tBadge.col+';font-weight:700">'+esc(g.tBadge.ic)+' '+esc(g.tBadge.l)+'</span>'
       +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+rugCol+';font-weight:700">'+esc(rugTxt)+'</span>'
-      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+scoreCol+';font-weight:800;font-family:var(--fm)">'+g.sc+' pts</span>'
+      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+scoreCol+';font-weight:800;font-family:var(--fm)">'+_gemDisp+(_gemNorm?'/100':' pts')+'</span>'
       +ageBadge
       +'</div>'
       +'<span style="font-family:var(--fm);font-size:12px;font-weight:800;color:var(--neon)">'+g.vx.toFixed(1)+'x vol</span>'

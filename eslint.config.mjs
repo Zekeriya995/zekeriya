@@ -300,6 +300,7 @@ export default [
       'src/scanner-tag-stats.js',
       'src/scanner-atr-zones.js',
       'src/scoring-rules.js',
+      'src/sectors.js',
       'src/indicator-engine.js',
       'src/whale-engine.js',
       'src/alerts-engine.js',

@@ -146,6 +146,20 @@ function safeEqual(a, b) {
   return timingSafeEqual(ab, bb);
 }
 
+/* Split an array into consecutive chunks of at most `size` elements. Used to
+   break a large fan-out of upstream requests into small SEQUENTIAL batches so
+   we stay under a provider's per-IP burst limit (see fetchBitfinex's 429 fix).
+   Pure: returns a fresh array of arrays. A non-array input, or a size that
+   isn't a positive number, yields [] (caller falls back to all-at-once). */
+function chunk(arr, size) {
+  if (!Array.isArray(arr) || !(size >= 1)) return [];
+  const out = [];
+  for (let i = 0; i < arr.length; i += Math.floor(size)) {
+    out.push(arr.slice(i, i + Math.floor(size)));
+  }
+  return out;
+}
+
 module.exports = {
   FETCH_HOST_ALLOWLIST,
   isAllowedFetchUrl,
@@ -155,4 +169,5 @@ module.exports = {
   createSafeAgent,
   sanitizeTelegramHtml,
   safeEqual,
+  chunk,
 };

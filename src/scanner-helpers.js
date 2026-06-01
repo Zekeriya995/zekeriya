@@ -1245,3 +1245,31 @@ function classifyScalpType(ctx) {
     !!ctx.confirmedBreakout || !!ctx.tfAlignBull || (!!ctx.obPressure && !!ctx.volSpike);
   return momentum ? 'fast' : 'daily';
 }
+
+/* gemMcGate — should a gem candidate be REJECTED on market-cap grounds?
+   (G3 scanner audit.)
+
+   The legacy inline gate was `mc != null && mc > 0 && (mc < min || mc > max)`:
+   it enforced the [min, max] band ONLY when the market cap was KNOWN. A coin
+   with a missing / zero market cap (CoinGecko had no entry) slipped through
+   the band filter silently — the render layer flags it amber ("Unknown"), but
+   it was never actually gated, so a coin that might be far outside the gem
+   band still surfaced.
+
+   This makes the unknown-MC policy explicit and configurable:
+     - known MC  → enforce the band exactly as before (mc < min || mc > max).
+     - unknown MC → rejected only when `strict` is set.
+
+   `strict` is wired to nxScannerFix_gem_mc_strict, default OFF (opt-in). Unlike
+   the other audit fixes it is NOT default-on, because rejecting unknown-MC is a
+   genuine product trade-off, not a clear correctness win: many real gems are
+   brand-new coins CoinGecko hasn't indexed yet, so strict mode would drop them.
+   Off = byte-for-byte the legacy behaviour; on = no unknown-MC coin surfaces.
+
+   Pure: numbers in, boolean out (true = reject). Unit-tested in
+   tests/scanner-helpers.test.js. */
+function gemMcGate(mc, min, max, strict) {
+  var known = mc != null && +mc > 0;
+  if (known) return mc < min || mc > max;
+  return !!strict;
+}

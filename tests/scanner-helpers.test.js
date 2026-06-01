@@ -1842,3 +1842,44 @@ test('regimeConfAdjustment — malformed regime / tags degrade to 0', () => {
   /* trending-down with non-array tags → treated as no reversal → heavy penalty */
   assert.equal(regimeConfAdjustment(TREND_DOWN, null), -12);
 });
+
+/* ─── gemMcGate — market-cap gate with an explicit unknown-MC policy (G3) ── */
+
+test('gemMcGate — known MC inside the band is not rejected', () => {
+  assert.equal(gemMcGate(5e6, 1e6, 1e8, false), false);
+  assert.equal(gemMcGate(5e6, 1e6, 1e8, true), false);
+});
+
+test('gemMcGate — known MC below min or above max is rejected (band enforced)', () => {
+  assert.equal(gemMcGate(5e5, 1e6, 1e8, false), true); /* below min */
+  assert.equal(gemMcGate(5e8, 1e6, 1e8, false), true); /* above max */
+});
+
+test('gemMcGate — band edges are inclusive (min/max themselves pass)', () => {
+  assert.equal(gemMcGate(1e6, 1e6, 1e8, false), false); /* == min */
+  assert.equal(gemMcGate(1e8, 1e6, 1e8, false), false); /* == max */
+});
+
+test('gemMcGate — unknown MC passes by default (legacy parity, strict off)', () => {
+  assert.equal(gemMcGate(null, 1e6, 1e8, false), false);
+  assert.equal(gemMcGate(undefined, 1e6, 1e8, false), false);
+  assert.equal(gemMcGate(0, 1e6, 1e8, false), false);
+});
+
+test('gemMcGate — unknown MC is rejected in strict mode (the G3 fix)', () => {
+  assert.equal(gemMcGate(null, 1e6, 1e8, true), true);
+  assert.equal(gemMcGate(undefined, 1e6, 1e8, true), true);
+  assert.equal(gemMcGate(0, 1e6, 1e8, true), true);
+});
+
+test('gemMcGate — strict-off is byte-for-byte the legacy inline gate', () => {
+  /* legacy: mc != null && mc > 0 && (mc < min || mc > max) */
+  function legacy(mc, min, max) {
+    return mc != null && mc > 0 && (mc < min || mc > max);
+  }
+  const min = 2e6,
+    max = 5e7;
+  for (const mc of [null, undefined, 0, 1, 1e6, 2e6, 1e7, 5e7, 9e7, -5]) {
+    assert.equal(gemMcGate(mc, min, max, false), legacy(mc, min, max), 'mc=' + mc);
+  }
+});

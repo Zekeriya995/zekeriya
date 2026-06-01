@@ -2077,6 +2077,12 @@ async function loadSmallCaps2(){
      by symbol, so the scoring pass reuses the value instead of paying for the
      same pure call twice. Behaviourally identical — pure dedup, no flag. */
   var _rugCache={};
+  /* G3 audit: reject gem candidates whose market cap is UNKNOWN (CoinGecko had
+     no entry) — the legacy band filter only gated KNOWN caps, so an unknown-MC
+     coin bypassed MC_MIN/MC_MAX silently. Opt-in via nxScannerFix_gem_mc_strict
+     (default OFF — many real gems are too new to be indexed; see gemMcGate).
+     Read once here, not per-candidate in the filter below. */
+  var _mcStrict=localStorage.getItem('nxScannerFix_gem_mc_strict')==='on';
   var cands=Object.entries(T).filter(function(e){
     var s=e[0],d=e[1];
     if(!isValidGemSymbol(s))return false;
@@ -2089,7 +2095,7 @@ async function loadSmallCaps2(){
     if(!d.p||d.p<=0||d.p>GEM_CONFIG.PRICE_MAX)return false;
     if(d.v<GEM_CONFIG.VOL_MIN)return false;
     var mc=marketCapData[s];
-    if(mc!=null&&mc>0&&(mc<GEM_CONFIG.MC_MIN||mc>GEM_CONFIG.MC_MAX))return false;
+    if(gemMcGate(mc,GEM_CONFIG.MC_MIN,GEM_CONFIG.MC_MAX,_mcStrict))return false;
     var rug=getRugPullRisk(d,frArgFor(s),bookTickers[s]);
     _rugCache[s]=rug;
     if(rug>=GEM_CONFIG.RUG_MAX)return false;

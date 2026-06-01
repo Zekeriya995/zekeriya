@@ -87,6 +87,7 @@ export default [
         notifDedupeKey: 'readonly',
         evaluateSignalOutcome: 'readonly',
         classifySetup: 'readonly',
+        classifyScalpType: 'readonly',
         rollingOBIFromArr: 'readonly',
         evaluateBlacklistAdd: 'readonly',
         evaluateBlacklistRemove: 'readonly',
@@ -164,6 +165,7 @@ export default [
         getCoinSector: 'readonly',
         sectorStrength: 'readonly',
         sectorVerdictTier: 'readonly',
+        sectorWeightedAvg: 'readonly',
         /* Declared in src/monitor-state.js */
         MONITOR_VERSION: 'readonly',
         DEFAULT_WEIGHTS: 'readonly',
@@ -376,6 +378,7 @@ export default [
         notifDedupeKey: 'readonly',
         evaluateSignalOutcome: 'readonly',
         classifySetup: 'readonly',
+        classifyScalpType: 'readonly',
         rollingOBIFromArr: 'readonly',
         evaluateBlacklistAdd: 'readonly',
         evaluateBlacklistRemove: 'readonly',

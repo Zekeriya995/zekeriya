@@ -1207,3 +1207,41 @@ function regimeConfAdjustment(regime, tags) {
   if (bias === 'bullish') return momentum ? 8 : 0;
   return 0;
 }
+
+/* classifyScalpType — choose the scalp ('fast', a 10-30min intraday play)
+   over the swing ('daily') plan from SHORT-TERM momentum instead of the 24h
+   change. (S2/S3 scanner audit.)
+
+   The legacy selector was (c24h >= -3 && c24h <= 0 && vol24h > 1e8):
+     - S2 (falling-knife bias): it fired the scalp ONLY on coins already DOWN
+       on the day — planning a long entry into 24h weakness with no intraday
+       signal that the slide had actually stopped.
+     - S3 (timeframe mismatch): it drove a 10-30min decision off the 24h
+       change, the wrong clock entirely for a scalp.
+
+   The replacement keeps the liquidity floor but gates on CONFIRMED intraday
+   strength: a closed-candle breakout, OR a 15m+1h bullish EMA alignment, OR
+   simultaneous order-book buy pressure and a volume spike. It also refuses to
+   chase a move already extended on the day (change24h at/above lateCeil), so
+   the scalp targets fresh intraday momentum rather than a tired runner. When
+   no intraday data exists every momentum flag is false, so the symbol falls
+   through to 'daily' instead of getting a fabricated scalp.
+
+   Pure: a plain ctx object in, 'fast' | 'daily' out. ctx fields:
+     vol24h, change24h, confirmedBreakout, tfAlignBull, obPressure, volSpike,
+     plus optional volFloor (default 1e8) / lateCeil (default 8) overrides.
+   Unit-tested in tests/scanner-scalp-plan.test.js. Wired into app.js behind
+   nxScannerFix_scalp_select (default on) — 'off' restores the legacy 24h
+   selector verbatim. */
+function classifyScalpType(ctx) {
+  ctx = ctx || {};
+  var volFloor = ctx.volFloor != null ? +ctx.volFloor : 1e8;
+  var lateCeil = ctx.lateCeil != null ? +ctx.lateCeil : 8;
+  /* liquidity floor — a scalp needs a book deep enough to get in and out */
+  if (!(+ctx.vol24h > volFloor)) return 'daily';
+  /* already extended on the day → too late for a fresh intraday scalp */
+  if (+ctx.change24h >= lateCeil) return 'daily';
+  var momentum =
+    !!ctx.confirmedBreakout || !!ctx.tfAlignBull || (!!ctx.obPressure && !!ctx.volSpike);
+  return momentum ? 'fast' : 'daily';
+}

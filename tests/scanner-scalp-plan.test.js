@@ -24,6 +24,7 @@ const assert = require('node:assert/strict');
    global scope via _setup.js and reference the global directly. */
 require('./_setup.js');
 const atrZones = globalThis.atrZones;
+const classifyScalpType = globalThis.classifyScalpType;
 
 /* The exact multipliers the scalp branch passes to atrZones. Mirror of the
    literal in app.js loadTrading — kept here so a change to the scalp's
@@ -70,4 +71,73 @@ test('scalp plan — entry is the live price (market scalp)', () => {
   const z = atrZones(2.5, 0.02, 0, 0, SCALP_MULTS);
   assert.equal(z.entry, 2.5);
   assert.ok(z.stop < z.entry && z.entry < z.target1);
+});
+
+/* ─── S2/S3 — scalp SELECTION from intraday momentum, not the 24h change ──
+   The legacy selector `(c24h >= -3 && c24h <= 0 && vol24h > 1e8)` fired the
+   scalp only on coins already down on the day (falling-knife long, S2) using
+   the wrong clock (S3). classifyScalpType gates on confirmed intraday
+   strength instead. */
+
+const LIQ = 2e8; /* comfortably above the 1e8 floor */
+
+test('classifyScalpType — confirmed breakout + liquidity ⇒ fast', () => {
+  assert.equal(classifyScalpType({ vol24h: LIQ, change24h: 1, confirmedBreakout: true }), 'fast');
+});
+
+test('classifyScalpType — thin volume is never a scalp (liquidity floor)', () => {
+  assert.equal(classifyScalpType({ vol24h: 5e7, change24h: 1, confirmedBreakout: true }), 'daily');
+});
+
+test('classifyScalpType — S2: a coin down on the day with NO intraday signal is not a scalp', () => {
+  /* The exact falling-knife case the legacy selector would have called 'fast'
+     (c24h = -2, in [-3,0]) — now 'daily' because nothing confirms the slide
+     stopped. */
+  assert.equal(classifyScalpType({ vol24h: LIQ, change24h: -2 }), 'daily');
+});
+
+test('classifyScalpType — S2: down on the day BUT a confirmed breakout ⇒ fast (reversal, not a knife)', () => {
+  assert.equal(classifyScalpType({ vol24h: LIQ, change24h: -2, confirmedBreakout: true }), 'fast');
+});
+
+test('classifyScalpType — each momentum path independently qualifies', () => {
+  assert.equal(classifyScalpType({ vol24h: LIQ, change24h: 0, confirmedBreakout: true }), 'fast');
+  assert.equal(classifyScalpType({ vol24h: LIQ, change24h: 0, tfAlignBull: true }), 'fast');
+  assert.equal(
+    classifyScalpType({ vol24h: LIQ, change24h: 0, obPressure: true, volSpike: true }),
+    'fast'
+  );
+});
+
+test('classifyScalpType — order-book pressure WITHOUT a volume spike is not enough', () => {
+  assert.equal(classifyScalpType({ vol24h: LIQ, change24h: 0, obPressure: true }), 'daily');
+  assert.equal(classifyScalpType({ vol24h: LIQ, change24h: 0, volSpike: true }), 'daily');
+});
+
+test('classifyScalpType — S3: selection ignores the 24h sign — a coin UP on the day with momentum is fast', () => {
+  /* The legacy selector REQUIRED c24h <= 0, so a coin up +1.5% intraday-strong
+     could never be a scalp. Now it can. */
+  assert.equal(classifyScalpType({ vol24h: LIQ, change24h: 1.5, tfAlignBull: true }), 'fast');
+});
+
+test('classifyScalpType — refuses to chase a move already extended on the day (lateCeil)', () => {
+  assert.equal(classifyScalpType({ vol24h: LIQ, change24h: 8, confirmedBreakout: true }), 'daily');
+  assert.equal(classifyScalpType({ vol24h: LIQ, change24h: 7.9, confirmedBreakout: true }), 'fast');
+});
+
+test('classifyScalpType — no intraday data ⇒ daily (skip, never a fabricated scalp)', () => {
+  assert.equal(classifyScalpType({ vol24h: LIQ, change24h: 0 }), 'daily');
+  assert.equal(classifyScalpType({}), 'daily');
+  assert.equal(classifyScalpType(null), 'daily');
+});
+
+test('classifyScalpType — overridable volFloor / lateCeil', () => {
+  assert.equal(
+    classifyScalpType({ vol24h: 1e6, change24h: 0, confirmedBreakout: true, volFloor: 5e5 }),
+    'fast'
+  );
+  assert.equal(
+    classifyScalpType({ vol24h: LIQ, change24h: 4, confirmedBreakout: true, lateCeil: 3 }),
+    'daily'
+  );
 });

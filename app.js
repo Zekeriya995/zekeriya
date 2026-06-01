@@ -2537,7 +2537,7 @@ var cbCache={t:0};
 async function fetchCoinbasePrices(){
   if(Date.now()-cbCache.t<30000)return;
   var coins=['BTC','ETH','SOL','XRP','DOGE','ADA','AVAX','LINK','DOT',
-    'MATIC','UNI','ATOM','LTC','NEAR','APT','ARB','OP','SUI','SEI',
+    'POL','UNI','ATOM','LTC','NEAR','APT','ARB','OP','SUI','SEI',
     'INJ','TIA','FIL','HBAR','ICP','PEPE','WIF','STX','IMX','FTM','AAVE'];
   var BATCH=6;
   for(var i=0;i<coins.length;i+=BATCH){

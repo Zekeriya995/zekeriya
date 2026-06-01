@@ -93,7 +93,7 @@
     'TRXUSDT',
     'TONUSDT',
     'SUIUSDT',
-    'MATICUSDT',
+    'POLUSDT',
     'DOTUSDT',
     'NEARUSDT',
     'ARBUSDT',

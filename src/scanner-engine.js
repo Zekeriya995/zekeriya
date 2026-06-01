@@ -140,7 +140,7 @@ const TIER1_SYMBOLS = new Set([
   'LINK',
   'AVAX',
   'DOT',
-  'MATIC',
+  'POL',
   'UNI',
   'ATOM',
   'LTC',

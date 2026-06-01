@@ -1463,7 +1463,8 @@ const BITFINEX_PAIRS = [
   ['LINK', 'tLINK:USD'],
   ['AVAX', 'tAVAX:USD'],
   ['DOT', 'tDOTUSD'],
-  ['MATIC', 'tMATIC:USD'],
+  /* Polygon rebranded MATIC→POL (2024); Bitfinex lists it as tPOL:USD. */
+  ['POL', 'tPOL:USD'],
 ];
 
 async function fetchBitfinex() {

@@ -52,6 +52,7 @@ const {
   createSafeAgent,
   sanitizeTelegramHtml,
   safeEqual,
+  chunk,
 } = require('./src/server-helpers');
 
 const app = express();
@@ -970,7 +971,10 @@ async function safeFetch(url, label, opts) {
       }
       const canRetry = attempt < maxAttempts - 1 && _isRetryable(err);
       if (!canRetry) break;
-      const base = SAFE_FETCH_BACKOFF_MS[attempt] || 2000;
+      const base =
+        (opts && Array.isArray(opts.backoff) && opts.backoff[attempt]) ||
+        SAFE_FETCH_BACKOFF_MS[attempt] ||
+        2000;
       const jitter = Math.floor(Math.random() * 250);
       const wait = base + jitter;
       console.warn(
@@ -1467,37 +1471,61 @@ const BITFINEX_PAIRS = [
   ['POL', 'tPOL:USD'],
 ];
 
+/* Bitfinex burst-throttle (chronic-429 fix). The public pos.size endpoint
+   rate-limits per-IP on INSTANTANEOUS concurrency, not average rate: firing
+   all pairs × 2 (long+short) at once tripped a sustained 429 storm (the
+   average rate is only ~0.17 req/s, so the burst is the sole cause). We send
+   the pairs in small SEQUENTIAL batches with a short gap — identical average
+   rate, tiny instantaneous burst — plus a longer Bitfinex-only backoff so a
+   stray 429 doesn't re-storm. Output is unchanged (same cache.bitfinex).
+   BITFINEX_BURST_THROTTLE=off restores the legacy all-at-once behaviour
+   verbatim; batch size / gap are env-tunable without a redeploy. */
+const BFX_BURST_THROTTLE = process.env.BITFINEX_BURST_THROTTLE !== 'off';
+const BFX_BATCH_SIZE = +process.env.BITFINEX_BATCH_SIZE || 2; /* pairs/batch → ×2 requests */
+const BFX_BATCH_GAP_MS = +process.env.BITFINEX_BATCH_GAP_MS || 300;
+const BFX_FETCH_OPTS = { retries: 3, backoff: [1500, 5000, 15000] };
+const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function fetchBitfinex() {
   try {
-    const updates = await Promise.allSettled(
-      BITFINEX_PAIRS.map(async ([sym, pair]) => {
-        const longUrl = 'https://api-pub.bitfinex.com/v2/stats1/pos.size:1m:' + pair + ':long/last';
-        const shortUrl =
-          'https://api-pub.bitfinex.com/v2/stats1/pos.size:1m:' + pair + ':short/last';
-        const [longRes, shortRes] = await Promise.all([
-          safeFetch(longUrl, 'BFX-LONG-' + sym),
-          safeFetch(shortUrl, 'BFX-SHORT-' + sym),
-        ]);
-        if (
-          !Array.isArray(longRes) ||
-          !Array.isArray(shortRes) ||
-          longRes.length < 2 ||
-          shortRes.length < 2
-        ) {
-          return null;
-        }
-        const long = Math.abs(parseFloat(longRes[1]));
-        const short = Math.abs(parseFloat(shortRes[1]));
-        const total = long + short;
-        if (!isFinite(total) || total <= 0) return null;
-        cache.bitfinex[sym] = {
-          longPct: Math.round((long / total) * 1000) / 10,
-          shortPct: Math.round((short / total) * 1000) / 10,
-          ratio: Math.round((long / Math.max(short, 1)) * 100) / 100,
-        };
-        return sym;
-      })
-    );
+    const fetchPair = async ([sym, pair]) => {
+      const longUrl = 'https://api-pub.bitfinex.com/v2/stats1/pos.size:1m:' + pair + ':long/last';
+      const shortUrl = 'https://api-pub.bitfinex.com/v2/stats1/pos.size:1m:' + pair + ':short/last';
+      const opts = BFX_BURST_THROTTLE ? BFX_FETCH_OPTS : undefined;
+      const [longRes, shortRes] = await Promise.all([
+        safeFetch(longUrl, 'BFX-LONG-' + sym, opts),
+        safeFetch(shortUrl, 'BFX-SHORT-' + sym, opts),
+      ]);
+      if (
+        !Array.isArray(longRes) ||
+        !Array.isArray(shortRes) ||
+        longRes.length < 2 ||
+        shortRes.length < 2
+      ) {
+        return null;
+      }
+      const long = Math.abs(parseFloat(longRes[1]));
+      const short = Math.abs(parseFloat(shortRes[1]));
+      const total = long + short;
+      if (!isFinite(total) || total <= 0) return null;
+      cache.bitfinex[sym] = {
+        longPct: Math.round((long / total) * 1000) / 10,
+        shortPct: Math.round((short / total) * 1000) / 10,
+        ratio: Math.round((long / Math.max(short, 1)) * 100) / 100,
+      };
+      return sym;
+    };
+
+    /* Sequential small batches when throttling; one all-at-once batch when off
+       (legacy). chunk() returns [] on bad input, so fall back defensively. */
+    const batches = BFX_BURST_THROTTLE ? chunk(BITFINEX_PAIRS, BFX_BATCH_SIZE) : [BITFINEX_PAIRS];
+    const safeBatches = batches.length ? batches : [BITFINEX_PAIRS];
+    const updates = [];
+    for (let b = 0; b < safeBatches.length; b++) {
+      const settled = await Promise.allSettled(safeBatches[b].map(fetchPair));
+      for (let i = 0; i < settled.length; i++) updates.push(settled[i]);
+      if (BFX_BURST_THROTTLE && b < safeBatches.length - 1) await _sleep(BFX_BATCH_GAP_MS);
+    }
     cache.lastUpdate.bitfinex = Date.now();
     const updated = updates.filter((r) => r.status === 'fulfilled' && r.value).length;
     console.log(`[BITFINEX] Updated: ${updated} pairs`);

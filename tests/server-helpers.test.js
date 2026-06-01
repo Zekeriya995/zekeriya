@@ -13,6 +13,7 @@ const {
   isPrivateAddress,
   sanitizeTelegramHtml,
   safeEqual,
+  chunk,
 } = require('../src/server-helpers');
 
 /* ─── isAllowedFetchUrl ───────────────────────────────────────────── */
@@ -201,4 +202,41 @@ test('safeEqual — handles UTF-8 multibyte correctly', () => {
   assert.equal(safeEqual('سرّ', 'سرّ'), true);
   assert.equal(safeEqual('🔑', '🔑'), true);
   assert.equal(safeEqual('🔑', '🔒'), false);
+});
+
+/* ─── chunk — sequential batching for upstream burst control (Bitfinex 429) ── */
+
+test('chunk — splits into consecutive batches of at most `size`', () => {
+  assert.deepEqual(chunk([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]);
+  assert.deepEqual(chunk([1, 2, 3, 4], 2), [
+    [1, 2],
+    [3, 4],
+  ]);
+});
+
+test('chunk — size >= length returns a single batch', () => {
+  assert.deepEqual(chunk([1, 2, 3], 10), [[1, 2, 3]]);
+  assert.deepEqual(chunk([1, 2, 3], 3), [[1, 2, 3]]);
+});
+
+test('chunk — size 1 yields one element per batch', () => {
+  assert.deepEqual(chunk(['a', 'b'], 1), [['a'], ['b']]);
+});
+
+test('chunk — covers every element exactly once, preserving order (the 10 BFX pairs)', () => {
+  const arr = Array.from({ length: 10 }, (_, i) => i);
+  assert.deepEqual(chunk(arr, 2).flat(), arr);
+  assert.equal(chunk(arr, 2).length, 5); /* 10 pairs / 2 = 5 sequential batches */
+});
+
+test('chunk — bad input returns [] so the caller falls back to all-at-once', () => {
+  assert.deepEqual(chunk([1, 2, 3], 0), []);
+  assert.deepEqual(chunk([1, 2, 3], -1), []);
+  assert.deepEqual(chunk([1, 2, 3], NaN), []);
+  assert.deepEqual(chunk(null, 2), []);
+  assert.deepEqual(chunk('nope', 2), []);
+});
+
+test('chunk — empty array yields no batches', () => {
+  assert.deepEqual(chunk([], 2), []);
 });

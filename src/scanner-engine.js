@@ -392,6 +392,9 @@ function scoreSymbol(sym, ctx) {
      (tests) with no profile fall back to the static SCANNER_WEIGHTS_V2 flag. */
   let _wp = WEIGHTS_V2_ENABLED ? 'v2' : null;
   if (ctx._weightProfile !== undefined) _wp = ctx._weightProfile;
+  /* Market regime (bull/bear/ranging) active at scoring time, threaded in by
+     the pass and stamped on the signal for per-regime L2 calibration. */
+  const _mr = typeof ctx._marketRegime === 'string' ? ctx._marketRegime : 'unknown';
   const registryResult = scoringRules.applyRules(_ruleCtx, { profile: _wp });
   score += registryResult.scoreDelta;
   for (const t of registryResult.tagsDelta) tags.push(t);
@@ -655,6 +658,9 @@ function scoreSymbol(sym, ctx) {
        champion/challenger A/B (compareWeightProfiles) recover each entry's
        profile-independent base score correctly even after V2 goes live. */
     weightsProfile: _wp || 'legacy',
+    /* Market regime (bull/bear/ranging) active when this scored — persisted by
+       recordSignal so L2 can calibrate weights per regime from forward data. */
+    marketRegime: _mr,
     /* Phase 4 Part 2: the registry input ctx captured at scoring
        time. scanner-history.recordSignal persists it (subject to
        bounded-size guards) so the backtest harness can later
@@ -725,8 +731,18 @@ function runScannerPass(cache) {
     btcMtf: indicatorsMtf.BTC ? indicatorsMtf.BTC.agreement : null,
     bullishPct: _tot > 0 ? (_up / _tot) * 100 : 50,
   });
+  /* Unified regime label stamped on every signal (bull / bear / ranging) so
+     L2 calibration can group forward outcomes by actual market direction. */
+  const marketRegimeLabel =
+    regime.direction && regime.direction !== 'none' ? regime.direction : regime.regime;
   let passProfile = WEIGHTS_V2_ENABLED ? 'v2' : null;
-  if (REGIME_ADAPTIVE_ENABLED) passProfile = regime.regime === 'trending' ? 'trend' : 'v2';
+  /* Regime-adaptive profile (P0): an UP-trend → momentum (trend); a DOWN-trend
+     OR a range → contrarian (v2). We deliberately never hand the momentum
+     profile to a downtrend — chasing a falling tape was the direction-blind
+     bug this fix closes. Inert unless SCANNER_REGIME_ADAPTIVE is on. */
+  if (REGIME_ADAPTIVE_ENABLED) {
+    passProfile = regime.regime === 'trending' && regime.direction !== 'bear' ? 'trend' : 'v2';
+  }
 
   for (const sym in tickers) {
     rejections.total++;
@@ -738,6 +754,7 @@ function runScannerPass(cache) {
     const r = scoreSymbol(sym, {
       _rejectionSink: rejections,
       _weightProfile: passProfile,
+      _marketRegime: marketRegimeLabel,
       ticker: tickers[sym],
       fr: cache.fr ? cache.fr[sym] : null,
       ls: cache.ls ? cache.ls[sym] : null,

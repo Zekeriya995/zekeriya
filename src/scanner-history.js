@@ -179,6 +179,14 @@ function recordSignal(history, sig, now) {
        legacy. Anything unrecognised (incl. pre-field signals) → 'legacy'. */
     weightsProfile:
       sig.weightsProfile === 'v2' || sig.weightsProfile === 'trend' ? sig.weightsProfile : 'legacy',
+    /* Market regime active at scoring time (bull / bear / ranging). Allowlisted
+       so a malformed emitter can't write arbitrary strings into history;
+       anything unrecognised (incl. pre-field legacy signals) → 'unknown'. L2
+       (calibrate-weights) groups forward outcomes by this to tune each regime. */
+    marketRegime:
+      sig.marketRegime === 'bull' || sig.marketRegime === 'bear' || sig.marketRegime === 'ranging'
+        ? sig.marketRegime
+        : 'unknown',
   };
   if (persistedCtx) entry.ctx = persistedCtx;
   history.push(entry);

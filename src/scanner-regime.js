@@ -41,8 +41,17 @@ const DEFAULTS = Object.freeze({
        bullishPct: number 0..100 — share of scanned coins up on the day
                    (market breadth).
      }
-   Returns { regime, trendScore, inputs }. Missing/!shaped fields degrade to
-   the neutral assumption (no trend) so a cold cache reads 'ranging'. */
+   Returns { regime, direction, trendScore, inputs }:
+     - regime:    'trending' | 'ranging' (the original output; kept verbatim so
+                  every existing consumer keeps working).
+     - direction: 'bull' | 'bear' | 'none' — NEW. The binary regime was
+                  direction-BLIND: a strong DOWN-trend scored 'trending' exactly
+                  like an up-trend, so the momentum profile got handed to a
+                  FALLING tape. direction recovers the up/down split from BTC's
+                  MTF agreement ('none' in a range). Consumers pick the profile
+                  from (regime, direction): up → momentum, down/range → contrarian.
+   Missing/!shaped fields degrade to the neutral assumption (no trend) so a
+   cold cache reads regime 'ranging', direction 'none'. */
 function detectRegime(input, opts) {
   const o = opts || {};
   const cfg = {
@@ -66,8 +75,17 @@ function detectRegime(input, opts) {
   if (bullishPct >= cfg.breadthHi || bullishPct <= cfg.breadthLo) trendScore += 1;
 
   const regime = trendScore >= cfg.trendScoreMin ? 'trending' : 'ranging';
+  /* Direction (audit fix): split a trend into UP vs DOWN from BTC's MTF
+     agreement, so a downtrend can stop receiving the momentum profile. A
+     ranging tape has no dominant direction. */
+  let direction = 'none';
+  if (regime === 'trending') {
+    if (agreement === 'bearish') direction = 'bear';
+    else if (agreement === 'bullish') direction = 'bull';
+  }
   return {
     regime,
+    direction,
     trendScore,
     inputs: {
       btcStrength: strength,

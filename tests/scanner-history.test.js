@@ -142,6 +142,25 @@ test('recordSignal — stamps weightsProfile, passing through v2 and trend verba
   assert.equal(h[3].weightsProfile, 'legacy'); /* unknown → legacy */
 });
 
+test('recordSignal — stamps marketRegime, allowlisting bull/bear/ranging', () => {
+  const h = [];
+  recordSignal(h, { ...ultra('NON') }, NOW); /* no field → unknown */
+  recordSignal(h, { ...ultra('BER'), marketRegime: 'bear' }, NOW + 60_000);
+  recordSignal(h, { ...ultra('BUL'), marketRegime: 'bull' }, NOW + 120_000);
+  recordSignal(h, { ...ultra('RNG'), marketRegime: 'ranging' }, NOW + 180_000);
+  recordSignal(
+    h,
+    { ...ultra('JNK'), marketRegime: 'trending' },
+    NOW + 240_000
+  ); /* not allowlisted */
+  assert.equal(h[0].marketRegime, 'unknown'); /* absent → unknown */
+  assert.equal(h[1].marketRegime, 'bear'); /* the case that must survive for
+                                              per-regime L2 calibration */
+  assert.equal(h[2].marketRegime, 'bull');
+  assert.equal(h[3].marketRegime, 'ranging');
+  assert.equal(h[4].marketRegime, 'unknown'); /* arbitrary string sanitized */
+});
+
 /* ─── evaluateOpenSignals ─────────────────────────────────────────── */
 
 test('evaluateOpenSignals — entries inside the 24h window stay open', () => {

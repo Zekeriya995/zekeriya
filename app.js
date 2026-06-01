@@ -1338,7 +1338,15 @@ function setScanSetup(s,btn){
 }
 function scanTab(idx,btn){curScanTab=idx;document.querySelectorAll('#pg-scan>.big-tabs>.big-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');['scanTrade','scanTrend','scanSmall'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=j===idx?'block':'none'});updateScanSummary(0,Object.keys(T).length);if(idx===0)loadTrading();if(idx===1)loadTrending();if(idx===2)loadSmallCapsUI()}
 /* ═══ TAB 1: SECTOR TRENDING ═══ */
-function analyzeSectors(){var res=[];for(var k in SECTORS){var sec=SECTORS[k];var coins=sec.coins.filter(function(s){return T[s]});if(coins.length<2)continue;var totC=0,rising=0,totV=0,cd=[];coins.forEach(function(s){var d=T[s];totC+=d.c;totV+=d.v;if(d.c>0)rising++;cd.push({s:s,c:d.c,p:d.p,v:d.v})});cd.sort(function(a,b){return b.c-a.c});var avg=totC/coins.length;var rPct=Math.round(rising/coins.length*100);/* Symmetric sector-heat score (T2 audit): the legacy ladder had five bull
+function analyzeSectors(){var res=[];for(var k in SECTORS){var sec=SECTORS[k];var coins=sec.coins.filter(function(s){return T[s]});if(coins.length<2)continue;var totC=0,rising=0,totV=0,cd=[];coins.forEach(function(s){var d=T[s];totC+=d.c;totV+=d.v;if(d.c>0)rising++;cd.push({s:s,c:d.c,p:d.p,v:d.v})});cd.sort(function(a,b){return b.c-a.c});
+    /* T3 audit: volume-weight the sector's directional average so capital
+       placement — not a flat per-coin mean — drives the heat. A thin microcap
+       down 8% can no longer outvote the megacap up 2% that actually holds the
+       money. Breadth (rPct) stays a separate equal-weighted input below, so a
+       weighted-up but broadly-weak sector is still visible, not masked. Behind
+       nxScannerFix_sector_volwt (default on); 'off' restores the flat mean.
+       Pure + unit-tested in tests/sectors-heat.test.js. */
+    var _volWt=(typeof sectorWeightedAvg==='function'&&localStorage.getItem('nxScannerFix_sector_volwt')!=='off');var avg=_volWt?sectorWeightedAvg(cd):(totC/coins.length);var rPct=Math.round(rising/coins.length*100);/* Symmetric sector-heat score (T2 audit): the legacy ladder had five bull
    buckets vs two bear, so it couldn't tell a −2% sector from a −10% one.
    sectorStrength re-centres on 50=flat and mirrors up/down. Behind
    nxScannerFix_sector_symmetry (default on) — flip to 'off' for the exact
@@ -1494,7 +1502,14 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
   var _tfCfgRender=TF_CONFIG[scannerTimeframe]||TF_CONFIG['1h'];
   var _tfHold=lang==='ar'?_tfCfgRender.holdAr:_tfCfgRender.holdEn;
   for(var i=0;i<Math.min(r.length,7);i++){var x=r[i];var d=T[x.s];if(!d)continue;
-    var type=(d.c>=-3&&d.c<=0&&d.v>1e8)?'fast':'daily';var entry,target,stop,dur;
+    /* S2/S3 audit: pick the scalp from CONFIRMED intraday momentum, not the
+       24h change — the old (d.c>=-3&&d.c<=0) selector fired the scalp only on
+       coins already down on the day (falling-knife long) and used the 24h
+       clock for a 10-30min play. classifyScalpType is pure + tested; behind
+       nxScannerFix_scalp_select (default on), 'off' restores the legacy line. */
+    var _scalpSel=(typeof classifyScalpType==='function'&&localStorage.getItem('nxScannerFix_scalp_select')!=='off');
+    var type=_scalpSel?classifyScalpType({vol24h:d.v,change24h:d.c,confirmedBreakout:x.confirmedBreakout,tfAlignBull:x.tfAlign&&x.tfAlign.aligned15m1h,obPressure:x.checks&&x.checks.ob,volSpike:x.checks&&x.checks.vol}):((d.c>=-3&&d.c<=0&&d.v>1e8)?'fast':'daily');
+    var entry,target,stop,dur;
     if(x.smartEntry&&type!=='fast'){entry=x.smartEntry.entry;target=x.smartEntry.target1;stop=x.smartEntry.stop;dur=_tfHold}
     else if(type==='fast'){
       /* S1/S5 audit: derive BOTH target and stop from the 15m ATR so a scalp's
@@ -2042,6 +2057,12 @@ async function loadSmallCaps2(){
     if(!frReady) return undefined;
     return FR[s] || null;
   }
+  /* G4 audit: rug-risk is computed in this pre-filter gate AND recomputed in
+     the scoring pass below on identical inputs (d=T[s], frArgFor(s),
+     bookTickers[s] are all stable within a single scan). Cache it here, keyed
+     by symbol, so the scoring pass reuses the value instead of paying for the
+     same pure call twice. Behaviourally identical — pure dedup, no flag. */
+  var _rugCache={};
   var cands=Object.entries(T).filter(function(e){
     var s=e[0],d=e[1];
     if(!isValidGemSymbol(s))return false;
@@ -2056,6 +2077,7 @@ async function loadSmallCaps2(){
     var mc=marketCapData[s];
     if(mc!=null&&mc>0&&(mc<GEM_CONFIG.MC_MIN||mc>GEM_CONFIG.MC_MAX))return false;
     var rug=getRugPullRisk(d,frArgFor(s),bookTickers[s]);
+    _rugCache[s]=rug;
     if(rug>=GEM_CONFIG.RUG_MAX)return false;
     return true;
   }).sort(function(a,b){return b[1].v-a[1].v}).slice(0,GEM_CONFIG.PREFILTER_LIMIT);
@@ -2106,7 +2128,9 @@ async function loadSmallCaps2(){
       var tags=_scored.tags;
       var target=timing!=='late'?pN*(timing==='early'?GEM_CONFIG.TARGET_EARLY:GEM_CONFIG.TARGET_STILL):null;
       var stop=timing!=='late'?pN*(timing==='early'?GEM_CONFIG.STOP_EARLY:GEM_CONFIG.STOP_STILL):null;
-      var rugRisk=getRugPullRisk(d,frArgFor(s),bookTickers[s]);
+      /* G4: reuse the pre-filter's rug-risk (same pure inputs); recompute only
+         as a defensive fallback if this symbol somehow wasn't cached. */
+      var rugRisk=_rugCache[s];if(rugRisk==null)rugRisk=getRugPullRisk(d,frArgFor(s),bookTickers[s]);
       var mc=marketCapData[s]||0;
       /* Momentum gate — tightened in the 2026-05-22 audit. The previous
          OR-gate (`vx>=1.5 OR timing IN [early,still]`) admitted

@@ -10,7 +10,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { sectorStrength, sectorVerdictTier } = require('../src/sectors');
+const { sectorStrength, sectorVerdictTier, sectorWeightedAvg } = require('../src/sectors');
 
 test('sectorStrength — flat sector sits at the 50 midpoint', () => {
   assert.equal(sectorStrength(0, 50), 50);
@@ -87,4 +87,70 @@ test('sectorVerdictTier — the neutral band is centred on 50', () => {
   assert.equal(sectorVerdictTier(50 + 5), 'neutral');
   assert.equal(sectorVerdictTier(50 - 7), 'declining');
   assert.equal(sectorVerdictTier(50 + 6), 'rising');
+});
+
+/* ─── T3 — volume-weighted sector change ──────────────────────────────
+   The flat mean let a thin microcap outvote the megacap that holds the
+   capital. sectorWeightedAvg weights each coin's change by its volume. */
+
+test('sectorWeightedAvg — equal volumes reduce to the flat mean', () => {
+  const flat = sectorWeightedAvg([
+    { c: 2, v: 100 },
+    { c: -2, v: 100 },
+    { c: 6, v: 100 },
+  ]);
+  assert.equal(flat, (2 - 2 + 6) / 3);
+});
+
+test('sectorWeightedAvg — the megacap that holds the money sets the sign (the T3 fix)', () => {
+  /* Flat mean would read −3% (bearish); weighting by where capital sits
+     flips it positive because the +2% coin carries ~99.7% of the volume. */
+  const coins = [
+    { c: 2, v: 30e9 } /* megacap up */,
+    { c: -8, v: 0.1e9 } /* microcap down, thin */,
+  ];
+  const flat = (2 - 8) / 2;
+  const wt = sectorWeightedAvg(coins);
+  assert.equal(flat, -3);
+  assert.ok(wt > 0, `expected weighted avg positive, got ${wt}`);
+  assert.ok(Math.abs(wt - 1.97) < 0.05, `expected ~1.97, got ${wt}`);
+});
+
+test('sectorWeightedAvg — zero/absent volume falls back to the flat mean (no div-by-zero)', () => {
+  assert.equal(
+    sectorWeightedAvg([
+      { c: 4, v: 0 },
+      { c: -2, v: 0 },
+    ]),
+    1 /* (4 + -2)/2 */
+  );
+  assert.equal(sectorWeightedAvg([{ c: 5 }, { c: 1 }]), 3); /* v undefined */
+});
+
+test('sectorWeightedAvg — a coin with unknown change is skipped, not treated as 0%', () => {
+  /* NaN change must not dilute the average toward zero. */
+  const wt = sectorWeightedAvg([
+    { c: 6, v: 100 },
+    { c: NaN, v: 100 },
+  ]);
+  assert.equal(wt, 6);
+});
+
+test('sectorWeightedAvg — empty / junk input is 0, never NaN', () => {
+  assert.equal(sectorWeightedAvg([]), 0);
+  assert.equal(sectorWeightedAvg(null), 0);
+  assert.equal(sectorWeightedAvg([{ c: NaN, v: NaN }]), 0);
+  assert.ok(Number.isFinite(sectorWeightedAvg([{ c: 3, v: -5 }]))); /* neg vol ignored */
+});
+
+test('sectorWeightedAvg — negative volume is ignored, positive-volume coins still weight', () => {
+  /* a junk negative volume must not subtract weight; it's dropped, and the
+     remaining positive-volume coin drives the result. */
+  assert.equal(
+    sectorWeightedAvg([
+      { c: 10, v: -100 } /* ignored */,
+      { c: 4, v: 50 },
+    ]),
+    4
+  );
 });

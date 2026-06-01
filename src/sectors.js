@@ -176,8 +176,55 @@ function sectorVerdictTier(str) {
   return 'declining';
 }
 
+/* ─── Volume-weighted sector change (T3 scanner audit) ─────────────────
+   analyzeSectors() averaged each sector's 24h move with a FLAT mean
+   (Σc / n), so a microcap down 8% on thin volume dragged a sector's heat
+   exactly as hard as the megacap up 2% that actually holds the capital.
+   For a money-FLOW panel the signal that matters is where the money sits,
+   so weight each coin's change by its 24h quote volume: Σ(cᵢ·vᵢ) / Σvᵢ.
+
+   This is deliberately ONLY the directional average — breadth (share of
+   rising coins, rPct) stays a separate, equal-weighted input to
+   sectorStrength, so a volume-weighted-up but broadly-weak sector is still
+   visible rather than masked. Falls back to the flat mean when total volume
+   is 0 or every coin's volume is non-finite, so a data gap can never
+   divide-by-zero or silently zero-out the sector. Coins with a non-finite
+   change are skipped entirely (they're not 0% — they're unknown).
+
+   Pure: array of { c, v } in, a number out. Unit-tested in
+   tests/sectors-heat.test.js. Wired into app.js behind
+   nxScannerFix_sector_volwt (default on) — flip to 'off' for the flat mean. */
+function sectorWeightedAvg(coinData) {
+  if (!coinData || !coinData.length) return 0;
+  var num = 0,
+    den = 0,
+    flatSum = 0,
+    n = 0;
+  for (var i = 0; i < coinData.length; i++) {
+    if (!coinData[i]) continue;
+    var c = +coinData[i].c;
+    if (!isFinite(c)) continue;
+    flatSum += c;
+    n++;
+    var v = +coinData[i].v;
+    if (isFinite(v) && v > 0) {
+      num += c * v;
+      den += v;
+    }
+  }
+  if (n === 0) return 0;
+  if (den > 0) return num / den;
+  return flatSum / n; /* no usable volume → flat mean (legacy behaviour) */
+}
+
 /* Dual-export so Node tests can require() these pure helpers while the
    browser keeps them as plain globals (script-tag load). */
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { SECTORS, getCoinSector, sectorStrength, sectorVerdictTier };
+  module.exports = {
+    SECTORS,
+    getCoinSector,
+    sectorStrength,
+    sectorVerdictTier,
+    sectorWeightedAvg,
+  };
 }

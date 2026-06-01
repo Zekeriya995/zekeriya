@@ -1338,7 +1338,13 @@ function setScanSetup(s,btn){
 }
 function scanTab(idx,btn){curScanTab=idx;document.querySelectorAll('#pg-scan>.big-tabs>.big-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');['scanTrade','scanTrend','scanSmall'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=j===idx?'block':'none'});updateScanSummary(0,Object.keys(T).length);if(idx===0)loadTrading();if(idx===1)loadTrending();if(idx===2)loadSmallCapsUI()}
 /* ═══ TAB 1: SECTOR TRENDING ═══ */
-function analyzeSectors(){var res=[];for(var k in SECTORS){var sec=SECTORS[k];var coins=sec.coins.filter(function(s){return T[s]});if(coins.length<2)continue;var totC=0,rising=0,totV=0,cd=[];coins.forEach(function(s){var d=T[s];totC+=d.c;totV+=d.v;if(d.c>0)rising++;cd.push({s:s,c:d.c,p:d.p,v:d.v})});cd.sort(function(a,b){return b.c-a.c});
+function analyzeSectors(){var res=[];
+  /* Perf: read the scanner-fix flags ONCE per call, not once per sector —
+     localStorage.getItem is a synchronous main-thread read and neither flag
+     can change mid-loop. (Hoisted out of the for-in below.) */
+  var _volWt=(typeof sectorWeightedAvg==='function'&&localStorage.getItem('nxScannerFix_sector_volwt')!=='off');
+  var _symFix=(typeof sectorStrength==='function'&&localStorage.getItem('nxScannerFix_sector_symmetry')!=='off');
+  for(var k in SECTORS){var sec=SECTORS[k];var coins=sec.coins.filter(function(s){return T[s]});if(coins.length<2)continue;var totC=0,rising=0,totV=0,cd=[];coins.forEach(function(s){var d=T[s];totC+=d.c;totV+=d.v;if(d.c>0)rising++;cd.push({s:s,c:d.c,p:d.p,v:d.v})});cd.sort(function(a,b){return b.c-a.c});
     /* T3 audit: volume-weight the sector's directional average so capital
        placement — not a flat per-coin mean — drives the heat. A thin microcap
        down 8% can no longer outvote the megacap up 2% that actually holds the
@@ -1346,12 +1352,12 @@ function analyzeSectors(){var res=[];for(var k in SECTORS){var sec=SECTORS[k];va
        weighted-up but broadly-weak sector is still visible, not masked. Behind
        nxScannerFix_sector_volwt (default on); 'off' restores the flat mean.
        Pure + unit-tested in tests/sectors-heat.test.js. */
-    var _volWt=(typeof sectorWeightedAvg==='function'&&localStorage.getItem('nxScannerFix_sector_volwt')!=='off');var avg=_volWt?sectorWeightedAvg(cd):(totC/coins.length);var rPct=Math.round(rising/coins.length*100);/* Symmetric sector-heat score (T2 audit): the legacy ladder had five bull
+    var avg=_volWt?sectorWeightedAvg(cd):(totC/coins.length);var rPct=Math.round(rising/coins.length*100);/* Symmetric sector-heat score (T2 audit): the legacy ladder had five bull
    buckets vs two bear, so it couldn't tell a −2% sector from a −10% one.
    sectorStrength re-centres on 50=flat and mirrors up/down. Behind
    nxScannerFix_sector_symmetry (default on) — flip to 'off' for the exact
    legacy ladder. Pure + unit-tested in tests/sectors-heat.test.js. */
-var _symFix=(typeof sectorStrength==='function'&&localStorage.getItem('nxScannerFix_sector_symmetry')!=='off');var str;if(_symFix){str=sectorStrength(avg,rPct)}else{str=0;if(avg>=8)str=90;else if(avg>=5)str=75;else if(avg>=3)str=60;else if(avg>=1)str=45;else if(avg>=0)str=30;else if(avg>=-3)str=15;else str=5;if(rPct>=80)str+=10;else if(rPct>=60)str+=5;str=Math.min(100,str)}var v,vc;var _tier=_symFix?sectorVerdictTier(str):(str>=70?'hot':str>=50?'rising':str>=30?'neutral':'declining');if(_tier==='hot'){v=lang==='ar'?'🔥 قطاع حامي — فرصة!':'🔥 Hot — Opportunity!';vc='var(--up)'}else if(_tier==='rising'){v=lang==='ar'?'📈 صاعد':'📈 Rising';vc='var(--neon)'}else if(_tier==='neutral'){v=lang==='ar'?'🟡 محايد':'🟡 Neutral';vc='var(--warn)'}else{v=lang==='ar'?'🔴 هابط — تجنب':'🔴 Declining — Avoid';vc='var(--dn)'}
+var str;if(_symFix){str=sectorStrength(avg,rPct)}else{str=0;if(avg>=8)str=90;else if(avg>=5)str=75;else if(avg>=3)str=60;else if(avg>=1)str=45;else if(avg>=0)str=30;else if(avg>=-3)str=15;else str=5;if(rPct>=80)str+=10;else if(rPct>=60)str+=5;str=Math.min(100,str)}var v,vc;var _tier=_symFix?sectorVerdictTier(str):(str>=70?'hot':str>=50?'rising':str>=30?'neutral':'declining');if(_tier==='hot'){v=lang==='ar'?'🔥 قطاع حامي — فرصة!':'🔥 Hot — Opportunity!';vc='var(--up)'}else if(_tier==='rising'){v=lang==='ar'?'📈 صاعد':'📈 Rising';vc='var(--neon)'}else if(_tier==='neutral'){v=lang==='ar'?'🟡 محايد':'🟡 Neutral';vc='var(--warn)'}else{v=lang==='ar'?'🔴 هابط — تجنب':'🔴 Declining — Avoid';vc='var(--dn)'}
   res.push({k:k,ic:sec.ic,name:sec.n[lang]||sec.n.en,col:sec.col,avg:+avg.toFixed(1),rising:rising,total:coins.length,rPct:rPct,vol:totV,str:str,coins:cd,verdict:v,verdictCol:vc})}res.sort(function(a,b){return b.str-a.str});return res}
 
 /* ═══ Sector Rotation — money-flow tracker ═══
@@ -1426,11 +1432,14 @@ function loadTrending(){
       +'<span><span style="color:var(--dn);font-weight:800">'+rotData.lagging.ic+' '+rotData.lagging.name+'</span> '+(lang==='ar'?'متراجع':'lagging')+' <span style="color:var(--dn);font-family:var(--fm);font-weight:700">'+(rotData.lagging.change1h>=0?'+':'')+rotData.lagging.change1h+'%</span></span>'
       +'</div></div>';
   }
+  /* Perf: read the symmetry flag once, not per sector chip (synchronous
+     localStorage read; can't change mid-render). */
+  var _symFix=localStorage.getItem('nxScannerFix_sector_symmetry')!=='off';
   rotData.sectors.forEach(function(s){
     /* Chip-display tiers track the symmetric scale (T2): hot (≥70) shows 5
        coins + a Trade button, neutral/rising (44–70) shows 3, bearish shows
        none. Mirrors the legacy 60/30 cutpoints under the rollback flag. */
-    var _symFix=localStorage.getItem('nxScannerFix_sector_symmetry')!=='off';var isHot=_symFix?s.str>=70:s.str>=60;var isMed=_symFix?(s.str>=44&&s.str<70):(s.str>=30&&s.str<60);
+    var isHot=_symFix?s.str>=70:s.str>=60;var isMed=_symFix?(s.str>=44&&s.str<70):(s.str>=30&&s.str<60);
     var flowCol=s.flow==='inflow'?'var(--up)':s.flow==='outflow'?'var(--dn)':'var(--t2)';
     var flowText=s.hasBaseline?(s.flowIc+' '+(s.change1h>=0?'+':'')+s.change1h+'%'):'·';
     h+='<div class="whale-card" style="border-left:3px solid '+s.col+';margin-bottom:8px;padding:10px">'
@@ -1501,13 +1510,19 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
      trade plan on each card matches the timeframe they're hunting on. */
   var _tfCfgRender=TF_CONFIG[scannerTimeframe]||TF_CONFIG['1h'];
   var _tfHold=lang==='ar'?_tfCfgRender.holdAr:_tfCfgRender.holdEn;
+  /* Perf: read all four scanner-fix flags ONCE per render, not once per signal
+     in the loop below — each is a synchronous localStorage read and none can
+     change mid-render. */
+  var _scalpSel=(typeof classifyScalpType==='function'&&localStorage.getItem('nxScannerFix_scalp_select')!=='off');
+  var _scalpAtr=(typeof atrZones==='function'&&localStorage.getItem('nxScannerFix_scalp_atr')!=='off');
+  var _regimeOn=(typeof regimeConfAdjustment==='function'&&localStorage.getItem('nxScannerFix_regime_align')!=='off');
+  var _confCapOn=(typeof capConfidenceForServerFlags==='function'&&localStorage.getItem('nxScannerFix_conf_demote_cap')!=='off');
   for(var i=0;i<Math.min(r.length,7);i++){var x=r[i];var d=T[x.s];if(!d)continue;
     /* S2/S3 audit: pick the scalp from CONFIRMED intraday momentum, not the
        24h change — the old (d.c>=-3&&d.c<=0) selector fired the scalp only on
        coins already down on the day (falling-knife long) and used the 24h
        clock for a 10-30min play. classifyScalpType is pure + tested; behind
        nxScannerFix_scalp_select (default on), 'off' restores the legacy line. */
-    var _scalpSel=(typeof classifyScalpType==='function'&&localStorage.getItem('nxScannerFix_scalp_select')!=='off');
     var type=_scalpSel?classifyScalpType({vol24h:d.v,change24h:d.c,confirmedBreakout:x.confirmedBreakout,tfAlignBull:x.tfAlign&&x.tfAlign.aligned15m1h,obPressure:x.checks&&x.checks.ob,volSpike:x.checks&&x.checks.vol}):((d.c>=-3&&d.c<=0&&d.v>1e8)?'fast':'daily');
     var entry,target,stop,dur;
     if(x.smartEntry&&type!=='fast'){entry=x.smartEntry.entry;target=x.smartEntry.target1;stop=x.smartEntry.stop;dur=_tfHold}
@@ -1522,7 +1537,6 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
          scalp with no volatility data is skipped outright instead of shown with
          a fabricated rr. Behind nxScannerFix_scalp_atr (default on); 'off'
          restores the legacy fixed-target plan verbatim. */
-      var _scalpAtr=(typeof atrZones==='function'&&localStorage.getItem('nxScannerFix_scalp_atr')!=='off');
       if(_scalpAtr){var _sz=atrZones(d.p,x.atr15m,0,0,{stop:1.2,t1:2.4,t2:3.6});if(!_sz)continue;entry=_sz.entry;target=_sz.target1;stop=_sz.stop}
       else{entry=d.p;target=d.p*1.015;stop=d.p-Math.max(d.p*0.005,(x.atr15m>0?x.atr15m:0))}
       dur=scannerTimeframe==='15m'?_tfHold:(lang==='ar'?'10-30 دقيقة':'10-30 min');
@@ -1581,13 +1595,13 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
        Inert in the current ranging market. Applied BEFORE the demote cap so
        the cap stays the final safety. window.__marketRegime is captured in
        loadTk from /api/all. Behind nxScannerFix_regime_align (default on). */
-    if(typeof regimeConfAdjustment==='function'&&localStorage.getItem('nxScannerFix_regime_align')!=='off'){conf=Math.max(20,Math.min(95,conf+regimeConfAdjustment(window.__marketRegime,x.tags)))}
+    if(_regimeOn){conf=Math.max(20,Math.min(95,conf+regimeConfAdjustment(window.__marketRegime,x.tags)))}
     /* Honor the server's protective demotion in the displayed conf% so a
        coin the server flagged (manip / P&D / falling-knife) can't show
        ULTRA-level confidence the client computed in isolation. Pure
        helper in scanner-helpers.js; only ever lowers conf. Behind
        nxScannerFix_conf_demote_cap (default on) for instant rollback. */
-    if(typeof capConfidenceForServerFlags==='function'&&localStorage.getItem('nxScannerFix_conf_demote_cap')!=='off'){conf=capConfidenceForServerFlags(conf,x.tags)}
+    if(_confCapOn){conf=capConfidenceForServerFlags(conf,x.tags)}
     var sec=getCoinSector(x.s);
     /* Classify the setup so the user can filter by trade pattern. */
     var _btcChg=T.BTC?T.BTC.c:0;
@@ -2196,6 +2210,9 @@ function renderSmallCaps(res){
   var slEl=document.getElementById('smallList');if(!slEl)return;
   if(!f.length){slEl.innerHTML='<div class="empty"><div class="empty-ic">💎</div><div class="empty-tx">'+esc(t('gem_no_results_short'))+'</div></div>';return}
   var h='';
+  /* Perf: read the gem-normalize flag once, not per gem card (synchronous
+     localStorage read; can't change mid-render). */
+  var _gemNorm=(typeof gemScore100==='function'&&localStorage.getItem('nxScannerFix_gem_norm')!=='off');
   f.slice(0,GEM_CONFIG.RENDER_LIMIT).forEach(function(g){
     /* Safety here is enforced by isValidGemSymbol's /^[A-Z0-9]{1,15}$/
        gate — a quote or angle bracket can never reach this point. We
@@ -2247,7 +2264,6 @@ function renderSmallCaps(res){
        Normalized color ladder:
          70+ : green (var(--up))   ·  50+ : neon (var(--neon))
          35+ : warn  (var(--warn)) ·  else : muted (var(--t2)) */
-    var _gemNorm=(typeof gemScore100==='function'&&localStorage.getItem('nxScannerFix_gem_norm')!=='off');
     var _gemDisp=_gemNorm?gemScore100(g.sc):g.sc;
     var scoreCol=_gemNorm
       ?(_gemDisp>=70?'var(--up)':_gemDisp>=50?'var(--neon)':_gemDisp>=35?'var(--warn)':'var(--t2)')

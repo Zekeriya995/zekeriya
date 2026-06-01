@@ -402,6 +402,13 @@ const GEM_CONFIG = Object.freeze({
   SCORE_MIN: 35 /* loadSmallCaps2 gate — raised from 25 to
                                require timing+vol or score-stack, not
                                timing alone */,
+  SCORE_MAX: 165 /* theoretical ceiling of scoreGemCandidate — the sum of
+     every branch at its strongest: 45 (vx≥4) + 30 (early) + 10 (bottom-of-
+     range) + 20 (ICE) + 15 (VPIN) + 10 (whale PnL) + 15 (CVD) + 20 (24h
+     change in (0,3)). Used by gemScore100 as the normalization denominator
+     so the card's displayed score/color/bar read on a true 0-100 scale
+     instead of a raw value that silently runs past 100. Keep in sync if a
+     scoring branch is added or reweighted. */,
 
   /* Spike walkback */
   WALKBACK_VOL_MULT: 1.5 /* a candle's vol > avgV*1.5 counts as part
@@ -739,6 +746,31 @@ function scoreGemCandidate(ticker, klineStats, v3) {
     else if (ticker.c >= 3 && ticker.c < 8) sc += 10;
   }
   return { score: sc, tags: tags };
+}
+
+/* Normalize a raw scoreGemCandidate result onto a 0-100 scale.
+   Pure; mirrors market-direction's scaleTs. The Gem Hunter card rendered
+   the RAW score ("120 pts") with color thresholds (85/70/50) and a progress
+   bar (width: min(100, sc)%) all written as if the score topped out at 100
+   — but the real ceiling is GEM_CONFIG.SCORE_MAX (165). Two consequences,
+   both worst exactly where it matters (the strong gems):
+     - the bar clipped at 100%, so every candidate from raw 100 up to 165
+       drew an identical full bar — no resolution across the strong range;
+     - the green band (raw ≥85) swallowed the entire upper HALF of the
+       achievable 35..165 range, so a merely-strong gem and a genuinely
+       exceptional one looked identical.
+   Dividing by the true denominator restores resolution: the badge, the
+   recalibrated color bands, and the bar all read honestly on one 0-100 axis.
+
+   Returns an integer in [0, 100]. Non-finite / negative input → 0. */
+function gemScore100(rawScore) {
+  var r = +rawScore;
+  if (!(r > 0)) return 0;
+  var max = (GEM_CONFIG && GEM_CONFIG.SCORE_MAX) || 165;
+  var pct = Math.round((r / max) * 100);
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  return pct;
 }
 
 /* Rugpull risk score (0-100) for the Gem Hunter — coins with high

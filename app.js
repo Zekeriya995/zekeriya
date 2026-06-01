@@ -1338,7 +1338,12 @@ function setScanSetup(s,btn){
 }
 function scanTab(idx,btn){curScanTab=idx;document.querySelectorAll('#pg-scan>.big-tabs>.big-tab').forEach(function(b){b.classList.remove('act')});if(btn)btn.classList.add('act');['scanTrade','scanTrend','scanSmall'].forEach(function(id,j){var el=document.getElementById(id);if(el)el.style.display=j===idx?'block':'none'});updateScanSummary(0,Object.keys(T).length);if(idx===0)loadTrading();if(idx===1)loadTrending();if(idx===2)loadSmallCapsUI()}
 /* ═══ TAB 1: SECTOR TRENDING ═══ */
-function analyzeSectors(){var res=[];for(var k in SECTORS){var sec=SECTORS[k];var coins=sec.coins.filter(function(s){return T[s]});if(coins.length<2)continue;var totC=0,rising=0,totV=0,cd=[];coins.forEach(function(s){var d=T[s];totC+=d.c;totV+=d.v;if(d.c>0)rising++;cd.push({s:s,c:d.c,p:d.p,v:d.v})});cd.sort(function(a,b){return b.c-a.c});var avg=totC/coins.length;var rPct=Math.round(rising/coins.length*100);var str=0;if(avg>=8)str=90;else if(avg>=5)str=75;else if(avg>=3)str=60;else if(avg>=1)str=45;else if(avg>=0)str=30;else if(avg>=-3)str=15;else str=5;if(rPct>=80)str+=10;else if(rPct>=60)str+=5;str=Math.min(100,str);var v,vc;if(str>=70){v=lang==='ar'?'🔥 قطاع حامي — فرصة!':'🔥 Hot — Opportunity!';vc='var(--up)'}else if(str>=50){v=lang==='ar'?'📈 صاعد':'📈 Rising';vc='var(--neon)'}else if(str>=30){v=lang==='ar'?'🟡 محايد':'🟡 Neutral';vc='var(--warn)'}else{v=lang==='ar'?'🔴 هابط — تجنب':'🔴 Declining — Avoid';vc='var(--dn)'}
+function analyzeSectors(){var res=[];for(var k in SECTORS){var sec=SECTORS[k];var coins=sec.coins.filter(function(s){return T[s]});if(coins.length<2)continue;var totC=0,rising=0,totV=0,cd=[];coins.forEach(function(s){var d=T[s];totC+=d.c;totV+=d.v;if(d.c>0)rising++;cd.push({s:s,c:d.c,p:d.p,v:d.v})});cd.sort(function(a,b){return b.c-a.c});var avg=totC/coins.length;var rPct=Math.round(rising/coins.length*100);/* Symmetric sector-heat score (T2 audit): the legacy ladder had five bull
+   buckets vs two bear, so it couldn't tell a −2% sector from a −10% one.
+   sectorStrength re-centres on 50=flat and mirrors up/down. Behind
+   nxScannerFix_sector_symmetry (default on) — flip to 'off' for the exact
+   legacy ladder. Pure + unit-tested in tests/sectors-heat.test.js. */
+var _symFix=(typeof sectorStrength==='function'&&localStorage.getItem('nxScannerFix_sector_symmetry')!=='off');var str;if(_symFix){str=sectorStrength(avg,rPct)}else{str=0;if(avg>=8)str=90;else if(avg>=5)str=75;else if(avg>=3)str=60;else if(avg>=1)str=45;else if(avg>=0)str=30;else if(avg>=-3)str=15;else str=5;if(rPct>=80)str+=10;else if(rPct>=60)str+=5;str=Math.min(100,str)}var v,vc;var _tier=_symFix?sectorVerdictTier(str):(str>=70?'hot':str>=50?'rising':str>=30?'neutral':'declining');if(_tier==='hot'){v=lang==='ar'?'🔥 قطاع حامي — فرصة!':'🔥 Hot — Opportunity!';vc='var(--up)'}else if(_tier==='rising'){v=lang==='ar'?'📈 صاعد':'📈 Rising';vc='var(--neon)'}else if(_tier==='neutral'){v=lang==='ar'?'🟡 محايد':'🟡 Neutral';vc='var(--warn)'}else{v=lang==='ar'?'🔴 هابط — تجنب':'🔴 Declining — Avoid';vc='var(--dn)'}
   res.push({k:k,ic:sec.ic,name:sec.n[lang]||sec.n.en,col:sec.col,avg:+avg.toFixed(1),rising:rising,total:coins.length,rPct:rPct,vol:totV,str:str,coins:cd,verdict:v,verdictCol:vc})}res.sort(function(a,b){return b.str-a.str});return res}
 
 /* ═══ Sector Rotation — money-flow tracker ═══
@@ -1368,7 +1373,13 @@ function analyzeSectorRotation(){
       hist.push({time:now,avg:s.avg,str:s.str,rPct:s.rPct});
       if(hist.length>144)sectorHistory[s.k]=hist.slice(-144);
     }
-    /* Find earliest sample at least 1h old as the baseline for delta. */
+    /* Baseline for the 1h delta = the MOST RECENT sample that is still at
+       least 1h old (i.e. the one closest to exactly 1h ago). hist is in
+       ascending time order, so walking forward and overwriting on every
+       match leaves the newest qualifying sample in `baseline`. (The prior
+       comment said "earliest", which contradicted the code — the code was
+       right; a delta measured against the closest-to-1h sample is what the
+       "last hour" reading should be.) */
     var baseline=null;
     for(var i=0;i<hist.length;i++){
       if(now-hist[i].time>=60*60*1000){baseline=hist[i]}
@@ -1408,7 +1419,10 @@ function loadTrending(){
       +'</div></div>';
   }
   rotData.sectors.forEach(function(s){
-    var isHot=s.str>=60;var isMed=s.str>=30&&s.str<60;
+    /* Chip-display tiers track the symmetric scale (T2): hot (≥70) shows 5
+       coins + a Trade button, neutral/rising (44–70) shows 3, bearish shows
+       none. Mirrors the legacy 60/30 cutpoints under the rollback flag. */
+    var _symFix=localStorage.getItem('nxScannerFix_sector_symmetry')!=='off';var isHot=_symFix?s.str>=70:s.str>=60;var isMed=_symFix?(s.str>=44&&s.str<70):(s.str>=30&&s.str<60);
     var flowCol=s.flow==='inflow'?'var(--up)':s.flow==='outflow'?'var(--dn)':'var(--t2)';
     var flowText=s.hasBaseline?(s.flowIc+' '+(s.change1h>=0?'+':'')+s.change1h+'%'):'·';
     h+='<div class="whale-card" style="border-left:3px solid '+s.col+';margin-bottom:8px;padding:10px">'
@@ -1482,7 +1496,23 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
   for(var i=0;i<Math.min(r.length,7);i++){var x=r[i];var d=T[x.s];if(!d)continue;
     var type=(d.c>=-3&&d.c<=0&&d.v>1e8)?'fast':'daily';var entry,target,stop,dur;
     if(x.smartEntry&&type!=='fast'){entry=x.smartEntry.entry;target=x.smartEntry.target1;stop=x.smartEntry.stop;dur=_tfHold}
-    else if(type==='fast'){entry=d.p;target=d.p*1.015;/* ATR-aware stop (≥0.5% floor): a fixed −0.5% is noise-width on a fast mover and gets stopped out before the +1.5% target; widening to the 15m ATR lets the rr<1.5 gate below drop scalps whose volatility can't support the target. */stop=d.p-Math.max(d.p*0.005,(x.atr15m>0?x.atr15m:0));dur=scannerTimeframe==='15m'?_tfHold:(lang==='ar'?'10-30 دقيقة':'10-30 min')}else{entry=d.p*0.995;target=x.ultra?d.p*1.08:d.p*1.06;stop=d.p*0.97;dur=_tfHold}
+    else if(type==='fast'){
+      /* S1/S5 audit: derive BOTH target and stop from the 15m ATR so a scalp's
+         reward and risk scale together. The old plan fixed the target at +1.5%
+         while only the stop tracked ATR — on a quiet coin that made the target
+         ~5×ATR (unreachable in 10-30min) yet displayed a flattering rr≈3.0, and
+         when atr15m was missing the stop silently fell back to a 0.5% floor so
+         the rr<1.5 gate below could never drop it. atrZones() (pure, tested)
+         returns symmetric ATR zones and NULL when ATR is absent/zero, so a
+         scalp with no volatility data is skipped outright instead of shown with
+         a fabricated rr. Behind nxScannerFix_scalp_atr (default on); 'off'
+         restores the legacy fixed-target plan verbatim. */
+      var _scalpAtr=(typeof atrZones==='function'&&localStorage.getItem('nxScannerFix_scalp_atr')!=='off');
+      if(_scalpAtr){var _sz=atrZones(d.p,x.atr15m,0,0,{stop:1.2,t1:2.4,t2:3.6});if(!_sz)continue;entry=_sz.entry;target=_sz.target1;stop=_sz.stop}
+      else{entry=d.p;target=d.p*1.015;stop=d.p-Math.max(d.p*0.005,(x.atr15m>0?x.atr15m:0))}
+      dur=scannerTimeframe==='15m'?_tfHold:(lang==='ar'?'10-30 دقيقة':'10-30 min');
+    }
+    else{entry=d.p*0.995;target=x.ultra?d.p*1.08:d.p*1.06;stop=d.p*0.97;dur=_tfHold}
     var risk=Math.abs(entry-stop);var rr=risk>0?+((target-entry)/risk).toFixed(1):0;if(rr<1.5)continue;
     var reasons=[];var ww=whaleWaves[x.s];if(ww&&ww.engine&&ww.engine.confidence>=30)reasons.push({ic:'🐋',t:lang==='ar'?'حوت مؤكد '+ww.engine.confidence+'%':'Whale '+ww.engine.confidence+'%'});
     var cvd=analyzeCVD(x.s);if(cvd.divergence==='BULLISH')reasons.push({ic:'📈',t:lang==='ar'?'CVD صاعد — تجميع صامت':'CVD rising — accumulation'});
@@ -2178,13 +2208,26 @@ function renderSmallCaps(res){
        looked identical bar the volume number, so a 75-point
        candidate and a 35-point one (the SCORE_MIN floor) looked
        equally credible to the user. Surfacing the raw score lets
-       the user calibrate confidence per card. Color ladder
-       matches the existing visual semantics:
-         85+ : green   (var(--up))
-         70+ : neon    (var(--neon))
-         50+ : warn    (var(--warn))
-         else: muted  (var(--t2))  */
-    var scoreCol=g.sc>=85?'var(--up)':g.sc>=70?'var(--neon)':g.sc>=50?'var(--warn)':'var(--t2)';
+       the user calibrate confidence per card.
+
+       G1 audit: the raw score's real ceiling is GEM_CONFIG.SCORE_MAX (165),
+       not 100 — so the legacy "85/70/50" color ladder and the progress bar
+       (width: min(100,sc)) were calibrated against a denominator that didn't
+       exist. Result: every gem from raw 100 to 165 drew a full bar (no
+       resolution across the strong range), and the green band (raw ≥85)
+       swallowed the entire upper half of the achievable 35..165 range, so
+       merely-strong and genuinely exceptional gems looked identical.
+       gemScore100() rescales onto a true 0-100 axis; the color bands and the
+       "/100" badge then mean what they say. Behind nxScannerFix_gem_norm
+       (default on) — 'off' restores the legacy raw "N pts" display verbatim.
+       Normalized color ladder:
+         70+ : green (var(--up))   ·  50+ : neon (var(--neon))
+         35+ : warn  (var(--warn)) ·  else : muted (var(--t2)) */
+    var _gemNorm=(typeof gemScore100==='function'&&localStorage.getItem('nxScannerFix_gem_norm')!=='off');
+    var _gemDisp=_gemNorm?gemScore100(g.sc):g.sc;
+    var scoreCol=_gemNorm
+      ?(_gemDisp>=70?'var(--up)':_gemDisp>=50?'var(--neon)':_gemDisp>=35?'var(--warn)':'var(--t2)')
+      :(g.sc>=85?'var(--up)':g.sc>=70?'var(--neon)':g.sc>=50?'var(--warn)':'var(--t2)');
     /* "Appeared X minutes ago" badge — uses the existing timeBadge() /
        timeAgo() helpers so the format matches the rest of the app
        (الآن / منذ Xم / منذ Xس). g.firstSeen is stamped by
@@ -2197,7 +2240,7 @@ function renderSmallCaps(res){
       +'<span style="font-weight:800;font-size:14px">💎 '+sSafe+'</span>'
       +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+g.tBadge.col+';font-weight:700">'+esc(g.tBadge.ic)+' '+esc(g.tBadge.l)+'</span>'
       +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+rugCol+';font-weight:700">'+esc(rugTxt)+'</span>'
-      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+scoreCol+';font-weight:800;font-family:var(--fm)">'+g.sc+' pts</span>'
+      +'<span style="font-size:8px;padding:2px 6px;border-radius:4px;background:var(--bg2);color:'+scoreCol+';font-weight:800;font-family:var(--fm)">'+_gemDisp+(_gemNorm?'/100':' pts')+'</span>'
       +ageBadge
       +'</div>'
       +'<span style="font-family:var(--fm);font-size:12px;font-weight:800;color:var(--neon)">'+g.vx.toFixed(1)+'x vol</span>'
@@ -2218,7 +2261,7 @@ function renderSmallCaps(res){
       h+='</div>';
     }
     if(g.target)h+='<div style="display:flex;gap:8px;font-size:8px;font-family:var(--fm);margin-bottom:4px"><span style="color:var(--up)">🎯 '+fP(g.target)+'</span><span style="color:var(--dn)">🛑 '+fP(g.stop)+'</span></div>';
-    h+='<div style="height:4px;background:var(--bg2);border-radius:2px;overflow:hidden"><div style="width:'+Math.min(100,g.sc)+'%;height:100%;background:'+(g.timing==='early'?'var(--up)':g.timing==='still'?'var(--warn)':'var(--dn)')+';border-radius:2px"></div></div>'
+    h+='<div style="height:4px;background:var(--bg2);border-radius:2px;overflow:hidden"><div style="width:'+Math.min(100,_gemDisp)+'%;height:100%;background:'+(g.timing==='early'?'var(--up)':g.timing==='still'?'var(--warn)':'var(--dn)')+';border-radius:2px"></div></div>'
       +'</div>';
   });
   slEl.innerHTML=h;

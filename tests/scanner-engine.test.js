@@ -15,6 +15,7 @@ const {
   TIER1_SYMBOLS,
   regimeTierBump,
   BEAR_TIER_BUMP,
+  VOLATILE_TIER_BUMP,
 } = require('../src/scanner-engine');
 
 function tk(over) {
@@ -818,22 +819,23 @@ test('Phase 2.A.4.b — non-tier-1 symbol keeps DEFAULT_MULTS (regression guard)
 
 /* ─── regimeTierBump — downtrend risk-off (regime policy matrix §4) ──── */
 
-test('regimeTierBump — only a bear regime tightens, and only when enabled', () => {
-  /* Disabled (SCANNER_REGIME_ADAPTIVE off) → never bumps, regardless of
-     direction. This is the default, so tiering is byte-for-byte the legacy
-     behaviour out of the box. */
-  assert.equal(regimeTierBump('bear', false), 0);
-  assert.equal(regimeTierBump('bull', false), 0);
-  assert.equal(regimeTierBump('ranging', false), 0);
-  /* Enabled: ONLY a downtrend raises the bar (fewer, higher-quality longs —
-     capital preservation). Up / range / unknown stay at the normal cutoffs. */
-  assert.equal(regimeTierBump('bear', true), BEAR_TIER_BUMP);
-  assert.equal(regimeTierBump('bull', true), 0);
-  assert.equal(regimeTierBump('ranging', true), 0);
-  assert.equal(regimeTierBump('none', true), 0);
-  assert.equal(regimeTierBump('unknown', true), 0);
-  assert.equal(regimeTierBump(undefined, true), 0);
-  /* The bump RAISES the bar (positive) — a downtrend yields fewer signals,
-     never more. */
-  assert.ok(BEAR_TIER_BUMP > 0, 'bear bump must raise the threshold');
+test('regimeTierBump — bear and volatile each tighten (and stack), only when enabled', () => {
+  /* Disabled (SCANNER_REGIME_ADAPTIVE off) → never bumps, whatever the regime.
+     This is the default, so tiering stays byte-for-byte the legacy behaviour. */
+  assert.equal(regimeTierBump('bear', 'high', false), 0);
+  assert.equal(regimeTierBump('bull', 'normal', false), 0);
+  /* Enabled — a downtrend raises the bar (risk-off). */
+  assert.equal(regimeTierBump('bear', 'normal', true), BEAR_TIER_BUMP);
+  /* A volatile tape raises it too, in ANY direction (design §4). */
+  assert.equal(regimeTierBump('bull', 'high', true), VOLATILE_TIER_BUMP);
+  assert.equal(regimeTierBump('ranging', 'high', true), VOLATILE_TIER_BUMP);
+  /* The two STACK — a volatile downtrend tightens hardest. */
+  assert.equal(regimeTierBump('bear', 'high', true), BEAR_TIER_BUMP + VOLATILE_TIER_BUMP);
+  /* A calm, non-bear tape stays at the normal cutoffs. */
+  assert.equal(regimeTierBump('bull', 'normal', true), 0);
+  assert.equal(regimeTierBump('ranging', 'normal', true), 0);
+  assert.equal(regimeTierBump('none', 'normal', true), 0);
+  assert.equal(regimeTierBump('unknown', undefined, true), 0);
+  /* Both bumps RAISE the bar (positive) — fewer signals, never more. */
+  assert.ok(BEAR_TIER_BUMP > 0 && VOLATILE_TIER_BUMP > 0);
 });

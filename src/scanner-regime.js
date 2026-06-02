@@ -30,6 +30,11 @@ const DEFAULTS = Object.freeze({
      tape — the signature of a trend rather than a chop. */
   BREADTH_HI: 65,
   BREADTH_LO: 35,
+  /* BTC 15m ATR as a % of price at/above which the tape is 'volatile'
+     (the design's transition regime). ATR(14,15m) for BTC sits ~0.3-0.8%
+     when calm; ≥1.2% is a genuinely fast tape that warrants fewer, higher-
+     conviction signals (risk-off) regardless of direction — design §4. */
+  VOLATILITY_HI_PCT: 1.2,
 });
 
 /* detectRegime(input, opts)
@@ -50,20 +55,28 @@ const DEFAULTS = Object.freeze({
                   FALLING tape. direction recovers the up/down split from BTC's
                   MTF agreement ('none' in a range). Consumers pick the profile
                   from (regime, direction): up → momentum, down/range → contrarian.
-   Missing/!shaped fields degrade to the neutral assumption (no trend) so a
-   cold cache reads regime 'ranging', direction 'none'. */
+     - volatility: 'high' | 'normal' — NEW. An axis ORTHOGONAL to direction,
+                  from BTC 15m ATR% (input btcAtrPct). A fast tape
+                  (≥ VOLATILITY_HI_PCT) warrants fewer, higher-conviction
+                  signals regardless of up/down/range (design §4). Unknown → normal.
+   Missing/!shaped fields degrade to the neutral assumption (no trend) so a cold
+   cache reads regime 'ranging', direction 'none', volatility 'normal'. */
 function detectRegime(input, opts) {
   const o = opts || {};
   const cfg = {
     trendScoreMin: Number.isFinite(o.trendScoreMin) ? o.trendScoreMin : DEFAULTS.TREND_SCORE_MIN,
     breadthHi: Number.isFinite(o.breadthHi) ? o.breadthHi : DEFAULTS.BREADTH_HI,
     breadthLo: Number.isFinite(o.breadthLo) ? o.breadthLo : DEFAULTS.BREADTH_LO,
+    volatilityHi: Number.isFinite(o.volatilityHi) ? o.volatilityHi : DEFAULTS.VOLATILITY_HI_PCT,
   };
   const i = input || {};
   const mtf = i.btcMtf && typeof i.btcMtf === 'object' ? i.btcMtf : {};
   const strength = typeof mtf.strength === 'string' ? mtf.strength : 'none';
   const agreement = typeof mtf.agreement === 'string' ? mtf.agreement : 'mixed';
   const bullishPct = typeof i.bullishPct === 'number' ? i.bullishPct : 50;
+  /* BTC 15m ATR as a % of price — the volatility axis. null when unavailable
+     (cold cache / missing indicator) so we degrade to 'normal'. */
+  const btcAtrPct = typeof i.btcAtrPct === 'number' && isFinite(i.btcAtrPct) ? i.btcAtrPct : null;
 
   let trendScore = 0;
   /* Primary signal: a full/partial directional alignment of BTC across
@@ -83,14 +96,20 @@ function detectRegime(input, opts) {
     if (agreement === 'bearish') direction = 'bear';
     else if (agreement === 'bullish') direction = 'bull';
   }
+  /* Volatility (design §4 'volatile / transition'): an axis ORTHOGONAL to
+     direction — a fast tape warrants fewer, higher-conviction signals whether
+     it's up, down, or ranging. Unknown ATR → 'normal' (no tightening). */
+  const volatility = btcAtrPct != null && btcAtrPct >= cfg.volatilityHi ? 'high' : 'normal';
   return {
     regime,
     direction,
+    volatility,
     trendScore,
     inputs: {
       btcStrength: strength,
       btcAgreement: agreement,
       bullishPct: Math.round(bullishPct * 10) / 10,
+      btcAtrPct: btcAtrPct != null ? Math.round(btcAtrPct * 100) / 100 : null,
     },
   };
 }

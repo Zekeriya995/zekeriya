@@ -197,13 +197,24 @@ const BEAR_TIER_BUMP = Number.isFinite(+process.env.SCANNER_BEAR_TIER_BUMP)
   ? +process.env.SCANNER_BEAR_TIER_BUMP
   : 12;
 
-/* Pure: points to RAISE every tier cutoff for a given regime direction. Only a
-   bear regime tightens (risk-off); bull/ranging/none/unknown are unchanged.
-   `enabled` mirrors REGIME_ADAPTIVE so the bump stays inert unless adaptive
-   selection is active — same gate as the profile switch. */
-function regimeTierBump(direction, enabled) {
+/* Volatile-regime risk-off (design §4 'volatile / transition'): a fast tape
+   also gets fewer, higher-conviction signals. Stacks with the bear bump — a
+   downtrend that is ALSO volatile tightens hardest. Env-tunable. */
+const VOLATILE_TIER_BUMP = Number.isFinite(+process.env.SCANNER_VOLATILE_TIER_BUMP)
+  ? +process.env.SCANNER_VOLATILE_TIER_BUMP
+  : 8;
+
+/* Pure: points to RAISE every tier cutoff for the given regime direction +
+   volatility. A bear regime and a volatile (high-ATR) tape each add a bump and
+   they STACK; bull/ranging/none and normal volatility add nothing. `enabled`
+   mirrors REGIME_ADAPTIVE so the bump stays inert unless adaptive selection is
+   active — same gate as the profile switch. */
+function regimeTierBump(direction, volatility, enabled) {
   if (!enabled) return 0;
-  return direction === 'bear' ? BEAR_TIER_BUMP : 0;
+  let bump = 0;
+  if (direction === 'bear') bump += BEAR_TIER_BUMP;
+  if (volatility === 'high') bump += VOLATILE_TIER_BUMP;
+  return bump;
 }
 
 /* Score → human-readable tier the PWA renders. The ULTRA cutoff
@@ -414,6 +425,9 @@ function scoreSymbol(sym, ctx) {
   /* Market regime (bull/bear/ranging) active at scoring time, threaded in by
      the pass and stamped on the signal for per-regime L2 calibration. */
   const _mr = typeof ctx._marketRegime === 'string' ? ctx._marketRegime : 'unknown';
+  /* Volatility axis (high/normal) threaded in by the pass — drives the
+     volatile risk-off tier bump alongside the bear bump. */
+  const _vol = typeof ctx._volatility === 'string' ? ctx._volatility : 'normal';
   const registryResult = scoringRules.applyRules(_ruleCtx, { profile: _wp });
   score += registryResult.scoreDelta;
   for (const t of registryResult.tagsDelta) tags.push(t);
@@ -652,7 +666,7 @@ function scoreSymbol(sym, ctx) {
      ordering and the MANIP_CAP tag makes the override explainable.
      Consumers that gate on tier (push trigger, badge color) get
      the demotion; consumers that gate on score do not. */
-  let tier = _tierFromScore(score, regimeTierBump(_mr, REGIME_ADAPTIVE_ENABLED));
+  let tier = _tierFromScore(score, regimeTierBump(_mr, _vol, REGIME_ADAPTIVE_ENABLED));
   if (MANIP_HARD_CAP_ENABLED && manip.verdict === 'HIGH' && tier === 'ULTRA') {
     tier = 'STRONG';
     tags.push('🚫MANIP_CAP');
@@ -746,9 +760,19 @@ function runScannerPass(cache) {
     _tot++;
     if ((typeof _t.change === 'number' ? _t.change : 0) > 0) _up++;
   }
+  /* BTC 15m ATR as a % of price — drives the volatility axis of the regime.
+     Guarded: a missing indicator or price → undefined → detectRegime degrades
+     to 'normal' (no tightening). */
+  const _btcInd = indicators.BTC;
+  const _btcPx = tickers.BTC && +tickers.BTC.price > 0 ? +tickers.BTC.price : 0;
+  const _btcAtrPct =
+    _btcInd && typeof _btcInd.atr === 'number' && _btcPx > 0
+      ? (_btcInd.atr / _btcPx) * 100
+      : undefined;
   const regime = regimeDetector.detectRegime({
     btcMtf: indicatorsMtf.BTC ? indicatorsMtf.BTC.agreement : null,
     bullishPct: _tot > 0 ? (_up / _tot) * 100 : 50,
+    btcAtrPct: _btcAtrPct,
   });
   /* Unified regime label stamped on every signal (bull / bear / ranging) so
      L2 calibration can group forward outcomes by actual market direction. */
@@ -774,6 +798,7 @@ function runScannerPass(cache) {
       _rejectionSink: rejections,
       _weightProfile: passProfile,
       _marketRegime: marketRegimeLabel,
+      _volatility: regime.volatility,
       ticker: tickers[sym],
       fr: cache.fr ? cache.fr[sym] : null,
       ls: cache.ls ? cache.ls[sym] : null,
@@ -827,6 +852,7 @@ module.exports = {
   WASH_VOLUME_FLOOR,
   WASH_OI_FLOOR,
   BEAR_TIER_BUMP,
+  VOLATILE_TIER_BUMP,
   regimeTierBump,
   scoreSymbol,
   runScannerPass,

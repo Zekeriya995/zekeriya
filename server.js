@@ -671,7 +671,7 @@ async function runScannerOnServer() {
     `[SCANNER] ${pass.signals.length} signals (${pass.signals.filter((r) => r.tier === 'ULTRA').length} ULTRA), top3=${pass.top3.map((r) => r.s).join(',') || '∅'} in ${Date.now() - t0}ms`
   );
   console.log(
-    `[REGIME] ${cache.regime.regime}${cache.regime.direction && cache.regime.direction !== 'none' ? '/' + cache.regime.direction : ''} (score=${cache.regime.trendScore}, btc=${cache.regime.inputs.btcStrength}, breadth=${cache.regime.inputs.bullishPct}%) profile=${cache.regimeProfile || 'legacy'}`
+    `[REGIME] ${cache.regime.regime}${cache.regime.direction && cache.regime.direction !== 'none' ? '/' + cache.regime.direction : ''}${cache.regime.volatility === 'high' ? ' ⚡volatile' : ''} (score=${cache.regime.trendScore}, btc=${cache.regime.inputs.btcStrength}, breadth=${cache.regime.inputs.bullishPct}%, atr=${cache.regime.inputs.btcAtrPct != null ? cache.regime.inputs.btcAtrPct + '%' : 'n/a'}) profile=${cache.regimeProfile || 'legacy'}`
   );
 
   if (!PUSH_ENABLED || !cache.pushSubs.length) return;

@@ -117,3 +117,39 @@ test('detectRegime — direction splits a trend into bull / bear (the audit fix)
   /* Cold / empty input → direction 'none'. */
   assert.equal(detectRegime().direction, 'none');
 });
+
+test('detectRegime — volatility axis from BTC 15m ATR% (design §4), orthogonal to direction', () => {
+  /* High ATR% → volatile, independent of direction (an up-trend can be fast). */
+  const volBull = detectRegime({
+    btcMtf: { agreement: 'bullish', strength: 'full' },
+    bullishPct: 80,
+    btcAtrPct: 1.6,
+  });
+  assert.equal(volBull.direction, 'bull');
+  assert.equal(volBull.volatility, 'high');
+  assert.equal(volBull.inputs.btcAtrPct, 1.6); /* echoed + rounded */
+  /* Calm tape → normal. */
+  const calm = detectRegime({
+    btcMtf: { agreement: 'bullish', strength: 'full' },
+    bullishPct: 80,
+    btcAtrPct: 0.5,
+  });
+  assert.equal(calm.volatility, 'normal');
+  /* A volatile RANGE is valid too (volatility ⟂ regime). */
+  const volRange = detectRegime({
+    btcMtf: { agreement: 'mixed', strength: 'none' },
+    bullishPct: 50,
+    btcAtrPct: 2.0,
+  });
+  assert.equal(volRange.regime, 'ranging');
+  assert.equal(volRange.volatility, 'high');
+  /* Unknown / absent ATR degrades to 'normal' — never tighten on missing data. */
+  assert.equal(
+    detectRegime({ btcMtf: { agreement: 'bullish', strength: 'full' }, bullishPct: 80 }).volatility,
+    'normal'
+  );
+  assert.equal(detectRegime().volatility, 'normal');
+  assert.equal(detectRegime().inputs.btcAtrPct, null);
+  /* Threshold is overridable via opts. */
+  assert.equal(detectRegime({ btcAtrPct: 0.9 }, { volatilityHi: 0.8 }).volatility, 'high');
+});

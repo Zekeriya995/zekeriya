@@ -8,7 +8,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { runScannerPass, scoreSymbol, STABLE_SET, TIER1_SYMBOLS } = require('../src/scanner-engine');
+const {
+  runScannerPass,
+  scoreSymbol,
+  STABLE_SET,
+  TIER1_SYMBOLS,
+  regimeTierBump,
+  BEAR_TIER_BUMP,
+} = require('../src/scanner-engine');
 
 function tk(over) {
   return Object.assign({ price: 100, change: 1, volume: 1e8, high: 102, low: 98 }, over);
@@ -807,4 +814,26 @@ test('Phase 2.A.4.b — non-tier-1 symbol keeps DEFAULT_MULTS (regression guard)
     !r.tags.includes('📐ATR_T1'),
     'non-tier-1 symbol must NOT carry the ATR_T1 observability tag'
   );
+});
+
+/* ─── regimeTierBump — downtrend risk-off (regime policy matrix §4) ──── */
+
+test('regimeTierBump — only a bear regime tightens, and only when enabled', () => {
+  /* Disabled (SCANNER_REGIME_ADAPTIVE off) → never bumps, regardless of
+     direction. This is the default, so tiering is byte-for-byte the legacy
+     behaviour out of the box. */
+  assert.equal(regimeTierBump('bear', false), 0);
+  assert.equal(regimeTierBump('bull', false), 0);
+  assert.equal(regimeTierBump('ranging', false), 0);
+  /* Enabled: ONLY a downtrend raises the bar (fewer, higher-quality longs —
+     capital preservation). Up / range / unknown stay at the normal cutoffs. */
+  assert.equal(regimeTierBump('bear', true), BEAR_TIER_BUMP);
+  assert.equal(regimeTierBump('bull', true), 0);
+  assert.equal(regimeTierBump('ranging', true), 0);
+  assert.equal(regimeTierBump('none', true), 0);
+  assert.equal(regimeTierBump('unknown', true), 0);
+  assert.equal(regimeTierBump(undefined, true), 0);
+  /* The bump RAISES the bar (positive) — a downtrend yields fewer signals,
+     never more. */
+  assert.ok(BEAR_TIER_BUMP > 0, 'bear bump must raise the threshold');
 });

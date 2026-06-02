@@ -16,6 +16,8 @@ const {
   regimeTierBump,
   BEAR_TIER_BUMP,
   VOLATILE_TIER_BUMP,
+  isCounterTrendException,
+  COUNTER_TREND_MIN_WHALE,
 } = require('../src/scanner-engine');
 
 function tk(over) {
@@ -838,4 +840,39 @@ test('regimeTierBump — bear and volatile each tighten (and stack), only when e
   assert.equal(regimeTierBump('unknown', undefined, true), 0);
   /* Both bumps RAISE the bar (positive) — fewer signals, never more. */
   assert.ok(BEAR_TIER_BUMP > 0 && VOLATILE_TIER_BUMP > 0);
+});
+
+/* ─── isCounterTrendException — whale accumulating against the tape ───── */
+
+test('isCounterTrendException — needs BOTH a defensive market AND whale + own-bullish', () => {
+  const bullFull = { agreement: 'bullish', strength: 'full' };
+  const bullPartial = { agreement: 'bullish', strength: 'partial' };
+  const bearFull = { agreement: 'bearish', strength: 'full' };
+  const W = COUNTER_TREND_MIN_WHALE;
+
+  /* The target case: a bear market, but THIS coin is bullish + has a strong
+     whale wave → it escapes the risk-off (the best counter-trend setup). */
+  assert.equal(isCounterTrendException('bear', 'normal', bullFull, W), true);
+  /* A volatile market qualifies as defensive too. */
+  assert.equal(isCounterTrendException('bull', 'high', bullPartial, W), true);
+
+  /* Requires BOTH legs — a whale on a NON-bullish coin is not an exception
+     (could be a whale shorting / distributing). */
+  assert.equal(isCounterTrendException('bear', 'normal', bearFull, 95), false);
+  assert.equal(isCounterTrendException('bear', 'normal', null, 95), false);
+  /* Own-bullish but the whale isn't strong enough — a green candle in a
+     downtrend must NOT qualify (that's the falling-knife trap we avoid). */
+  assert.equal(isCounterTrendException('bear', 'normal', bullFull, W - 1), false);
+  /* Mixed / weak own alignment → no. */
+  assert.equal(
+    isCounterTrendException('bear', 'normal', { agreement: 'mixed', strength: 'none' }, 95),
+    false
+  );
+
+  /* Calm / up markets have nothing to escape → always false (no free pass). */
+  assert.equal(isCounterTrendException('bull', 'normal', bullFull, 95), false);
+  assert.equal(isCounterTrendException('ranging', 'normal', bullFull, 95), false);
+
+  /* Whale threshold is overridable. */
+  assert.equal(isCounterTrendException('bear', 'normal', bullFull, 30, { minWhaleConf: 25 }), true);
 });

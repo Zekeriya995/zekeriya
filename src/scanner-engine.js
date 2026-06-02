@@ -217,6 +217,36 @@ function regimeTierBump(direction, volatility, enabled) {
   return bump;
 }
 
+/* Per-coin counter-trend exception (L4 "richer policy"). Kill-switch: default
+   ON within adaptive mode; set SCANNER_COUNTER_TREND=false to disable. */
+const COUNTER_TREND_ENABLED = process.env.SCANNER_COUNTER_TREND !== 'false';
+/* Minimum whale-wave confidence for a coin to earn the exception. */
+const COUNTER_TREND_MIN_WHALE = Number.isFinite(+process.env.SCANNER_COUNTER_TREND_MIN_WHALE)
+  ? +process.env.SCANNER_COUNTER_TREND_MIN_WHALE
+  : 50;
+
+/* Pure: should THIS coin escape the market-wide risk-off? In a DEFENSIVE market
+   (bear or volatile) the regime suppresses every long — but a single coin that
+   is itself strongly bullish (its OWN MTF aligned up) AND backed by a confirmed
+   whale wave is the "smart money accumulating a strong coin against the tape"
+   case: usually the best setup, not a falling knife. Such a coin is scored with
+   the MOMENTUM profile and exempted from the tier bump so it can surface on its
+   own merit. Requires BOTH whale + own-bullish alignment, so a mere green candle
+   in a downtrend never qualifies. Returns false in calm/up markets (nothing to
+   escape). */
+function isCounterTrendException(marketRegime, volatility, coinMtf, whaleConf, opts) {
+  if (!COUNTER_TREND_ENABLED) return false;
+  const defensive = marketRegime === 'bear' || volatility === 'high';
+  if (!defensive) return false;
+  const minWhale =
+    opts && Number.isFinite(opts.minWhaleConf) ? opts.minWhaleConf : COUNTER_TREND_MIN_WHALE;
+  const ownBullish =
+    !!coinMtf &&
+    coinMtf.agreement === 'bullish' &&
+    (coinMtf.strength === 'full' || coinMtf.strength === 'partial');
+  return ownBullish && (+whaleConf || 0) >= minWhale;
+}
+
 /* Score → human-readable tier the PWA renders. The ULTRA cutoff
    is what the push trigger watches — match the client's threshold
    in app.js so the two views agree on what counts as "ULTRA".
@@ -428,9 +458,19 @@ function scoreSymbol(sym, ctx) {
   /* Volatility axis (high/normal) threaded in by the pass — drives the
      volatile risk-off tier bump alongside the bear bump. */
   const _vol = typeof ctx._volatility === 'string' ? ctx._volatility : 'normal';
+  /* Per-coin counter-trend exception: a strongly-bullish coin with a confirmed
+     whale wave escapes the market-wide risk-off — scored with the MOMENTUM
+     profile here, and (below) exempted from the risk-off tier bump, so smart-
+     money accumulation against a falling tape can still surface. Gated by
+     REGIME_ADAPTIVE; only fires in a defensive (bear/volatile) market. */
+  const _whaleConf = ctx.whaleWave && ctx.whaleWave.engine ? ctx.whaleWave.engine.confidence : 0;
+  const _ctException =
+    REGIME_ADAPTIVE_ENABLED && isCounterTrendException(_mr, _vol, ctx.mtfAgreement, _whaleConf);
+  if (_ctException) _wp = 'trend';
   const registryResult = scoringRules.applyRules(_ruleCtx, { profile: _wp });
   score += registryResult.scoreDelta;
   for (const t of registryResult.tagsDelta) tags.push(t);
+  if (_ctException) tags.push('🐋⤴️CTREND');
 
   /* Change bands + late-entry penalties + Volume tiers — all
      migrated to the unified registry in PR F (CHANGE_RISING /
@@ -666,7 +706,12 @@ function scoreSymbol(sym, ctx) {
      ordering and the MANIP_CAP tag makes the override explainable.
      Consumers that gate on tier (push trigger, badge color) get
      the demotion; consumers that gate on score do not. */
-  let tier = _tierFromScore(score, regimeTierBump(_mr, _vol, REGIME_ADAPTIVE_ENABLED));
+  /* A counter-trend exception coin is exempted from the risk-off bump (bump 0)
+     so it surfaces at the normal cutoffs despite the defensive market. */
+  let tier = _tierFromScore(
+    score,
+    _ctException ? 0 : regimeTierBump(_mr, _vol, REGIME_ADAPTIVE_ENABLED)
+  );
   if (MANIP_HARD_CAP_ENABLED && manip.verdict === 'HIGH' && tier === 'ULTRA') {
     tier = 'STRONG';
     tags.push('🚫MANIP_CAP');
@@ -854,6 +899,8 @@ module.exports = {
   BEAR_TIER_BUMP,
   VOLATILE_TIER_BUMP,
   regimeTierBump,
+  COUNTER_TREND_MIN_WHALE,
+  isCounterTrendException,
   scoreSymbol,
   runScannerPass,
 };

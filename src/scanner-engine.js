@@ -189,16 +189,35 @@ const TIER1_SYMBOLS = new Set([
   'XLM',
 ]);
 
+/* Downtrend risk-off (regime policy matrix §4: "higher threshold, fewer
+   longs"). In a bear regime the tier bar is RAISED by BEAR_TIER_BUMP points so
+   only exceptional setups surface — capital preservation, which the design
+   (§1.6) calls the platform's most professional trait. Env-tunable. */
+const BEAR_TIER_BUMP = Number.isFinite(+process.env.SCANNER_BEAR_TIER_BUMP)
+  ? +process.env.SCANNER_BEAR_TIER_BUMP
+  : 12;
+
+/* Pure: points to RAISE every tier cutoff for a given regime direction. Only a
+   bear regime tightens (risk-off); bull/ranging/none/unknown are unchanged.
+   `enabled` mirrors REGIME_ADAPTIVE so the bump stays inert unless adaptive
+   selection is active — same gate as the profile switch. */
+function regimeTierBump(direction, enabled) {
+  if (!enabled) return 0;
+  return direction === 'bear' ? BEAR_TIER_BUMP : 0;
+}
+
 /* Score → human-readable tier the PWA renders. The ULTRA cutoff
    is what the push trigger watches — match the client's threshold
    in app.js so the two views agree on what counts as "ULTRA".
    Thresholds sourced from the unified registry (Phase 2.A.3
    wiring); a future PR migrates app.js's _tierFromScore to import
-   the same constants. */
-function _tierFromScore(score) {
-  if (score >= scoringRules.THRESHOLDS.ULTRA) return 'ULTRA';
-  if (score >= scoringRules.THRESHOLDS.STRONG) return 'STRONG';
-  if (score >= scoringRules.THRESHOLDS.MEDIUM) return 'MEDIUM';
+   the same constants. Optional `bump` raises every cutoff (downtrend
+   risk-off); 0/absent = the original behaviour verbatim. */
+function _tierFromScore(score, bump) {
+  const b = bump || 0;
+  if (score >= scoringRules.THRESHOLDS.ULTRA + b) return 'ULTRA';
+  if (score >= scoringRules.THRESHOLDS.STRONG + b) return 'STRONG';
+  if (score >= scoringRules.THRESHOLDS.MEDIUM + b) return 'MEDIUM';
   return 'WEAK';
 }
 
@@ -633,7 +652,7 @@ function scoreSymbol(sym, ctx) {
      ordering and the MANIP_CAP tag makes the override explainable.
      Consumers that gate on tier (push trigger, badge color) get
      the demotion; consumers that gate on score do not. */
-  let tier = _tierFromScore(score);
+  let tier = _tierFromScore(score, regimeTierBump(_mr, REGIME_ADAPTIVE_ENABLED));
   if (MANIP_HARD_CAP_ENABLED && manip.verdict === 'HIGH' && tier === 'ULTRA') {
     tier = 'STRONG';
     tags.push('🚫MANIP_CAP');
@@ -807,6 +826,8 @@ module.exports = {
   TIER1_SYMBOLS,
   WASH_VOLUME_FLOOR,
   WASH_OI_FLOOR,
+  BEAR_TIER_BUMP,
+  regimeTierBump,
   scoreSymbol,
   runScannerPass,
 };

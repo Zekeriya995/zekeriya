@@ -1295,7 +1295,7 @@ function renderMySettings(){
 }
 /* ⚖️ calcRisk2 for QA page */
 function calcRisk2(){var cap=+document.getElementById('rcCap2').value,risk=+document.getElementById('rcRisk2').value,entry=+document.getElementById('rcEntry2').value,sl=+document.getElementById('rcSL2').value,tp=+document.getElementById('rcTP2').value;if(!cap||!entry||!sl){document.getElementById('rcRes2').innerHTML='<div style="text-align:center;color:var(--t3);padding:12px;font-size:12px">'+t('enter_data')+'</div>';return};var rA=cap*(risk/100),slD=Math.abs(entry-sl),pos=slD>0?rA/slD:0,posV=pos*entry,rew=tp?pos*Math.abs(tp-entry):0,rr=tp&&rA>0?rew/rA:0,lev=cap>0?posV/cap:0;document.getElementById('rcRes2').innerHTML='<div class="rc-row"><span>'+t('risk_amt')+'</span><span class="rc-val" style="color:var(--dn)">'+fmt(rA)+'</span></div><div class="rc-row"><span>'+t('pos_size')+'</span><span class="rc-val">'+pos.toFixed(4)+'</span></div><div class="rc-row"><span>'+t('pos_val')+'</span><span class="rc-val">'+fmt(posV)+'</span></div><div class="rc-row"><span>'+t('leverage')+'</span><span class="rc-val" style="color:'+(lev>10?'var(--dn)':lev>5?'var(--warn)':'var(--up)')+'">'+lev.toFixed(1)+'x</span></div>'+(tp?'<div class="rc-row"><span>'+t('exp_profit')+'</span><span class="rc-val" style="color:var(--up)">'+fmt(rew)+'</span></div><div class="rc-row"><span>R/R</span><span class="rc-val" style="color:'+(rr>=2?'var(--up)':rr>=1?'var(--warn)':'var(--dn)')+'">1:'+rr.toFixed(1)+'</span></div>':'')+'<div class="rc-row"><span>'+t('sl_loss')+'</span><span class="rc-val" style="color:var(--dn)">-'+fmt(rA)+'</span></div>'}
-var curScanTab=0,curTradeFilter='all',curSmallFilter='all',chartSignal=null;
+var curScanTab=0,curTradeFilter='all',curSmallFilter='all',curSmallSectorFilter='all',chartSignal=null;
 /* ═══ Timeframe Selector ═══
    The scanner already fetches 5m + 15m + 1h + 4h klines for the top
    candidates. This selector doesn't change WHAT we fetch — it tunes
@@ -1435,6 +1435,11 @@ function loadTrending(){
   /* Perf: read the symmetry flag once, not per sector chip (synchronous
      localStorage read; can't change mid-render). */
   var _symFix=localStorage.getItem('nxScannerFix_sector_symmetry')!=='off';
+  /* Sector → gems bridge (compass → radar): default-on. When on, hot/rising
+     sector cards expose a "💎 Gems <sector>" action that opens the gems tab
+     narrowed to that sector's early members. 'off' restores the legacy cards
+     verbatim (no extra button, no behaviour change). */
+  var _gemBridge=localStorage.getItem('nxScannerFix_gem_sector_bridge')!=='off';
   rotData.sectors.forEach(function(s){
     /* Chip-display tiers track the symmetric scale (T2): hot (≥70) shows 5
        coins + a Trade button, neutral/rising (44–70) shows 3, bearish shows
@@ -1460,11 +1465,48 @@ function loadTrending(){
       s.coins.slice(0,showCount).forEach(function(c){h+='<div style="display:flex;align-items:center;gap:4px;padding:3px 6px;background:var(--bg2);border-radius:6px;font-size:9px;font-family:var(--fm);cursor:pointer" onclick="openCoin(\''+c.s+'\')"><span style="font-weight:800">'+c.s+'</span><span style="color:'+(c.c>=0?'var(--up)':'var(--dn)')+';font-weight:700">'+(c.c>=0?'+':'')+c.c.toFixed(1)+'%</span></div>'});
       h+='</div>';
     }
-    if(isHot){h+='<div style="text-align:center"><button class="chart-tf" onclick="scanTab(1,document.querySelectorAll(\'#pg-scan>.big-tabs>.big-tab\')[1]);curTradeFilter=\''+s.sector+'\'" style="font-size:9px">📊 '+(lang==='ar'?'تداول '+s.name:'Trade '+s.name)+'</button></div>'}
+    /* Actionable sector cards (compass → radar). The legacy "Trade" button
+       called scanTab(1) — the trend tab's OWN index — so it re-rendered this
+       tab and never reached the scalping list; tradeBySector routes to tab 0
+       correctly. The new "Gems" button (default-on bridge) opens the gems tab
+       narrowed to this sector's early small-cap members. */
+    if(isHot){h+='<div style="display:flex;gap:4px;justify-content:center">'
+      +'<button class="chart-tf" onclick="tradeBySector(\''+s.sector+'\')" style="font-size:9px">📊 '+(lang==='ar'?'تداول '+s.name:'Trade '+s.name)+'</button>'
+      +(_gemBridge?'<button class="chart-tf" onclick="gemsBySector(\''+s.sector+'\')" style="font-size:9px">💎 '+(lang==='ar'?'جواهر '+s.name:'Gems '+s.name)+'</button>':'')
+      +'</div>'}
+    else if(isMed&&_gemBridge){h+='<div style="text-align:center"><button class="chart-tf" onclick="gemsBySector(\''+s.sector+'\')" style="font-size:9px">💎 '+(lang==='ar'?'جواهر '+s.name:'Gems '+s.name)+'</button></div>'}
     h+='<div style="height:4px;background:var(--bg2);border-radius:2px;overflow:hidden;margin-top:4px"><div style="width:'+s.str+'%;height:100%;background:'+s.col+';border-radius:2px"></div></div></div>';
   });
   var trendEl=document.getElementById('trendList');
   if(trendEl)trendEl.innerHTML=h||'<div class="empty"><div class="empty-ic">📡</div><div class="empty-tx">'+(lang==='ar'?'جاري التحليل...':'Analyzing...')+'</div></div>';
+}
+/* ═══ Sector bridges — make the trend tab's cards actionable ═══
+   tradeBySector jumps to the scalping tab (idx 0) filtered to a sector's
+   liquid signals (renderTrading matches x.sec===curTradeFilter). gemsBySector
+   jumps to the gems tab (idx 2) narrowed to the sector's early small-cap
+   members (renderSmallCaps → filterRowsBySector). Together they wire the
+   "compass" (which theme is hot) to the "radar" (which coin inside it to
+   actually trade / hunt). */
+function tradeBySector(sec){
+  curTradeFilter=sec;
+  scanTab(0,document.querySelectorAll('#pg-scan>.big-tabs>.big-tab')[0]);
+}
+function gemsBySector(sec){
+  curSmallSectorFilter=sec;
+  /* Land on ALL of the sector's gems (early/still/late) so a stale timing
+     filter can't greet the user with an empty screen; re-sync the timing
+     button highlight to "all" to match. */
+  curSmallFilter='all';
+  scanTab(2,document.querySelectorAll('#pg-scan>.big-tabs>.big-tab')[2]);
+  var _first=document.querySelector('#scanSmall .chart-tf');
+  if(_first&&_first.parentElement){_first.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});_first.classList.add('act')}
+}
+/* Clear the active sector bridge and fall back to the full gem list. Mirrors
+   filterSmall's fresh-cache-or-reload re-render path. */
+function clearGemSector(){
+  curSmallSectorFilter='all';
+  if(_gemResCache && Date.now() - _gemResCacheAt < GEM_CONFIG.RES_TTL_MS){renderSmallCaps(_gemResCache)}
+  else{loadSmallCapsUI()}
 }
 /* ═══ TAB 2: SMART TRADING ═══
    forceFresh=true bypasses the 60s scan cache — used by user-driven
@@ -2212,10 +2254,27 @@ function filterSmall(f,btn){
 
 function renderSmallCaps(res){
   var f=res;
-  if(curSmallFilter!=='all')f=res.filter(function(x){return x.timing===curSmallFilter});
+  /* Sector bridge (compass → radar): if the user arrived from a hot sector
+     card, narrow the gems to that sector's members BEFORE the timing filter.
+     Pure helper filterRowsBySector, behind nxScannerFix_gem_sector_bridge
+     (default on); an 'off'/'all'/unknown key is a no-op passthrough. */
+  var _secActive=(typeof filterRowsBySector==='function'&&curSmallSectorFilter&&curSmallSectorFilter!=='all'&&typeof SECTORS!=='undefined'&&SECTORS[curSmallSectorFilter]&&localStorage.getItem('nxScannerFix_gem_sector_bridge')!=='off');
+  if(_secActive)f=filterRowsBySector(f,curSmallSectorFilter);
+  if(curSmallFilter!=='all')f=f.filter(function(x){return x.timing===curSmallFilter});
   var slEl=document.getElementById('smallList');if(!slEl)return;
-  if(!f.length){slEl.innerHTML='<div class="empty"><div class="empty-ic">💎</div><div class="empty-tx">'+esc(t('gem_no_results_short'))+'</div></div>';return}
-  var h='';
+  /* Active-sector banner: a removable chip naming the sector the gems are
+     scoped to, with an ✕ that clears the bridge back to the full list. */
+  var _secBanner='';
+  if(_secActive){
+    var _sec=SECTORS[curSmallSectorFilter];
+    var _secName=(_sec.n&&(_sec.n[lang]||_sec.n.en))||curSmallSectorFilter;
+    _secBanner='<div class="sc-info" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;border-left:3px solid '+(_sec.col||'var(--neon)')+'">'
+      +'<span style="font-size:11px;font-weight:700;color:var(--t1)">'+(_sec.ic||'💎')+' '+(lang==='ar'?'جواهر قطاع '+esc(_secName):esc(_secName)+' gems')+'</span>'
+      +'<button class="chart-tf" onclick="clearGemSector()" style="font-size:9px;padding:2px 8px">✕ '+(lang==='ar'?'إلغاء':'Clear')+'</button>'
+      +'</div>';
+  }
+  if(!f.length){slEl.innerHTML=_secBanner+'<div class="empty"><div class="empty-ic">💎</div><div class="empty-tx">'+(_secActive?esc(lang==='ar'?'لا جواهر مبكّرة في هذا القطاع الآن':'No early gems in this sector right now'):esc(t('gem_no_results_short')))+'</div></div>';return}
+  var h=_secBanner;
   /* Perf: read the gem-normalize flag once, not per gem card (synchronous
      localStorage read; can't change mid-render). */
   var _gemNorm=(typeof gemScore100==='function'&&localStorage.getItem('nxScannerFix_gem_norm')!=='off');

@@ -120,6 +120,37 @@ function getCoinSector(sym) {
   return null;
 }
 
+/* ─── Sector → gems bridge (the "compass → radar" link) ────────────────
+   The sector-trend panel is a MIRROR: analyzeSectors() shows every flagship
+   member's 24h move, INCLUDING the large TIER1 names (WLD, FET, …) that have
+   already run. The gems scanner is a RADAR for small caps and EXCLUDES TIER1,
+   so a hot sector's headline large-cap movers never overlap with its early
+   small-cap gems — the user sees "WLD +30%" under AI yet nothing in Gems.
+
+   filterRowsBySector bridges the two: given the already-gated gem rows and a
+   sector key, it returns only the gems that are MEMBERS of that sector, so a
+   hot sector (the compass: which theme has money) links straight to its early
+   coins (the radar: which small cap inside it is moving). Membership is checked
+   directly against SECTORS[key].coins — not getCoinSector's first-match — so the
+   gems shown match exactly the coins on that sector's card even if a symbol were
+   ever listed under two sectors.
+
+   Scope note: SECTORS lists curated FLAGSHIP members, so this surfaces the
+   SMALLER / earlier members of a sector (e.g. CTXC, NMR, AKT in AI) that pass
+   the gem gates — not brand-new coins absent from the taxonomy; growing the
+   bridge's reach is a taxonomy job, not a code one. Pure: rows + key in,
+   filtered rows out, input untouched. A null / 'all' / unknown key is a no-op
+   passthrough (returns the SAME array). Unit-tested in tests/sectors-heat.test.js. */
+function filterRowsBySector(rows, sectorKey) {
+  if (!Array.isArray(rows)) return [];
+  var sec = sectorKey && sectorKey !== 'all' ? SECTORS[sectorKey] : null;
+  if (!sec || !Array.isArray(sec.coins)) return rows;
+  var members = sec.coins;
+  return rows.filter(function (r) {
+    return r && members.indexOf(r.s) !== -1;
+  });
+}
+
 /* ─── Sector heat — symmetric strength score (T2 scanner audit) ────────
    analyzeSectors() in app.js scored sector heat with a structurally
    bull-biased ladder: FIVE positive buckets (avg ≥0/1/3/5/8 → 30/45/60/
@@ -223,6 +254,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     SECTORS,
     getCoinSector,
+    filterRowsBySector,
     sectorStrength,
     sectorVerdictTier,
     sectorWeightedAvg,

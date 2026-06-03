@@ -10,7 +10,13 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { sectorStrength, sectorVerdictTier, sectorWeightedAvg } = require('../src/sectors');
+const {
+  sectorStrength,
+  sectorVerdictTier,
+  sectorWeightedAvg,
+  filterRowsBySector,
+  SECTORS,
+} = require('../src/sectors');
 
 test('sectorStrength — flat sector sits at the 50 midpoint', () => {
   assert.equal(sectorStrength(0, 50), 50);
@@ -153,4 +159,68 @@ test('sectorWeightedAvg — negative volume is ignored, positive-volume coins st
     ]),
     4
   );
+});
+
+/* ─── Sector → gems bridge (compass → radar) ──────────────────────────
+   filterRowsBySector narrows the already-gated gem rows to the members of
+   one sector, so a hot sector card on the trend tab links to its early
+   small-cap gems instead of dead-ending at the large movers it mirrors. */
+
+test("filterRowsBySector — narrows gems to a sector's members", () => {
+  const rows = [
+    { s: 'CTXC', sc: 60 } /* AI member */,
+    { s: 'NMR', sc: 55 } /* AI member */,
+    { s: 'GALA', sc: 70 } /* gaming member */,
+    { s: 'WOOF', sc: 40 } /* not in any sector */,
+  ];
+  assert.deepEqual(
+    filterRowsBySector(rows, 'ai').map((r) => r.s),
+    ['CTXC', 'NMR']
+  );
+  assert.deepEqual(
+    filterRowsBySector(rows, 'gaming').map((r) => r.s),
+    ['GALA']
+  );
+});
+
+test('filterRowsBySector — only real SECTORS members survive (uses live taxonomy)', () => {
+  /* Pin the contract against the actual taxonomy, not a fixture: every AI
+     gem returned must be a declared member of SECTORS.ai. */
+  const rows = SECTORS.ai.coins.concat(['NOTACOIN', 'ZZZZ']).map((s) => ({ s }));
+  const out = filterRowsBySector(rows, 'ai').map((r) => r.s);
+  assert.deepEqual(out, SECTORS.ai.coins);
+  out.forEach((s) => assert.ok(SECTORS.ai.coins.includes(s)));
+});
+
+test('filterRowsBySector — null / all / unknown key is a no-op passthrough (same array)', () => {
+  const rows = [{ s: 'CTXC' }, { s: 'GALA' }];
+  assert.equal(filterRowsBySector(rows, 'all'), rows);
+  assert.equal(filterRowsBySector(rows, null), rows);
+  assert.equal(filterRowsBySector(rows, undefined), rows);
+  assert.equal(filterRowsBySector(rows, 'no_such_sector'), rows);
+});
+
+test('filterRowsBySector — preserves input order and the original row objects', () => {
+  const rows = [
+    { s: 'NMR', sc: 1 },
+    { s: 'FET', sc: 2 } /* AI but TIER1 — membership only; gating is upstream */,
+    { s: 'CTXC', sc: 3 },
+  ];
+  const out = filterRowsBySector(rows, 'ai');
+  assert.deepEqual(
+    out.map((r) => r.s),
+    ['NMR', 'FET', 'CTXC']
+  );
+  assert.equal(out[0], rows[0]); /* same object refs, not copies */
+});
+
+test('filterRowsBySector — non-array rows yield [] (never throw)', () => {
+  assert.deepEqual(filterRowsBySector(null, 'ai'), []);
+  assert.deepEqual(filterRowsBySector(undefined, 'ai'), []);
+  assert.deepEqual(filterRowsBySector('oops', 'ai'), []);
+});
+
+test('filterRowsBySector — a sector with no gem members yields an empty set', () => {
+  const rows = [{ s: 'CTXC' }, { s: 'GALA' }];
+  assert.deepEqual(filterRowsBySector(rows, 'privacy'), []);
 });

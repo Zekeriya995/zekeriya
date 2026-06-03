@@ -1891,6 +1891,12 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
     else if(_isStale){verdict=lang==='ar'?'⚪ إشارة قديمة — للمراقبة فقط':'⚪ Stale — Watch Only';vCol='var(--t2)';vBg='rgba(56,72,96,.04)'}
     else if(s.conf>=55){verdict=lang==='ar'?'🔵 إشارة متوسطة — للمراقبة':'🔵 Moderate — Monitor';vCol='var(--blue)';vBg='rgba(91,156,255,.04)'}
     else{verdict=lang==='ar'?'⚪ فرصة محتملة — راقب فقط':'⚪ Watch Only';vCol='var(--t2)';vBg='rgba(56,72,96,.04)'}
+    /* #4 (scalp-cta audit): gate the Enter CTA to the verdict. A "Monitor /
+       Watch Only" verdict (conf<70 or stale) must NOT show a live green Enter
+       button — the user trusts the button over the text. scalpVerdictAllowsEntry
+       (pure, tested) mirrors the enter-verdict split exactly. Behind
+       nxScannerFix_scalp_cta (default on); 'off' = always-enter (legacy). */
+    var _canEnter=(typeof scalpVerdictAllowsEntry==='function'&&localStorage.getItem('nxScannerFix_scalp_cta')!=='off')?scalpVerdictAllowsEntry(s.conf,s.freshness):true;
     var wConf=0;var ww=whaleWaves[s.s];if(ww&&ww.engine)wConf=ww.engine.confidence||0;
     var btcChg=T.BTC?T.BTC.c:0;var btcCol=btcChg>=1?'var(--up)':btcChg<=-1?'var(--dn)':'var(--t2)';
     /* Build 6-checks grid */
@@ -1986,7 +1992,7 @@ function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter
     /* Progress bar */
     h+='<div class="sc-bar-wrap"><div class="sc-bar"><div class="sc-bar-fill" style="width:'+s.conf+'%;background:'+(s.ultra?'linear-gradient(90deg,var(--ultra),var(--dn))':s.conf>=60?'var(--up)':'var(--warn)')+'"></div></div><span class="sc-bar-num">'+s.conf+'</span></div>'
     /* Actions */
-    +'<div class="sc-actions"><button class="sc-btn" onclick="chartSignal={entry:'+s.entry+',target:'+s.target+',stop:'+s.stop+',s:\''+s.s+'\'};openCoin(\''+s.s+'\')">'+t('scan_chart')+'</button><button class="sc-btn sc-btn-enter" style="flex:1" onclick="if(T[\''+s.s+'\'])openTrade(\''+s.s+'\',T[\''+s.s+'\'].p,\''+s.type+'\','+s.conf+')">'+t('scan_enter')+'</button></div>'
+    +'<div class="sc-actions"><button class="sc-btn" onclick="chartSignal={entry:'+s.entry+',target:'+s.target+',stop:'+s.stop+',s:\''+s.s+'\'};openCoin(\''+s.s+'\')">'+t('scan_chart')+'</button>'+(_canEnter?'<button class="sc-btn sc-btn-enter" style="flex:1" onclick="if(T[\''+s.s+'\'])openTrade(\''+s.s+'\',T[\''+s.s+'\'].p,\''+s.type+'\','+s.conf+')">'+t('scan_enter')+'</button>':'<button class="sc-btn" style="flex:1;opacity:.55;cursor:not-allowed" disabled>'+(lang==='ar'?'👁 للمراقبة':'👁 Watch only')+'</button>')+'</div>'
     +'<div style="font-size:9px;color:var(--t3);text-align:center;margin-top:6px">⏱ '+t('scan_duration')+': '+s.dur+'</div>'
     +'</div></div>'});
   var tradeListEl=document.getElementById('tradeList');if(tradeListEl)tradeListEl.innerHTML=h}

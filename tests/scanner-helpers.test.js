@@ -1953,3 +1953,33 @@ test('classifyFreshness — junk input degrades to fresh, never throws; opts ove
   /* opts widen the favorable-warm gate so +3% no longer warms. */
   assert.equal(classifyFreshness(5, 3, 'daily', { favWarm: 5 }), 'fresh');
 });
+
+/* ─── scalpVerdictAllowsEntry (#4 scalp-CTA audit) ────────────────────── */
+
+test('scalpVerdictAllowsEntry — enters only when the verdict says enter (conf>=70 & not stale)', () => {
+  assert.equal(scalpVerdictAllowsEntry(85, 'fresh'), true); /* Excellent / Strong */
+  assert.equal(
+    scalpVerdictAllowsEntry(72, 'warm'),
+    true
+  ); /* Good — Enter Carefully (warm allowed) */
+  assert.equal(scalpVerdictAllowsEntry(70, 'fresh'), true); /* boundary */
+});
+
+test('scalpVerdictAllowsEntry — monitor verdicts block entry (conf<70)', () => {
+  assert.equal(scalpVerdictAllowsEntry(69, 'fresh'), false); /* Moderate — Monitor */
+  assert.equal(scalpVerdictAllowsEntry(55, 'warm'), false);
+  assert.equal(scalpVerdictAllowsEntry(40, 'fresh'), false); /* Watch Only */
+});
+
+test('scalpVerdictAllowsEntry — a stale signal never allows entry, even at high conf', () => {
+  /* the BNB-class case: conf could be high but freshness=old → watch only. */
+  assert.equal(scalpVerdictAllowsEntry(90, 'old'), false);
+  assert.equal(scalpVerdictAllowsEntry(70, 'old'), false);
+});
+
+test('scalpVerdictAllowsEntry — junk conf is false; minConf override works', () => {
+  assert.equal(scalpVerdictAllowsEntry(NaN, 'fresh'), false);
+  assert.equal(scalpVerdictAllowsEntry(undefined, 'fresh'), false);
+  assert.equal(scalpVerdictAllowsEntry(65, 'fresh', 60), true); /* lowered floor */
+  assert.equal(scalpVerdictAllowsEntry(75, 'fresh', 80), false); /* raised floor */
+});

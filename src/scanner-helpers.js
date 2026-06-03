@@ -1297,6 +1297,23 @@ function classifyFreshness(ageMins, changeDet, scalpType, opts) {
   return 'fresh';
 }
 
+/* scalpVerdictAllowsEntry — does the card's verdict actually say "enter"?
+   The Enter CTA must agree with the verdict line: a "Monitor / Watch Only"
+   verdict paired with a live green Enter button is a contradiction users
+   reasonably resolve in favour of the button (the #4 scalp-CTA audit). The
+   "enter" verdict tiers (Excellent / Strong / Good-carefully) ALL require
+   conf >= 70 AND a non-stale signal; the rest (Stale / Moderate-monitor /
+   Watch) are monitor states. This mirrors that exact split so the button can
+   be gated to match. Keep the 70 floor in sync with the verdict ladder in
+   renderTrading. Pure: number + freshness in, boolean out; never throws.
+   Unit-tested in tests/scanner-helpers.test.js. */
+function scalpVerdictAllowsEntry(conf, freshness, minConf) {
+  var c = +conf;
+  if (!isFinite(c)) return false;
+  var min = isFinite(minConf) ? minConf : 70;
+  return c >= min && freshness !== 'old';
+}
+
 /* gemMcGate — should a gem candidate be REJECTED on market-cap grounds?
    (G3 scanner audit.)
 

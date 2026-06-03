@@ -1883,3 +1883,73 @@ test('gemMcGate — strict-off is byte-for-byte the legacy inline gate', () => {
     assert.equal(gemMcGate(mc, min, max, false), legacy(mc, min, max), 'mc=' + mc);
   }
 });
+
+/* ─── classifyFreshness (scalp-freshness audit, 2026-06) ──────────────── */
+
+test('classifyFreshness — small age + small drift is fresh', () => {
+  assert.equal(classifyFreshness(5, 0.5, 'daily'), 'fresh');
+  assert.equal(classifyFreshness(2, -0.5, 'daily'), 'fresh');
+});
+
+test('classifyFreshness — the BNB case: an adverse (down) long stales to old', () => {
+  /* BNB: detected 57m ago, price FELL 4.9% since (long thesis failing). The
+     legacy |drift| daily gate (drOld=5) called this "warm / still an
+     opportunity"; a 4.9% drawdown on a long must read 'old'. */
+  assert.equal(classifyFreshness(57, -4.9, 'daily'), 'old');
+  assert.equal(classifyFreshness(5, -3, 'daily'), 'old'); /* adv 3 > advOld 2.5 */
+});
+
+test('classifyFreshness — the ZEC case: a favorable (up) long is unchanged (no regression)', () => {
+  /* ZEC: 22m ago, +2.8% since — late but working. Stays 'warm' exactly as the
+     legacy gate had it (favorable side keeps the |drift| thresholds). */
+  assert.equal(classifyFreshness(22, 2.8, 'daily'), 'warm');
+  assert.equal(classifyFreshness(5, 6, 'daily'), 'old'); /* fav 6 > favOld 5 = too late */
+});
+
+test('classifyFreshness — direction asymmetry: a drop stales sooner than an equal rise', () => {
+  /* Same magnitude, opposite outcome — the core #2 fix. */
+  assert.equal(classifyFreshness(5, -3, 'daily'), 'old');
+  assert.equal(classifyFreshness(5, 3, 'daily'), 'warm');
+  assert.equal(classifyFreshness(5, -1.5, 'daily'), 'warm'); /* adv 1.5 > advWarm 1 */
+  assert.equal(classifyFreshness(5, 1.5, 'daily'), 'fresh'); /* fav 1.5 < favWarm 2 */
+});
+
+test('classifyFreshness — favorable side is byte-for-byte the legacy |drift| daily gate', () => {
+  function legacy(age, drift) {
+    const drOld = 5,
+      drWarm = 2,
+      agOld = 60,
+      agWarm = 15;
+    if (age > agOld || Math.abs(drift) > drOld) return 'old';
+    if (age > agWarm || Math.abs(drift) > drWarm) return 'warm';
+    return 'fresh';
+  }
+  /* For non-negative drift the new gate must match the old one exactly. */
+  for (const age of [0, 10, 16, 61]) {
+    for (const d of [0, 1, 2, 2.01, 5, 5.01, 9]) {
+      assert.equal(classifyFreshness(age, d, 'daily'), legacy(age, d), `age=${age} d=${d}`);
+    }
+  }
+});
+
+test('classifyFreshness — fast scalps get the tight gates, on both sides', () => {
+  assert.equal(classifyFreshness(5, 1.6, 'fast'), 'old'); /* fav 1.6 > favOld 1.5 */
+  assert.equal(classifyFreshness(5, -1.1, 'fast'), 'old'); /* adv 1.1 > advOld 1.0 */
+  assert.equal(classifyFreshness(5, -0.6, 'fast'), 'warm'); /* adv 0.6 > advWarm 0.5 */
+  assert.equal(classifyFreshness(5, 0.5, 'fast'), 'fresh');
+  assert.equal(classifyFreshness(31, 0, 'fast'), 'old'); /* age > 30 */
+  assert.equal(classifyFreshness(11, 0, 'fast'), 'warm'); /* age > 10 */
+});
+
+test('classifyFreshness — age gates fire independent of drift', () => {
+  assert.equal(classifyFreshness(61, 0, 'daily'), 'old');
+  assert.equal(classifyFreshness(16, 0, 'daily'), 'warm');
+});
+
+test('classifyFreshness — junk input degrades to fresh, never throws; opts override', () => {
+  assert.equal(classifyFreshness(NaN, NaN, 'daily'), 'fresh');
+  assert.equal(classifyFreshness('x', 'y', 'daily'), 'fresh');
+  assert.equal(classifyFreshness(57, -4.9, undefined), 'old'); /* unknown type → daily gates */
+  /* opts widen the favorable-warm gate so +3% no longer warms. */
+  assert.equal(classifyFreshness(5, 3, 'daily', { favWarm: 5 }), 'fresh');
+});

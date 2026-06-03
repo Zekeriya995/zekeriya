@@ -3239,13 +3239,28 @@ async function deepAnalyze(cands){var results=[];var top=cands.slice(0,100);
     /* Freshness gates scale to the setup type. A "fast" scalp targets +1.5%
        with a sub-1% stop, so the daily 2%/5% drift tolerance would call a
        scalp that has already blown past its whole target "ideal entry".
-       Scalp gates track the scalp's own geometry (≈half-target = warm,
-       ≈full-target = stale); daily setups keep the original wider gates. */
-    var _isScalp=(c.c>=-3&&c.c<=0&&c.v>1e8);
-    var _drOld=_isScalp?1.5:5,_drWarm=_isScalp?0.75:2,_agOld=_isScalp?30:60,_agWarm=_isScalp?10:15;
-    var _freshness='fresh';
-    if(_ageMins>_agOld||Math.abs(_changeDet)>_drOld)_freshness='old';
-    else if(_ageMins>_agWarm||Math.abs(_changeDet)>_drWarm)_freshness='warm';
+       Scalp gates track the scalp's own geometry; daily setups keep the
+       wider gates.
+
+       Scalp-freshness audit (2026-06): the legacy `_isScalp` selector below
+       is the SAME falling-knife heuristic the S2/S3 audit retired from
+       type-selection, and the |drift| gates can't tell a long that FELL from
+       one that ROSE (BNB −4.9% read "still an opportunity"). classifyFreshness
+       (pure, tested) aligns the freshness type with the card's classifyScalpType
+       and stales an ADVERSE (down) move sooner than a favorable (up) one.
+       Behind nxScannerFix_scalp_freshness (default on); 'off' restores the
+       legacy block verbatim. */
+    var _freshness;
+    if(typeof classifyFreshness==='function'&&localStorage.getItem('nxScannerFix_scalp_freshness')!=='off'){
+      var _scalpTypeF=(typeof classifyScalpType==='function')?classifyScalpType({vol24h:c.v,change24h:c.c,confirmedBreakout:brk.confirmed,tfAlignBull:tfAlign&&tfAlign.aligned15m1h,obPressure:checks&&checks.ob,volSpike:checks&&checks.vol}):((c.c>=-3&&c.c<=0&&c.v>1e8)?'fast':'daily');
+      _freshness=classifyFreshness(_ageMins,_changeDet,_scalpTypeF);
+    }else{
+      var _isScalp=(c.c>=-3&&c.c<=0&&c.v>1e8);
+      var _drOld=_isScalp?1.5:5,_drWarm=_isScalp?0.75:2,_agOld=_isScalp?30:60,_agWarm=_isScalp?10:15;
+      _freshness='fresh';
+      if(_ageMins>_agOld||Math.abs(_changeDet)>_drOld)_freshness='old';
+      else if(_ageMins>_agWarm||Math.abs(_changeDet)>_drWarm)_freshness='warm';
+    }
     results.push({s:c.s,p:c.p,c:c.c,v:c.v,score:ds,tags:dt,checks:checks,passed:passed,total:6,ultra:isUltra,confirmed:isConf,fr:c.fr,by:c.by,cb:c.cb,whaleConf:whaleConf,waveCount:waveCount,smartEntry:smartEntry,tfAlign:tfAlign,confirmedBreakout:brk.confirmed,kl15Available:kl15Available,atr15m:atr15,pdFlags:c.pdFlags||0,proven:_proven,coinWinRate:_coinWinRate,detectedAt:getSigTime(c.s,isUltra?'ultra':'trade'),priceAtDetection:_priceAtDet,ageMinutes:_ageMins,changeFromDetection:_changeDet,freshness:_freshness})}catch(_perCoinErr){/* one coin's analysis blew up — skip it so the whole scan doesn't fail. Symbol-tagged warn so a recurring bug on the same coin surfaces in DevTools. */ _scWarn('deepAnalyze:'+(top[ci]&&top[ci].s||'?'),_perCoinErr); continue}}
   return results.sort(function(a,b){return b.score-a.score})}
 /* ═══ QUALITY FILTER v3 — strict gate before rendering ═══

@@ -1246,6 +1246,57 @@ function classifyScalpType(ctx) {
   return momentum ? 'fast' : 'daily';
 }
 
+/* classifyFreshness — how tradeable-NOW a (long) scalp signal still is, from
+   how long ago it was first detected and how far price has DRIFTED from the
+   detection price. Returns 'fresh' | 'warm' | 'old'. (Scalp-freshness audit,
+   2026-06 — extracted from the inline gate in deepAnalyze.)
+
+   Two corrections over the legacy inline gate:
+
+   1. TYPE ALIGNMENT. The legacy gate decided "is this a scalp?" with the very
+      selector — `change24h in [-3,0] && vol>1e8` — that the S2/S3 audit had
+      already RETIRED from type-selection for being a falling-knife filter. So
+      the trade plan used classifyScalpType while freshness used the dead
+      heuristic, and the two could DISAGREE: a 'fast' card could inherit the
+      loose 'daily' drift tolerance and only go stale long after blowing past
+      its target. The caller now passes the SAME scalpType the card shows.
+
+   2. DIRECTION. The legacy gate used |drift|, so a long that FELL 5% (thesis
+      failing) aged exactly like one that ROSE 5% (thesis working — you're just
+      late). For a long, a DOWN move is ADVERSE and must invalidate sooner than
+      an equal UP move. Favorable (up) drift keeps the legacy late-entry
+      thresholds verbatim — no regression — while adverse (down) drift uses a
+      tighter gate (≈half), so a falling knife reads 'old', not "still an
+      opportunity". (The scalp scanner is long-only: target > entry.)
+
+   Pure: numbers + 'fast'|'daily' in, a freshness string out; never throws.
+   Thresholds overridable via opts for tests. Unit-tested in
+   tests/scanner-helpers.test.js. */
+function classifyFreshness(ageMins, changeDet, scalpType, opts) {
+  var o = opts || {};
+  var isScalp = scalpType === 'fast';
+  var age = +ageMins;
+  if (!isFinite(age)) age = 0;
+  var drift = +changeDet;
+  if (!isFinite(drift)) drift = 0;
+  /* favorable = price moved WITH the long (up) → "late entry"; adverse =
+     price moved AGAINST it (down) → "thesis weakening", gated tighter. */
+  var fav = drift > 0 ? drift : 0;
+  var adv = drift < 0 ? -drift : 0;
+  var agOld = isFinite(o.agOld) ? o.agOld : isScalp ? 30 : 60;
+  var agWarm = isFinite(o.agWarm) ? o.agWarm : isScalp ? 10 : 15;
+  /* favorable gates == the legacy |drift| thresholds (preserves late-entry). */
+  var favOld = isFinite(o.favOld) ? o.favOld : isScalp ? 1.5 : 5;
+  var favWarm = isFinite(o.favWarm) ? o.favWarm : isScalp ? 0.75 : 2;
+  /* adverse gates ≈ half the favorable ones — losing ground is worse than
+     merely being late to a working long. */
+  var advOld = isFinite(o.advOld) ? o.advOld : isScalp ? 1.0 : 2.5;
+  var advWarm = isFinite(o.advWarm) ? o.advWarm : isScalp ? 0.5 : 1.0;
+  if (age > agOld || fav > favOld || adv > advOld) return 'old';
+  if (age > agWarm || fav > favWarm || adv > advWarm) return 'warm';
+  return 'fresh';
+}
+
 /* gemMcGate — should a gem candidate be REJECTED on market-cap grounds?
    (G3 scanner audit.)
 

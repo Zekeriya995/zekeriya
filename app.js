@@ -1559,6 +1559,10 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
   var _scalpAtr=(typeof atrZones==='function'&&localStorage.getItem('nxScannerFix_scalp_atr')!=='off');
   var _regimeOn=(typeof regimeConfAdjustment==='function'&&localStorage.getItem('nxScannerFix_regime_align')!=='off');
   var _confCapOn=(typeof capConfidenceForServerFlags==='function'&&localStorage.getItem('nxScannerFix_conf_demote_cap')!=='off');
+  /* #5 live ATR levels for the daily plan; #7 coin-level falling-knife conf
+     penalty. Read once per render (synchronous localStorage; can't change mid-render). */
+  var _liveLevelsOn=(typeof scalpDailyPlan==='function'&&localStorage.getItem('nxScannerFix_scalp_live_levels')!=='off');
+  var _fkOn=(typeof fallingKnifePenalty==='function'&&localStorage.getItem('nxScannerFix_scalp_falling_knife')!=='off');
   for(var i=0;i<Math.min(r.length,7);i++){var x=r[i];var d=T[x.s];if(!d)continue;
     /* S2/S3 audit: pick the scalp from CONFIRMED intraday momentum, not the
        24h change — the old (d.c>=-3&&d.c<=0) selector fired the scalp only on
@@ -1583,7 +1587,7 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
       else{entry=d.p;target=d.p*1.015;stop=d.p-Math.max(d.p*0.005,(x.atr15m>0?x.atr15m:0))}
       dur=scannerTimeframe==='15m'?_tfHold:(lang==='ar'?'10-30 دقيقة':'10-30 min');
     }
-    else{entry=d.p*0.995;target=x.ultra?d.p*1.08:d.p*1.06;stop=d.p*0.97;dur=_tfHold}
+    else{var _dp=scalpDailyPlan(d.p,x.tp1,x.sl,x.ultra,_liveLevelsOn);entry=_dp.entry;target=_dp.target;stop=_dp.stop;dur=_tfHold}
     var risk=Math.abs(entry-stop);var rr=risk>0?+((target-entry)/risk).toFixed(1):0;if(rr<1.5)continue;
     var reasons=[];var ww=whaleWaves[x.s];if(ww&&ww.engine&&ww.engine.confidence>=30)reasons.push({ic:'🐋',t:lang==='ar'?'حوت مؤكد '+ww.engine.confidence+'%':'Whale '+ww.engine.confidence+'%'});
     var cvd=analyzeCVD(x.s);if(cvd.divergence==='BULLISH')reasons.push({ic:'📈',t:lang==='ar'?'CVD صاعد — تجميع صامت':'CVD rising — accumulation'});
@@ -1638,6 +1642,12 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
        the cap stays the final safety. window.__marketRegime is captured in
        loadTk from /api/all. Behind nxScannerFix_regime_align (default on). */
     if(_regimeOn){conf=Math.max(20,Math.min(95,conf+regimeConfAdjustment(window.__marketRegime,x.tags)))}
+    /* #7 (falling-knife audit): regime-INDEPENDENT coin-level penalty for a long
+       on a coin dumping hard on the day — fixes the gap where regimeConfAdjustment
+       is inert in a 'ranging' tape. Waived for whale-backed longs (mirrors #169,
+       bar 50) and silent on mild dips (contrarian thesis preserved). Behind
+       nxScannerFix_scalp_falling_knife (default on). */
+    if(_fkOn){conf=Math.max(20,Math.min(95,conf+fallingKnifePenalty(d.c,x.whaleConf)))}
     /* Honor the server's protective demotion in the displayed conf% so a
        coin the server flagged (manip / P&D / falling-knife) can't show
        ULTRA-level confidence the client computed in isolation. Pure

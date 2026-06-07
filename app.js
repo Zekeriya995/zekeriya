@@ -1652,25 +1652,23 @@ async function loadTrading(forceFresh){var trLoadEl=document.getElementById('tra
     sigs.push({s:x.s,p:d.p,c:d.c,v:d.v,type:type,setup:setup,conf:conf,entry:entry,target:target,stop:stop,rr:rr,dur:dur,reasons:reasons,score:x.score,checks:x.checks,passed:x.passed,total:x.total,ultra:x.ultra,confirmed:x.confirmed,tags:x.tags,sec:sec,proven:x.proven,coinWinRate:x.coinWinRate,detectedAt:x.detectedAt,priceAtDetection:x.priceAtDetection,ageMinutes:x.ageMinutes,changeFromDetection:x.changeFromDetection,freshness:x.freshness})}
   sigs.sort(function(a,b){return b.conf-a.conf});renderTrading(sigs)}
 function filterTrade(f,btn){curTradeFilter=f;btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act');loadTrading()}
-/* Scanner minimum-score filter. Stored in localStorage so the
-   slider position survives reloads. Default 50 (hides WEAK
-   signals 30-49) because the full unfiltered list is too noisy
-   for most users — a fresh visitor sees the meaningful signals
-   first, can drag the slider down to 30 if they want everything. */
-var SCAN_MIN_SCORE_KEY='nx.scannerMinScore';
-function getScanMinScore(){var v=parseInt(localStorage.getItem(SCAN_MIN_SCORE_KEY),10);return isFinite(v)&&v>=30&&v<=100?v:50}
-function _scanTierLabel(s){if(s>=100)return'ULTRA';if(s>=70)return'STRONG';if(s>=50)return'MEDIUM';return'WEAK'}
-function setScanMinScore(v){var n=parseInt(v,10);if(!isFinite(n))n=50;if(n<30)n=30;if(n>100)n=100;localStorage.setItem(SCAN_MIN_SCORE_KEY,n);var lbl=document.getElementById('scanMinScoreLabel');if(lbl)lbl.innerHTML=n+'<span style="font-size:10px;color:var(--t2)"> · '+_scanTierLabel(n)+'</span>';loadTrading();var sc=cache&&cache.scan;if(sc)renderScanResults(sc)}
-/* Apply the slider's threshold to a list of scanned signals.
-   Pure function — used by both loadTrading and renderScanResults
-   so the user's preference flows through every code path that
-   feeds the scanner panel. */
-function applyScanMinScore(items){var min=getScanMinScore();return(items||[]).filter(function(r){return r&&typeof r.score==='number'&&r.score>=min})}
-/* Sync the slider DOM to the stored value on first paint so the
-   thumb sits at the user's last position instead of the HTML
-   default. Called from boot path after the scanner page is
-   inserted. */
-function initScanMinScore(){var el=document.getElementById('scanMinScore');if(!el)return;var v=getScanMinScore();el.value=v;var lbl=document.getElementById('scanMinScoreLabel');if(lbl)lbl.innerHTML=v+'<span style="font-size:10px;color:var(--t2)"> · '+_scanTierLabel(v)+'</span>'}
+/* Scanner quality filter. The numeric "min points" slider (score 30-100 +
+   WEAK/MEDIUM/STRONG, which also mismatched the conf% the cards display and
+   confused new users) was replaced by three plain presets: 🤖 Auto (default),
+   🔥 Strong-only, 📋 All. 'auto' adapts the floor to the market regime via
+   scanPresetFloor/autoMinScore (risk-off tape → STRONG-only; healthy → MEDIUM+),
+   mirroring the regime risk-off posture (#167/#168). 'all' is the user-level
+   escape hatch (no meaningful filter). */
+var SCAN_MODE_KEY='nx.scanMode';
+function getScanMode(){var m=localStorage.getItem(SCAN_MODE_KEY);return(m==='all'||m==='strong'||m==='auto')?m:'auto'}
+function scanModeMinScore(){return(typeof scanPresetFloor==='function')?scanPresetFloor(getScanMode(),window.__marketRegime):50}
+function setScanMode(mode,btn){if(mode!=='all'&&mode!=='strong'&&mode!=='auto')mode='auto';localStorage.setItem(SCAN_MODE_KEY,mode);if(btn&&btn.parentElement){btn.parentElement.querySelectorAll('.chart-tf').forEach(function(b){b.classList.remove('act')});btn.classList.add('act')}loadTrading();var sc=cache&&cache.scan;if(sc)renderScanResults(sc)}
+/* Apply the active preset's score floor to a list of scanned signals. Used by
+   both loadTrading and renderScanResults so the choice flows through every path
+   feeding the scanner panel. */
+function applyScanMinScore(items){var min=scanModeMinScore();return(items||[]).filter(function(r){return r&&typeof r.score==='number'&&r.score>=min})}
+/* Highlight the preset button matching the stored mode on first paint. */
+function initScanMode(){var m=getScanMode();var wrap=document.getElementById('scanModeRow');if(!wrap)return;wrap.querySelectorAll('.chart-tf').forEach(function(b){b.classList.toggle('act',b.getAttribute('data-mode')===m)})}
 /* Idea 3 — Recent win rate per signal tier.
    Buckets checked predictions by the same score thresholds the acc
    panel uses, then exposes a rate (0-100) + sample count. Returns null
@@ -7652,7 +7650,7 @@ document.addEventListener('DOMContentLoaded', function () {
      left it at last session. Runs after the scanner page HTML is
      in the DOM (which it is by DOMContentLoaded — the page-tab
      div is part of the static markup). */
-  if (typeof initScanMinScore === 'function') initScanMinScore();
+  if (typeof initScanMode === 'function') initScanMode();
   /* Initial fill — long enough for src/push-client.js to register
      window.nxPush via its IIFE. defer guarantees ordering, but the
      SW registration that getStatus() awaits can take a moment more

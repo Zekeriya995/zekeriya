@@ -1983,3 +1983,32 @@ test('scalpVerdictAllowsEntry — junk conf is false; minConf override works', (
   assert.equal(scalpVerdictAllowsEntry(65, 'fresh', 60), true); /* lowered floor */
   assert.equal(scalpVerdictAllowsEntry(75, 'fresh', 80), false); /* raised floor */
 });
+
+/* ─── autoMinScore / scanPresetFloor (auto scanner quality filter, #6) ─── */
+
+test('autoMinScore — risk-off tape (bear OR high-vol) raises the floor to STRONG (70)', () => {
+  assert.equal(autoMinScore({ direction: 'bear', volatility: 'normal' }), 70);
+  assert.equal(autoMinScore({ direction: 'bull', volatility: 'high' }), 70); /* fast tape */
+  assert.equal(autoMinScore({ direction: 'none', volatility: 'high' }), 70);
+});
+
+test('autoMinScore — a healthy / ranging normal-vol tape uses the balanced MEDIUM floor (50)', () => {
+  assert.equal(autoMinScore({ direction: 'bull', volatility: 'normal' }), 50);
+  assert.equal(autoMinScore({ direction: 'none', volatility: 'normal' }), 50);
+});
+
+test('autoMinScore — cold / malformed regime degrades to the balanced default', () => {
+  assert.equal(autoMinScore(), 50);
+  assert.equal(autoMinScore(null), 50);
+  assert.equal(autoMinScore('oops'), 50);
+  assert.equal(autoMinScore({}), 50);
+});
+
+test('scanPresetFloor — all/strong are fixed; auto delegates to the regime', () => {
+  assert.equal(scanPresetFloor('all', { direction: 'bear' }), 30); /* escape hatch */
+  assert.equal(scanPresetFloor('strong', { direction: 'bull' }), 70);
+  assert.equal(scanPresetFloor('auto', { direction: 'bear' }), 70); /* risk-off */
+  assert.equal(scanPresetFloor('auto', { direction: 'bull', volatility: 'normal' }), 50);
+  assert.equal(scanPresetFloor('xyz', { direction: 'bear' }), 70); /* unknown mode → auto */
+  assert.equal(scanPresetFloor(undefined, {}), 50);
+});

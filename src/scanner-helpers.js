@@ -1314,6 +1314,34 @@ function scalpVerdictAllowsEntry(conf, freshness, minConf) {
   return c >= min && freshness !== 'old';
 }
 
+/* autoMinScore / scanPresetFloor — the scanner's quality-floor logic after the
+   numeric "min points" slider (score 30-100 + WEAK/MEDIUM/STRONG jargon, which
+   also mismatched the conf% the cards display and baffled new users) was
+   replaced by three plain presets: 🤖 Auto · 🔥 Strong-only · 📋 All.
+
+   autoMinScore is the Auto preset's brain: it adapts the floor to the market
+   regime so a beginner configures nothing. A risk-off tape — a BEAR direction
+   OR a HIGH-volatility/fast tape — warrants fewer, higher-conviction signals
+   (the same posture as the regime risk-off bumps, #167/#168), so it raises the
+   floor to STRONG (70). Any other tape (bull / ranging / normal vol) uses the
+   balanced MEDIUM floor (50) that merely hides the weak noise. Cold/unknown
+   regime → the safe balanced default.
+
+   scanPresetFloor maps the chosen preset to a score floor: 'all' → 30 (no
+   meaningful filter, the user's escape hatch), 'strong' → 70 (STRONG always),
+   anything else → 'auto' (regime-adaptive). Pure: inputs in, a number out;
+   unit-tested in tests/scanner-helpers.test.js. */
+function autoMinScore(regime) {
+  var r = regime && typeof regime === 'object' ? regime : {};
+  var riskOff = r.direction === 'bear' || r.volatility === 'high';
+  return riskOff ? 70 : 50;
+}
+function scanPresetFloor(mode, regime) {
+  if (mode === 'all') return 30;
+  if (mode === 'strong') return 70;
+  return autoMinScore(regime);
+}
+
 /* gemMcGate — should a gem candidate be REJECTED on market-cap grounds?
    (G3 scanner audit.)
 

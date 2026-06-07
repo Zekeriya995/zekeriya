@@ -2,7 +2,7 @@
    the previous generation atomically. The old string ('nexus-v10-v14-modules')
    was static, which meant a hot-fix to app.js was never fetched from the
    network until users hard-refreshed. */
-var CACHE_VERSION = 'v10.27.0-scalp-live-levels-2026-06-07';
+var CACHE_VERSION = 'v10.28.0-sw-fresh-precache-2026-06-07';
 var CACHE_NAME = 'nexus-' + CACHE_VERSION;
 /* Critical assets — install fails if any fail */
 var CRITICAL_ASSETS = [
@@ -38,7 +38,22 @@ self.addEventListener('install', function (e) {
     caches
       .open(CACHE_NAME)
       .then(function (cache) {
-        return cache.addAll(CRITICAL_ASSETS).then(function () {
+        /* Precache critical assets with {cache:'reload'} so each fetch BYPASSES
+           the browser HTTP cache. A plain cache.addAll() can be served a still-
+           valid HTTP-cached app.js, so a CACHE_VERSION bump re-stored the STALE
+           bytes under the new cache name and the update never landed until a
+           manual cache clear — the "new buttons don't respond after deploy" bug.
+           'reload' always hits the network AND refreshes the HTTP cache, so the
+           SWR revalidation below stays fresh too. Still atomic: any critical
+           asset failing rejects install, so a bad deploy keeps the old SW. */
+        return Promise.all(
+          CRITICAL_ASSETS.map(function (url) {
+            return fetch(url, { cache: 'reload' }).then(function (resp) {
+              if (!resp || !resp.ok) throw new Error('[SW] critical precache failed: ' + url);
+              return cache.put(url, resp);
+            });
+          })
+        ).then(function () {
           return Promise.all(
             OPTIONAL_ASSETS.map(function (url) {
               return cache.add(url).catch(function () {

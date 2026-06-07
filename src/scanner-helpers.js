@@ -1342,6 +1342,56 @@ function scanPresetFloor(mode, regime) {
   return autoMinScore(regime);
 }
 
+/* scalpDailyPlan — the 'daily' scalp's entry/target/stop (#5 live-levels audit).
+   The legacy daily plan was a FIXED ladder off the current price (entry -0.5%,
+   target +6%/+8%, stop -3%), so EVERY daily signal showed the same +6.5%/-2.5%
+   regardless of the coin's volatility — a megacap and a mid-cap got identical
+   targets, and a +6% move in "1-4h" is unreachable for a megacap. Meanwhile the
+   server already computes ATR-based sl/tp1 and ships them on the signal (overlaid
+   as x.sl / x.tp1), but they were consumed ONLY via smartEntry — so a coin
+   WITHOUT a smartEntry (exactly the daily case, e.g. ZEC/BNB) silently dropped
+   them and fell back to the fixed ladder.
+
+   This prefers the server's live levels when they sanely bracket the current
+   price for a long (tp1 > price > sl > 0), so the plan scales with real
+   volatility; otherwise it returns the exact legacy fixed ladder (byte-for-byte
+   when useLive is off). Pure: numbers in, {entry,target,stop,live} out;
+   unit-tested in tests/scanner-helpers.test.js. */
+function scalpDailyPlan(price, srvTp1, srvSl, ultra, useLive) {
+  var p = +price;
+  var tp1 = +srvTp1,
+    sl = +srvSl;
+  if (useLive && isFinite(tp1) && isFinite(sl) && p > 0 && tp1 > p && sl < p && sl > 0) {
+    return { entry: p, target: tp1, stop: sl, live: true };
+  }
+  return { entry: p * 0.995, target: ultra ? p * 1.08 : p * 1.06, stop: p * 0.97, live: false };
+}
+
+/* fallingKnifePenalty — confidence penalty for a LONG on a coin already dumping
+   hard on the day (#7 falling-knife audit). regimeConfAdjustment penalises
+   trend-fighting longs only when the tape is classified 'trending'; a choppy
+   DECLINE reads 'ranging' and slips through, so BNB (-6.1% on the day) kept full
+   confidence. This is the regime-INDEPENDENT, coin-level guard: scale the
+   penalty by the depth of the 24h drop.
+
+   It stays faithful to the platform's CONTRARIAN design — it fires ONLY on hard
+   dumps (< -5%, so oversold-bounce setups in the -0..-5% band are untouched) and
+   is WAIVED when a whale is accumulating (whaleConf >= the #169 counter-trend
+   bar, default 50), so a whale-backed long can still buck a defensive tape
+   exactly as #169 intends. It only ever LOWERS confidence (returns <= 0). Pure:
+   numbers in, an adjustment out; unit-tested in tests/scanner-helpers.test.js. */
+function fallingKnifePenalty(change24h, whaleConf, opts) {
+  var o = opts || {};
+  var hardDump = isFinite(o.dumpPct) ? o.dumpPct : -5;
+  var deepDump = isFinite(o.deepPct) ? o.deepPct : -8;
+  var whaleBar = isFinite(o.whaleBar) ? o.whaleBar : 50;
+  var c = +change24h;
+  if (!isFinite(c) || c >= hardDump) return 0;
+  var w = +whaleConf;
+  if (isFinite(w) && w >= whaleBar) return 0;
+  return c <= deepDump ? -18 : -10;
+}
+
 /* gemMcGate — should a gem candidate be REJECTED on market-cap grounds?
    (G3 scanner audit.)
 

@@ -2012,3 +2012,64 @@ test('scanPresetFloor — all/strong are fixed; auto delegates to the regime', (
   assert.equal(scanPresetFloor('xyz', { direction: 'bear' }), 70); /* unknown mode → auto */
   assert.equal(scanPresetFloor(undefined, {}), 50);
 });
+
+/* ─── scalpDailyPlan (#5 live levels) ─────────────────────────────────── */
+
+test('scalpDailyPlan — prefers live server levels when they bracket price (the #5 fix)', () => {
+  assert.deepEqual(scalpDailyPlan(100, 108, 96, false, true), {
+    entry: 100,
+    target: 108,
+    stop: 96,
+    live: true,
+  });
+});
+
+test('scalpDailyPlan — falls back to the fixed ladder when live levels are absent/insane', () => {
+  assert.deepEqual(scalpDailyPlan(100, undefined, undefined, false, true), {
+    entry: 99.5,
+    target: 106,
+    stop: 97,
+    live: false,
+  });
+  assert.equal(scalpDailyPlan(100, 95, 90, false, true).live, false); /* tp1 below price */
+  assert.equal(scalpDailyPlan(100, 108, 101, false, true).live, false); /* sl above price */
+  assert.equal(scalpDailyPlan(100, 108, 0, false, true).live, false); /* sl<=0 */
+});
+
+test('scalpDailyPlan — ultra widens the fixed target to +8%', () => {
+  assert.equal(scalpDailyPlan(100, NaN, NaN, true, true).target, 108);
+  assert.equal(scalpDailyPlan(100, NaN, NaN, false, true).target, 106);
+});
+
+test('scalpDailyPlan — useLive=off is byte-for-byte the legacy fixed ladder', () => {
+  assert.deepEqual(scalpDailyPlan(200, 220, 190, false, false), {
+    entry: 199,
+    target: 212,
+    stop: 194,
+    live: false,
+  });
+});
+
+/* ─── fallingKnifePenalty (#7) ────────────────────────────────────────── */
+
+test('fallingKnifePenalty — the BNB case: hard dump + sub-threshold whale → penalised', () => {
+  assert.equal(fallingKnifePenalty(-6.1, 46), -10); /* -5..-8, whale<50 */
+  assert.equal(fallingKnifePenalty(-9, 30), -18); /* deep dump */
+});
+
+test('fallingKnifePenalty — mild dips are untouched (contrarian thesis preserved)', () => {
+  assert.equal(fallingKnifePenalty(-3, 0), 0);
+  assert.equal(fallingKnifePenalty(-5, 0), 0); /* boundary: -5 is not < -5 */
+  assert.equal(fallingKnifePenalty(2, 0), 0); /* up day */
+});
+
+test('fallingKnifePenalty — whale accumulation waives it (mirrors #169, bar 50)', () => {
+  assert.equal(fallingKnifePenalty(-9, 50), 0); /* whale >= 50 exempt */
+  assert.equal(fallingKnifePenalty(-9, 49), -18); /* just under → penalised */
+});
+
+test('fallingKnifePenalty — junk input is 0; no-whale-data is NOT exempt; thresholds tunable', () => {
+  assert.equal(fallingKnifePenalty(NaN, 0), 0);
+  assert.equal(fallingKnifePenalty(-6, NaN), -10); /* unknown whale → not exempt */
+  assert.equal(fallingKnifePenalty(-6, 0, { dumpPct: -10 }), 0); /* raise the dump bar */
+});

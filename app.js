@@ -4640,6 +4640,19 @@ function renderMonPanel(){
   h+='<div style="height:5px;background:linear-gradient(90deg,var(--dn),var(--warn),var(--up));border-radius:3px;margin:8px 0;position:relative"><div style="position:absolute;top:-4px;left:'+moodScore+'%;width:12px;height:12px;background:var(--t0);border-radius:50%;border:2px solid var(--bg);transform:translateX(-50%)"></div></div>';
   h+='<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--t3)"><span>FG: '+fgValue+'</span><span>BTC: '+(btcChg>=0?'+':'')+btcChg.toFixed(1)+'%</span><span>Green: '+greenPct+'%</span></div></div>';
 
+  /* #5 (monitor audit): the performance sections (V3 categories / streak /
+     hours / coins / confidence / self-tune) are ALL derived from trades the user
+     placed in the app. For a scanner-only user they're permanently empty — ~7
+     "need trades" boxes of clutter. Fold them behind one placeholder until there
+     is trade data. Behind nxMonitorFix_fold_empty_perf (default on). */
+  var _foldPerf=localStorage.getItem('nxMonitorFix_fold_empty_perf')!=='off';
+  var _hasTradeData=((typeof factorLog!=='undefined'&&factorLog&&factorLog.length>0)||(ms.perf&&ms.perf.totalTrades>0));
+  var _showPerf=(!_foldPerf||_hasTradeData);
+  if(!_showPerf){
+    h+='<div class="sv-sec-title">📊 '+(ar?'أداء التداول':'Trading Performance')+'</div>';
+    h+='<div class="cd sv-empty" style="padding:14px;text-align:center;line-height:1.7">'+(ar?'🔒 أقسام الأداء (الفئات · الساعات · العملات · معايرة الثقة · التعلّم الذاتي) تبدأ بعد أن تنفّذ صفقات عبر المنصّة. حتى ذلك الحين النظام يراقب ويُحصي فقط.':'🔒 Performance sections (categories · hours · coins · confidence · self-tuning) unlock once you place trades in the app. Until then the system only observes.')+'</div>';
+  }
+  if(_showPerf){
   /* ═══ S8: V3 CATEGORY PERFORMANCE ═══ */
   h+='<div class="sv-sec-title">📊 '+(ar?'أداء V3':'V3 Categories')+'</div>';
   h+='<div class="cd" style="padding:10px">';
@@ -4692,6 +4705,7 @@ function renderMonPanel(){
   h+='<div class="sv-sec-title">🚫 '+(ar?'محظورة':'Blacklist')+'</div>';
   if(ms.coinBlacklist&&ms.coinBlacklist.length){h+='<div style="display:flex;gap:4px;flex-wrap:wrap">';ms.coinBlacklist.forEach(function(s){h+='<span style="padding:5px 12px;background:var(--dd);border:1px solid rgba(255,56,96,.1);border-radius:8px;font-size:11px;font-weight:700;color:var(--dn)">'+s+'</span>'});h+='</div>'}else{h+='<div style="padding:6px;text-align:center;font-size:11px;color:var(--up)">✅ '+(ar?'لا محظورة':'All clean')+'</div>'}
 
+  } /* end perf block A (#5) */
   /* ═══ S12: GATE REJECTION LOG ═══ */
   h+='<div class="sv-sec-title">🚧 '+(ar?'سجل الحظر':'Gate Rejections')+'</div>';
   var gLog=supervisorData.gateLog||[];
@@ -4712,6 +4726,7 @@ function renderMonPanel(){
     }else{h+='<div class="cd sv-empty">'+(ar?'لا فك قريب':'No TIER1 unlocks')+'</div>';}
   }else{h+='<div class="cd sv-empty">'+(ar?'لا بيانات':'No data')+'</div>';}
 
+  if(_showPerf){
   /* ═══ S14: CONFIDENCE CALIBRATION ═══ */
   h+='<div class="sv-sec-title">🎯 '+(ar?'معايرة الثقة':'Confidence')+'</div><div class="cd" style="padding:10px">';
   var bk=Object.keys(ms.confCalib).sort();
@@ -4733,6 +4748,7 @@ function renderMonPanel(){
   if(wKeys.length){h+='<div style="font-size:9px;color:var(--t3);margin-top:6px;text-transform:uppercase;letter-spacing:1px">'+(ar?'أوزان قديمة':'Old Weights')+':</div><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">';wKeys.forEach(function(k){h+='<span style="font-size:8px;font-family:var(--fm);padding:2px 6px;background:var(--bg2);border-radius:4px;color:var(--t2)">'+k+':'+(ms.weights[k]||0).toFixed(1)+'</span>'});h+='</div>'}
   h+='</div>';
 
+  } /* end perf block B (#5) */
   /* ═══ S17: RECOMMENDATIONS ═══ */
   if(rpt&&rpt.recommendations&&rpt.recommendations.length){
     h+='<div class="sv-sec-title">💡 '+(ar?'توصيات':'Recommendations')+'</div>';

@@ -4571,6 +4571,22 @@ function renderMonPanel(){
   exArr.forEach(function(ex){h+='<div class="sv-ex-item" style="border-color:'+(ex.c>0?'rgba(0,255,136,.1)':'rgba(255,56,96,.08)')+'"><span style="font-size:8px;font-weight:700;color:var(--t1)">'+ex.n+'</span><span style="font-size:9px;font-family:var(--fm);font-weight:700;color:'+(ex.c>0?'var(--up)':'var(--dn)')+'">'+(ex.c>0?'✅ '+ex.c:'❌')+'</span></div>';});
   h+='</div>';
 
+  /* ═══ S5b: LIVE SOURCE HEALTH (real ping of every upstream) ═══
+     #3 monitor audit: the real source checker (pingAllSources, 12 upstreams)
+     lived ONLY in the Account page, so "Data Monitor" never actually probed the
+     sources. Surface it here, reusing the tested renderSourceHealth /
+     runSourceHealthCheck with Monitor-scoped element ids. Behind
+     nxMonitorFix_live_source_check (default on). */
+  var _liveSrcCheck=localStorage.getItem('nxMonitorFix_live_source_check')!=='off';
+  if(_liveSrcCheck){
+    h+='<div class="sv-sec-title">🔌 '+(ar?'صحة المصادر (فحص حيّ)':'Source Health (live)')+'</div>';
+    h+='<div class="cd" style="padding:8px">';
+    h+='<button class="rfr" id="monSrcHealthBtn" type="button" style="width:100%;margin:0 0 6px" onclick="runSourceHealthCheck({btn:\'monSrcHealthBtn\',list:\'monSrcHealthList\',summary:\'monSrcHealthSummary\'})">🔍 '+(ar?'فحص كل المصادر الآن':'Ping all sources')+'</button>';
+    h+='<div id="monSrcHealthList" role="list"></div>';
+    h+='<div id="monSrcHealthSummary" style="font-size:10px;color:var(--t3);margin-top:6px;text-align:center"></div>';
+    h+='</div>';
+  }
+
   /* ═══ S6: WHALE ACTIVITY ═══ */
   var whC=Object.keys(whaleWaves).filter(function(s){return whaleWaves[s]&&whaleWaves[s].waves&&whaleWaves[s].waves.length}).length;
   h+='<div class="sv-sec-title">🐋 '+(ar?'نشاط الحيتان':'Whale Activity')+' <span style="font-size:9px;padding:2px 6px;border-radius:5px;background:rgba(0,255,136,.1);color:var(--up)">'+whC+'</span></div>';
@@ -4717,6 +4733,9 @@ function renderMonPanel(){
   h+='<div style="text-align:center;font-size:8px;color:var(--t3);margin-top:8px">🔄 Supervisor: '+colTxt+' — report '+(supervisorData.lastReport?new Date(supervisorData.lastReport).toLocaleDateString():'Never')+'</div>';
 
   el.innerHTML=h;
+  /* Populate the live-source list with the last-known probe state (neutral until
+     the user taps "Ping all sources"). The element was just (re)created above. */
+  if(_liveSrcCheck){try{if(typeof renderSourceHealth==='function')renderSourceHealth('monSrcHealthList')}catch(e){}}
 }
 /* DASHBOARD */
 var lastFullLoad=0;var LOAD_COOLDOWN=15000;

@@ -13,9 +13,12 @@
 
 /* Initial render — one neutral row per source, before any probe.
    Re-render on every probe completion. */
-function renderSourceHealth() {
+/* listId defaults to the Account-page list ('srcHealthList'); the Monitor panel
+   passes its own element id so the SAME tested probe/render can run in both
+   places (#3 monitor audit — the real source checker was orphaned in Account). */
+function renderSourceHealth(listId) {
   if (typeof document === 'undefined') return;
-  var listEl = document.getElementById('srcHealthList');
+  var listEl = document.getElementById(listId || 'srcHealthList');
   if (!listEl || typeof NEXUS_SOURCES === 'undefined') return;
 
   listEl.innerHTML = NEXUS_SOURCES.map(function (s) {
@@ -55,11 +58,12 @@ function renderSourceHealth() {
 
 /* Run the probe, render twice (once with the existing state, once
    after results land), and update the summary line + button label. */
-async function runSourceHealthCheck() {
+async function runSourceHealthCheck(ids) {
   if (typeof document === 'undefined' || typeof pingAllSources !== 'function') return;
-  var btn = document.getElementById('srcHealthRunBtn');
-  var listEl = document.getElementById('srcHealthList');
-  var sumEl = document.getElementById('srcHealthSummary');
+  ids = ids || {};
+  var btn = document.getElementById(ids.btn || 'srcHealthRunBtn');
+  var listEl = document.getElementById(ids.list || 'srcHealthList');
+  var sumEl = document.getElementById(ids.summary || 'srcHealthSummary');
   if (btn) {
     btn.disabled = true;
     /* Don't translate the button label — it's transient; just signal busy. */
@@ -74,7 +78,7 @@ async function runSourceHealthCheck() {
   } catch (e) {
     results = [];
   }
-  renderSourceHealth();
+  renderSourceHealth(ids.list);
 
   if (sumEl) {
     var ok = results.filter(function (r) {

@@ -1411,6 +1411,36 @@ function scalpConfFloor(monitorMinConf, singleGate) {
   return Math.max(35, m - 10);
 }
 
+/* dataSourceHealth — honest "data monitor" health from the live feed counts
+   (#1 monitor audit). The home card's % was getConnQuality() alone, which
+   measures ONLY the freshness of the primary price feed — so it read 100% even
+   while several upstreams were failing (the live [DEPTH-HYPE] / [OI-USD1] HTTP
+   400s). This counts how many tracked sources are actually flowing:
+   pct = alive / total. The caller shows min(freshness, pct) so the headline
+   drops when a feed goes stale OR a source dies, and surfaces `down` so the
+   panel can name the offenders. Sources flagged { optional:true } (legitimately
+   empty feeds like News/Unlocks) are excluded from the score. Pure: array of
+   { name, count } in, { pct, alive, total, down } out; never throws. */
+function dataSourceHealth(sources) {
+  if (!Array.isArray(sources)) return { pct: 0, alive: 0, total: 0, down: [] };
+  var alive = 0,
+    total = 0,
+    down = [];
+  for (var i = 0; i < sources.length; i++) {
+    var s = sources[i];
+    if (!s || s.optional) continue;
+    total++;
+    if (+s.count > 0) alive++;
+    else down.push(s.name);
+  }
+  return {
+    pct: total > 0 ? Math.round((alive / total) * 100) : 0,
+    alive: alive,
+    total: total,
+    down: down,
+  };
+}
+
 /* gemMcGate — should a gem candidate be REJECTED on market-cap grounds?
    (G3 scanner audit.)
 

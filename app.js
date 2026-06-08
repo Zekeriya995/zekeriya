@@ -4407,11 +4407,25 @@ function updateQACards(){
     var favEl=document.getElementById('qaFav');if(favEl)favEl.textContent=favorites.length+(lang==='ar'?' عملات':' coins');
     var alEl=document.getElementById('qaAlerts');if(alEl){var c=notifHist?notifHist.length:0;alEl.innerHTML=c>0?c+' '+(lang==='ar'?'جديدة':'new')+'<span style="display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--dn);margin-right:3px;animation:pls 1s infinite"></span>':'0'}
     var monEl=document.getElementById('qaMon');if(monEl){
-      var svRpt=supervisorData.dailyReport;
-      if(svRpt&&svRpt.gradeLabel){
-        var gCol=svRpt.grade>=85?'var(--up)':svRpt.grade>=60?'var(--warn)':'var(--dn)';
-        monEl.innerHTML='<span style="font-size:14px;font-weight:800;color:'+gCol+'">'+svRpt.gradeLabel+'</span><span style="font-size:8px;color:var(--t3)"> ('+svRpt.grade+')</span>';
-      }else{var q=getConnQuality();monEl.textContent=q+'%';monEl.style.color=q>=80?'var(--up)':q>=50?'var(--warn)':'var(--dn)'}
+      /* #1 (monitor audit): the headline % was getConnQuality() — freshness of
+         the PRIMARY feed only — so it read 100% while upstreams were failing.
+         Show an HONEST min(freshness, source-availability) instead, with the
+         daily grade as a small suffix when available. Behind
+         nxMonitorFix_card_health (default on); 'off' = legacy grade-or-conn%. */
+      if(typeof dataSourceHealth==='function'&&localStorage.getItem('nxMonitorFix_card_health')!=='off'){
+        var _byC=Object.keys(T).filter(function(s){return T[s]&&T[s].by}).length;
+        var _hl=dataSourceHealth([{name:'Prices',count:Object.keys(T).length},{name:'FR',count:Object.keys(FR).length},{name:'OI',count:Object.keys(OI).length},{name:'L/S',count:Object.keys(LS).length},{name:'Coinalyze',count:Object.keys(coinalyzeOI).length},{name:'Bitfinex',count:Object.keys(bitfinexMargin).length},{name:'Hyperliquid',count:Object.keys(hyperliquidData).length},{name:'Coinbase',count:Object.keys(CBP).length},{name:'Bybit',count:_byC}]);
+        var _pct=Math.min(getConnQuality(),_hl.pct);
+        var _hc=_pct>=85?'var(--up)':_pct>=60?'var(--warn)':'var(--dn)';
+        var _gr=supervisorData.dailyReport&&supervisorData.dailyReport.gradeLabel?'<span style="font-size:8px;color:var(--t3)"> · '+supervisorData.dailyReport.gradeLabel+'</span>':'';
+        monEl.style.color='';monEl.innerHTML='<span style="color:'+_hc+'">'+_pct+'%</span>'+_gr;
+      }else{
+        var svRpt=supervisorData.dailyReport;
+        if(svRpt&&svRpt.gradeLabel){
+          var gCol=svRpt.grade>=85?'var(--up)':svRpt.grade>=60?'var(--warn)':'var(--dn)';
+          monEl.innerHTML='<span style="font-size:14px;font-weight:800;color:'+gCol+'">'+svRpt.gradeLabel+'</span><span style="font-size:8px;color:var(--t3)"> ('+svRpt.grade+')</span>';
+        }else{var q=getConnQuality();monEl.textContent=q+'%';monEl.style.color=q>=80?'var(--up)':q>=50?'var(--warn)':'var(--dn)'}
+      }
     }
   }catch(e){}
 }
@@ -4553,7 +4567,7 @@ function renderMonPanel(){
   /* ═══ S5: EXCHANGE HEALTH ═══ */
   h+='<div class="sv-sec-title">🌐 '+(ar?'صحة البورصات':'Exchange Health')+'</div>';
   h+='<div class="sv-exchange-grid">';
-  var exArr=[{n:'Binance Spot',c:tkC},{n:'Binance Futures',c:frC},{n:'Bybit',c:Object.keys(coinalyzeOI).length},{n:'Coinbase',c:Object.keys(CBP).length},{n:'Bitfinex',c:Object.keys(bitfinexMargin).length},{n:'Hyperliquid',c:Object.keys(hyperliquidData).length},{n:'Coinalyze',c:Object.keys(coinalyzeOI).length}];
+  var exArr=[{n:'Binance Spot',c:tkC},{n:'Binance Futures',c:frC},{n:'Bybit',c:Object.keys(T).filter(function(s){return T[s]&&T[s].by}).length},{n:'Coinbase',c:Object.keys(CBP).length},{n:'Bitfinex',c:Object.keys(bitfinexMargin).length},{n:'Hyperliquid',c:Object.keys(hyperliquidData).length},{n:'Coinalyze',c:Object.keys(coinalyzeOI).length}];
   exArr.forEach(function(ex){h+='<div class="sv-ex-item" style="border-color:'+(ex.c>0?'rgba(0,255,136,.1)':'rgba(255,56,96,.08)')+'"><span style="font-size:8px;font-weight:700;color:var(--t1)">'+ex.n+'</span><span style="font-size:9px;font-family:var(--fm);font-weight:700;color:'+(ex.c>0?'var(--up)':'var(--dn)')+'">'+(ex.c>0?'✅ '+ex.c:'❌')+'</span></div>';});
   h+='</div>';
 

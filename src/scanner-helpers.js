@@ -1441,6 +1441,42 @@ function dataSourceHealth(sources) {
   };
 }
 
+/* supervisorGrade — the daily grade + WHETHER it reflects trading performance
+   (#4 monitor audit). The legacy grade always blended scanRate/whaleRate/PnL with
+   API/uptime, so a user who never traded still scored ~"C" — a performance letter
+   with nothing behind it. This splits the verdict by sample size:
+     tradeSample >= minSample → 'performance': the full blend (legacy scale, verbatim).
+     otherwise               → 'data': grade from API + uptime ONLY (the 0-trade
+       performance buckets excluded), so the card/panel can label it data-health
+       instead of implying a trading score. Pure: metrics in,
+       { grade, gradeLabel, basis, tradeSample } out; unit-tested. */
+function _svGradeLabel(g) {
+  return g >= 85 ? 'A' : g >= 70 ? 'B+' : g >= 60 ? 'B' : g >= 50 ? 'C' : 'D';
+}
+function supervisorGrade(m) {
+  m = m || {};
+  var scanRate = +m.scanRate || 0,
+    whaleRate = +m.whaleRate || 0,
+    apiRate = +m.apiRate || 0,
+    totalPnl = +m.totalPnl || 0,
+    disconnects = +m.disconnects || 0;
+  var tradeSample = (+m.tradeSample || 0) + (+m.whaleSample || 0);
+  var minSample = isFinite(+m.minSample) ? +m.minSample : 5;
+  if (tradeSample < minSample) {
+    var d =
+      (apiRate >= 95 ? 50 : apiRate >= 80 ? 38 : 12) +
+      (disconnects === 0 ? 50 : disconnects <= 2 ? 33 : 16);
+    return { grade: d, gradeLabel: _svGradeLabel(d), basis: 'data', tradeSample: tradeSample };
+  }
+  var g =
+    (scanRate >= 70 ? 30 : scanRate >= 50 ? 20 : 10) +
+    (whaleRate >= 60 ? 20 : whaleRate >= 40 ? 10 : 0) +
+    (apiRate >= 95 ? 20 : apiRate >= 80 ? 15 : 5) +
+    (totalPnl > 0 ? 15 : totalPnl > -2 ? 10 : 5) +
+    (disconnects === 0 ? 15 : disconnects <= 2 ? 10 : 5);
+  return { grade: g, gradeLabel: _svGradeLabel(g), basis: 'performance', tradeSample: tradeSample };
+}
+
 /* gemMcGate — should a gem candidate be REJECTED on market-cap grounds?
    (G3 scanner audit.)
 

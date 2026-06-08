@@ -247,13 +247,23 @@ function supervisorDailyReport() {
   var avgDataAge = qualRecent.length > 0 ? Math.round(qualRecent.reduce(function(s, q) { return s + q.dataAge; }, 0) / qualRecent.length) : 0;
   var disconnects = qualRecent.filter(function(q) { return q.coins < 50; }).length;
   var totalPnl = recentTrades.reduce(function(s, t) { return s + (t.pnl || 0); }, 0);
-  var grade = 0;
-  if (scanRate >= 70) grade += 30; else if (scanRate >= 50) grade += 20; else grade += 10;
-  if (whaleRate >= 60) grade += 20; else if (whaleRate >= 40) grade += 10;
-  if (avgApiRate >= 95) grade += 20; else if (avgApiRate >= 80) grade += 15; else grade += 5;
-  if (totalPnl > 0) grade += 15; else if (totalPnl > -2) grade += 10; else grade += 5;
-  if (disconnects === 0) grade += 15; else if (disconnects <= 2) grade += 10; else grade += 5;
-  var gradeLabel = grade >= 85 ? 'A' : grade >= 70 ? 'B+' : grade >= 60 ? 'B' : grade >= 50 ? 'C' : 'D';
+  /* #4 (monitor audit): split the grade by sample size — a no-trade user no
+     longer gets a misleading performance "C". supervisorGrade (pure, tested)
+     returns a 'data' basis (API+uptime only) until enough trades exist. Behind
+     nxMonitorFix_grade_basis (default on); 'off' = the legacy blended grade. */
+  var grade, gradeLabel, gradeBasis = 'performance';
+  if (typeof supervisorGrade === 'function' && localStorage.getItem('nxMonitorFix_grade_basis') !== 'off') {
+    var _gr = supervisorGrade({ scanRate: scanRate, whaleRate: whaleRate, apiRate: avgApiRate, totalPnl: totalPnl, disconnects: disconnects, tradeSample: recentTrades.length, whaleSample: whaleRecent.length });
+    grade = _gr.grade; gradeLabel = _gr.gradeLabel; gradeBasis = _gr.basis;
+  } else {
+    grade = 0;
+    if (scanRate >= 70) grade += 30; else if (scanRate >= 50) grade += 20; else grade += 10;
+    if (whaleRate >= 60) grade += 20; else if (whaleRate >= 40) grade += 10;
+    if (avgApiRate >= 95) grade += 20; else if (avgApiRate >= 80) grade += 15; else grade += 5;
+    if (totalPnl > 0) grade += 15; else if (totalPnl > -2) grade += 10; else grade += 5;
+    if (disconnects === 0) grade += 15; else if (disconnects <= 2) grade += 10; else grade += 5;
+    gradeLabel = grade >= 85 ? 'A' : grade >= 70 ? 'B+' : grade >= 60 ? 'B' : grade >= 50 ? 'C' : 'D';
+  }
   var recommendations = [];
   Object.keys(gateCounts).forEach(function(gate) {
     if (gateCounts[gate].total >= 3) { recommendations.push({ type: 'info', text: 'Gate "' + gate + '" blocked ' + gateCounts[gate].total + ' signals' }); }
@@ -263,7 +273,7 @@ function supervisorDailyReport() {
   if (avgDataAge > 15) recommendations.push({ type: 'warn', text: 'Average data age ' + avgDataAge + 's — check connection' });
   if (disconnects > 3) recommendations.push({ type: 'bad', text: 'Frequent disconnects (' + disconnects + 'x) — check PROXY' });
   var report = {
-    time: now, grade: grade, gradeLabel: gradeLabel,
+    time: now, grade: grade, gradeLabel: gradeLabel, gradeBasis: gradeBasis,
     totalTrades: recentTrades.length, scanWins: scanWins, scanRate: scanRate,
     bestTrade: bestTrade ? { sym: bestTrade.sym, pnl: bestTrade.pnl || 0 } : null,
     worstTrade: worstTrade ? { sym: worstTrade.sym, pnl: worstTrade.pnl || 0 } : null,
@@ -4417,7 +4427,7 @@ function updateQACards(){
         var _hl=dataSourceHealth([{name:'Prices',count:Object.keys(T).length},{name:'FR',count:Object.keys(FR).length},{name:'OI',count:Object.keys(OI).length},{name:'L/S',count:Object.keys(LS).length},{name:'Coinalyze',count:Object.keys(coinalyzeOI).length},{name:'Bitfinex',count:Object.keys(bitfinexMargin).length},{name:'Hyperliquid',count:Object.keys(hyperliquidData).length},{name:'Coinbase',count:Object.keys(CBP).length},{name:'Bybit',count:_byC}]);
         var _pct=Math.min(getConnQuality(),_hl.pct);
         var _hc=_pct>=85?'var(--up)':_pct>=60?'var(--warn)':'var(--dn)';
-        var _gr=supervisorData.dailyReport&&supervisorData.dailyReport.gradeLabel?'<span style="font-size:8px;color:var(--t3)"> · '+supervisorData.dailyReport.gradeLabel+'</span>':'';
+        var _gr=(supervisorData.dailyReport&&supervisorData.dailyReport.gradeLabel&&supervisorData.dailyReport.gradeBasis!=='data')?'<span style="font-size:8px;color:var(--t3)"> · '+supervisorData.dailyReport.gradeLabel+'</span>':'';
         monEl.style.color='';monEl.innerHTML='<span style="color:'+_hc+'">'+_pct+'%</span>'+_gr;
       }else{
         var svRpt=supervisorData.dailyReport;
@@ -4492,16 +4502,24 @@ function renderMonPanel(){
   /* ═══ S1: DAILY REPORT CARD ═══ */
   var rpt=supervisorData.dailyReport;
   if(rpt){
+    /* #4 (monitor audit): a 'data' basis means there aren't enough trades yet —
+       relabel as Data Health and hide the (all-zero) performance stats so the
+       letter no longer implies trading performance. */
+    var _db=rpt.gradeBasis==='data';
     var gradeCol=rpt.grade>=85?'var(--up)':rpt.grade>=60?'var(--warn)':'var(--dn)';
     h+='<div class="sv-report-card" onclick="try{renderDailyReport()}catch(e){}">';
     h+='<div class="sv-grade" style="color:'+gradeCol+'">'+rpt.gradeLabel+'</div>';
-    h+='<div style="font-size:11px;font-weight:700;color:'+gradeCol+'">'+(ar?'التقييم اليومي':'Daily Grade')+' ('+rpt.grade+'/100)</div>';
-    h+='<div class="sv-report-stats">';
-    h+='<div class="sv-rs"><span class="sv-rs-v" style="color:'+(rpt.scanRate>=60?'var(--up)':'var(--warn)')+'">'+rpt.scanRate+'%</span><span class="sv-rs-l">'+(ar?'سكانر':'Scanner')+'</span></div>';
-    h+='<div class="sv-rs"><span class="sv-rs-v" style="color:'+(rpt.whaleRate>=50?'var(--up)':'var(--warn)')+'">'+rpt.whaleRate+'%</span><span class="sv-rs-l">'+(ar?'حيتان':'Whales')+'</span></div>';
-    h+='<div class="sv-rs"><span class="sv-rs-v" style="color:'+(rpt.vipRate>=60?'var(--up)':'var(--warn)')+'">'+rpt.vipRate+'%</span><span class="sv-rs-l">VIP</span></div>';
-    h+='<div class="sv-rs"><span class="sv-rs-v" style="color:'+(rpt.totalPnl>=0?'var(--up)':'var(--dn)')+'">'+(rpt.totalPnl>=0?'+':'')+rpt.totalPnl.toFixed(1)+'%</span><span class="sv-rs-l">P&L</span></div>';
-    h+='</div>';
+    h+='<div style="font-size:11px;font-weight:700;color:'+gradeCol+'">'+(_db?(ar?'صحّة البيانات':'Data Health'):(ar?'التقييم اليومي':'Daily Grade'))+' ('+rpt.grade+'/100)</div>';
+    if(_db){
+      h+='<div style="font-size:9px;color:var(--t3);margin-top:6px;text-align:center">'+(ar?'📊 تقييم الأداء يبدأ بعد أن تنفّذ صفقات عبر المنصّة':'📊 Performance grade starts once you place trades')+'</div>';
+    }else{
+      h+='<div class="sv-report-stats">';
+      h+='<div class="sv-rs"><span class="sv-rs-v" style="color:'+(rpt.scanRate>=60?'var(--up)':'var(--warn)')+'">'+rpt.scanRate+'%</span><span class="sv-rs-l">'+(ar?'سكانر':'Scanner')+'</span></div>';
+      h+='<div class="sv-rs"><span class="sv-rs-v" style="color:'+(rpt.whaleRate>=50?'var(--up)':'var(--warn)')+'">'+rpt.whaleRate+'%</span><span class="sv-rs-l">'+(ar?'حيتان':'Whales')+'</span></div>';
+      h+='<div class="sv-rs"><span class="sv-rs-v" style="color:'+(rpt.vipRate>=60?'var(--up)':'var(--warn)')+'">'+rpt.vipRate+'%</span><span class="sv-rs-l">VIP</span></div>';
+      h+='<div class="sv-rs"><span class="sv-rs-v" style="color:'+(rpt.totalPnl>=0?'var(--up)':'var(--dn)')+'">'+(rpt.totalPnl>=0?'+':'')+rpt.totalPnl.toFixed(1)+'%</span><span class="sv-rs-l">P&L</span></div>';
+      h+='</div>';
+    }
     h+='<div style="font-size:8px;color:var(--t3);margin-top:6px">'+new Date(rpt.time).toLocaleString()+' — '+(ar?'اضغط للتفاصيل':'Tap for details')+'</div></div>';
   }
 

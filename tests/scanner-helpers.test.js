@@ -2140,3 +2140,54 @@ test('dataSourceHealth — junk input is safe (0/empty, never throws)', () => {
   assert.equal(r.alive, 0);
   assert.deepEqual(r.down, ['x']);
 });
+
+/* ─── supervisorGrade (#4 monitor audit: data vs performance basis) ───── */
+
+test('supervisorGrade — performance basis matches the legacy blend when trades exist', () => {
+  const r = supervisorGrade({
+    scanRate: 75,
+    whaleRate: 65,
+    apiRate: 96,
+    totalPnl: 1,
+    disconnects: 0,
+    tradeSample: 10,
+  });
+  assert.equal(r.basis, 'performance');
+  assert.equal(r.grade, 30 + 20 + 20 + 15 + 15); /* 100 */
+  assert.equal(r.gradeLabel, 'A');
+});
+
+test('supervisorGrade — no/low trades → data basis from API+uptime only (the #4 fix)', () => {
+  /* the no-trade case: scanRate/whaleRate/PnL all 0, good API+uptime → "Data A",
+     NOT a misleading performance "C". */
+  const r = supervisorGrade({
+    scanRate: 0,
+    whaleRate: 0,
+    apiRate: 96,
+    totalPnl: 0,
+    disconnects: 0,
+    tradeSample: 0,
+    whaleSample: 0,
+  });
+  assert.equal(r.basis, 'data');
+  assert.equal(r.grade, 100); /* 50 (api) + 50 (uptime) */
+  assert.equal(r.gradeLabel, 'A');
+});
+
+test('supervisorGrade — tradeSample = trades + whales vs minSample (overridable)', () => {
+  assert.equal(
+    supervisorGrade({ tradeSample: 3, whaleSample: 3, apiRate: 96 }).basis,
+    'performance'
+  );
+  assert.equal(supervisorGrade({ tradeSample: 2, whaleSample: 2, apiRate: 96 }).basis, 'data');
+  assert.equal(supervisorGrade({ tradeSample: 10, minSample: 20 }).basis, 'data');
+});
+
+test('supervisorGrade — degraded data lowers the data grade; junk input is safe', () => {
+  assert.ok(
+    supervisorGrade({ apiRate: 50, disconnects: 5, tradeSample: 0 }).grade < 50
+  ); /* 12+16 → D */
+  const j = supervisorGrade();
+  assert.equal(j.basis, 'data');
+  assert.ok(j.grade >= 0 && j.grade <= 100);
+});

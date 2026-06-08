@@ -1483,6 +1483,14 @@ const BITFINEX_PAIRS = [
 const BFX_BURST_THROTTLE = process.env.BITFINEX_BURST_THROTTLE !== 'off';
 const BFX_BATCH_SIZE = +process.env.BITFINEX_BATCH_SIZE || 2; /* pairs/batch → ×2 requests */
 const BFX_BATCH_GAP_MS = +process.env.BITFINEX_BATCH_GAP_MS || 300;
+/* Footprint cap (2026-06): Bitfinex IP-rate-limited the host even at the
+   throttled rate — a single manual request 429s — so fetch only the top
+   BITFINEX_MAX_PAIRS pairs (default 2 = BTC/ETH). Enough to keep the margin
+   signal for the majors while the penalised IP recovers; 0 disables Bitfinex
+   entirely, higher (≤ list length) re-expands once it recovers. */
+const BFX_MAX_PAIRS = Number.isFinite(+process.env.BITFINEX_MAX_PAIRS)
+  ? +process.env.BITFINEX_MAX_PAIRS
+  : 2;
 const BFX_FETCH_OPTS = { retries: 3, backoff: [1500, 5000, 15000] };
 const _sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -1516,10 +1524,17 @@ async function fetchBitfinex() {
       return sym;
     };
 
+    /* Footprint cap: only the top BFX_MAX_PAIRS pairs (0 = Bitfinex disabled). */
+    const _bfxPairs = BFX_MAX_PAIRS > 0 ? BITFINEX_PAIRS.slice(0, BFX_MAX_PAIRS) : [];
+    if (!_bfxPairs.length) {
+      cache.lastUpdate.bitfinex = Date.now();
+      console.log('[BITFINEX] disabled (BITFINEX_MAX_PAIRS=0)');
+      return;
+    }
     /* Sequential small batches when throttling; one all-at-once batch when off
        (legacy). chunk() returns [] on bad input, so fall back defensively. */
-    const batches = BFX_BURST_THROTTLE ? chunk(BITFINEX_PAIRS, BFX_BATCH_SIZE) : [BITFINEX_PAIRS];
-    const safeBatches = batches.length ? batches : [BITFINEX_PAIRS];
+    const batches = BFX_BURST_THROTTLE ? chunk(_bfxPairs, BFX_BATCH_SIZE) : [_bfxPairs];
+    const safeBatches = batches.length ? batches : [_bfxPairs];
     const updates = [];
     for (let b = 0; b < safeBatches.length; b++) {
       const settled = await Promise.allSettled(safeBatches[b].map(fetchPair));

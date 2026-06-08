@@ -19,6 +19,11 @@ module.exports = {
            reverting. Tune further via these same keys if Bitfinex tightens. */
         BITFINEX_BATCH_SIZE: '1',
         BITFINEX_BATCH_GAP_MS: '2000',
+        /* Footprint cap — Bitfinex IP-rate-limited the host (a single request
+           429s) even at the throttled rate, so fetch only the top N pairs
+           (2 = BTC/ETH) to let the penalised IP recover. 0 disables Bitfinex;
+           raise (≤17) to re-expand once it recovers. */
+        BITFINEX_MAX_PAIRS: '2',
       },
       watch: false,
       time: true,

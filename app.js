@@ -4424,7 +4424,7 @@ function updateQACards(){
          nxMonitorFix_card_health (default on); 'off' = legacy grade-or-conn%. */
       if(typeof dataSourceHealth==='function'&&localStorage.getItem('nxMonitorFix_card_health')!=='off'){
         var _byC=Object.keys(T).filter(function(s){return T[s]&&T[s].by}).length;
-        var _hl=dataSourceHealth([{name:'Prices',count:Object.keys(T).length},{name:'FR',count:Object.keys(FR).length},{name:'OI',count:Object.keys(OI).length},{name:'L/S',count:Object.keys(LS).length},{name:'Coinalyze',count:Object.keys(coinalyzeOI).length},{name:'Bitfinex',count:Object.keys(bitfinexMargin).length},{name:'Hyperliquid',count:Object.keys(hyperliquidData).length},{name:'Coinbase',count:Object.keys(CBP).length},{name:'Bybit',count:_byC}]);
+        var _hl=dataSourceHealth([{name:'Prices',count:Object.keys(T).length},{name:'FR',count:Object.keys(FR).length},{name:'OI',count:Object.keys(OI).length},{name:'L/S',count:Object.keys(LS).length},{name:'Coinalyze',count:Object.keys(coinalyzeOI).length},{name:'Bitfinex',count:Object.keys(bitfinexMargin).length,optional:true},{name:'Hyperliquid',count:Object.keys(hyperliquidData).length},{name:'Coinbase',count:Object.keys(CBP).length},{name:'Bybit',count:_byC}]);
         var _pct=Math.min(getConnQuality(),_hl.pct);
         var _hc=_pct>=85?'var(--up)':_pct>=60?'var(--warn)':'var(--dn)';
         var _gr=(supervisorData.dailyReport&&supervisorData.dailyReport.gradeLabel&&supervisorData.dailyReport.gradeBasis!=='data')?'<span style="font-size:8px;color:var(--t3)"> · '+supervisorData.dailyReport.gradeLabel+'</span>':'';

@@ -7545,14 +7545,44 @@ function nxShowUpdateBanner() {
 if ('serviceWorker' in navigator) {
   try {
     navigator.serviceWorker.register('./sw.js').then(function (reg) {
+      /* Installed PWAs resume from the background WITHOUT a navigation, so the
+         browser may not re-check sw.js for a new version for up to ~24h — the
+         "the app never gets my updates" bug. Proactively check on load, every
+         30 min while open, and (the key one) whenever the app is foregrounded.
+         When a new version has finished downloading we apply it on the NEXT
+         foreground — seamless, since the user just opened the app — and also
+         surface the banner for active sessions. */
+      var _nxUpdateReady = false;
+      function nxCheckUpdate() {
+        try {
+          reg.update();
+        } catch (e) {
+          /* noop */
+        }
+      }
+      nxCheckUpdate();
+      setInterval(nxCheckUpdate, 30 * 60 * 1000);
+      document.addEventListener('visibilitychange', function () {
+        if (document.visibilityState !== 'visible') return;
+        if (_nxUpdateReady) {
+          _nxUpdateReady = false;
+          try {
+            location.reload();
+          } catch (e) {
+            /* noop */
+          }
+        } else {
+          nxCheckUpdate();
+        }
+      });
       reg.addEventListener('updatefound', function () {
         var nw = reg.installing;
         if (!nw) return;
         nw.addEventListener('statechange', function () {
-          /* Only prompt when this is an *update* over an existing SW; first
-             install (no controller yet) is the user's first visit and needs
-             no banner. */
+          /* Only when this is an *update* over an existing SW; first install
+             (no controller yet) is the user's first visit and needs nothing. */
           if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            _nxUpdateReady = true;
             nxShowUpdateBanner();
           }
         });

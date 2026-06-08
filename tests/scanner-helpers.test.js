@@ -2090,3 +2090,53 @@ test('scalpConfFloor — legacy (off) tracks the Monitor floor (minConf-10, min 
   assert.equal(scalpConfFloor(undefined, false), 40); /* no Monitor → legacy 40 */
   assert.equal(scalpConfFloor(NaN, false), 40);
 });
+
+/* ─── dataSourceHealth (#1 monitor audit: honest data-source health %) ─── */
+
+test('dataSourceHealth — pct is alive/total and names the dead sources', () => {
+  const r = dataSourceHealth([
+    { name: 'Prices', count: 800 },
+    { name: 'FR', count: 700 },
+    { name: 'Bitfinex', count: 0 },
+    { name: 'Coinalyze', count: 50 },
+  ]);
+  assert.equal(r.total, 4);
+  assert.equal(r.alive, 3);
+  assert.equal(r.pct, 75);
+  assert.deepEqual(r.down, ['Bitfinex']);
+});
+
+test('dataSourceHealth — all alive = 100, all dead = 0', () => {
+  assert.equal(
+    dataSourceHealth([
+      { name: 'a', count: 1 },
+      { name: 'b', count: 5 },
+    ]).pct,
+    100
+  );
+  assert.equal(
+    dataSourceHealth([
+      { name: 'a', count: 0 },
+      { name: 'b', count: 0 },
+    ]).pct,
+    0
+  );
+});
+
+test('dataSourceHealth — { optional:true } sources are excluded from the score', () => {
+  const r = dataSourceHealth([
+    { name: 'Prices', count: 800 },
+    { name: 'News', count: 0, optional: true },
+  ]);
+  assert.equal(r.total, 1); /* News doesn't count */
+  assert.equal(r.pct, 100);
+});
+
+test('dataSourceHealth — junk input is safe (0/empty, never throws)', () => {
+  assert.deepEqual(dataSourceHealth(null), { pct: 0, alive: 0, total: 0, down: [] });
+  assert.deepEqual(dataSourceHealth([]), { pct: 0, alive: 0, total: 0, down: [] });
+  const r = dataSourceHealth([{ name: 'x', count: 'abc' }, null]); /* NaN count, null entry */
+  assert.equal(r.total, 1);
+  assert.equal(r.alive, 0);
+  assert.deepEqual(r.down, ['x']);
+});

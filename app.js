@@ -4559,7 +4559,7 @@ function renderMonPanel(){
   h+='<div class="sv-pip-step"><div class="sv-pip-v" style="color:var(--ultra)">'+openTrades.length+'</div><div class="sv-pip-l">'+(ar?'صفقة':'Trades')+'</div></div></div>';
 
   /* ═══ S4: DATA FRESHNESS ═══ */
-  h+='<div class="sv-sec-title">📡 '+(ar?'نضارة البيانات':'Data Freshness')+'</div>';
+  h+='<div class="sv-sec-title">📡 '+(ar?'تدفّق البيانات':'Data Feeds')+'</div>';
   h+='<div class="cd" style="padding:8px">';
   var dataAge=Math.round((Date.now()-lastDataTime)/1000);
   function dfRow(name,count){var col=count>0?'var(--up)':'var(--dn)';var st=count>0?'✅':'❌';return'<div style="display:flex;justify-content:space-between;align-items:center;padding:4px 2px;border-bottom:1px solid var(--bdr);font-size:10px"><span style="color:var(--t2)">'+name+'</span><span style="font-family:var(--fm);font-weight:700;color:'+col+'">'+st+' '+count+'</span></div>';}
@@ -4627,11 +4627,21 @@ function renderMonPanel(){
   /* ═══ S7: MARKET MOOD ═══ */
   h+='<div class="sv-sec-title">🧠 '+(ar?'مزاج السوق':'Market Mood')+'</div>';
   var allCoins=Object.values(T);var greenPct=allCoins.length>0?Math.round(allCoins.filter(function(x){return x.c>0}).length/allCoins.length*100):50;
-  var moodScore=50;moodScore+=(fgValue-50)*0.3;moodScore+=(greenPct-50)*0.2;
-  var btcChg=T.BTC?T.BTC.c:0;moodScore+=btcChg*2;
-  if(typeof newsSentiment!=='undefined'&&newsSentiment&&newsSentiment.score)moodScore+=(newsSentiment.score-50)*0.15;
-  if(typeof stablecoinData!=='undefined'&&stablecoinData&&stablecoinData['USDT']&&stablecoinData['USDT'].change7d)moodScore+=stablecoinData['USDT'].change7d*3;
-  moodScore=Math.max(0,Math.min(100,Math.round(moodScore)));
+  var btcChg=T.BTC?T.BTC.c:0;
+  /* #8 (monitor audit): bound the mood inputs so a flash crash / stablecoin
+     spike can't peg the gauge (BTC was ×2 unbounded, USDT-7d ×3 unbounded).
+     marketMoodScore (pure, tested) caps BTC ±8 and USDT-7d ±2. Behind
+     nxMonitorFix_mood_bounded (default on); 'off' = the legacy unbounded sum. */
+  var _newsScore=(typeof newsSentiment!=='undefined'&&newsSentiment&&newsSentiment.score)?newsSentiment.score:50;
+  var _usdt7d=(typeof stablecoinData!=='undefined'&&stablecoinData&&stablecoinData['USDT']&&stablecoinData['USDT'].change7d)?stablecoinData['USDT'].change7d:0;
+  var moodScore;
+  if(typeof marketMoodScore==='function'&&localStorage.getItem('nxMonitorFix_mood_bounded')!=='off'){
+    moodScore=marketMoodScore({fgValue:fgValue,greenPct:greenPct,btcChg:btcChg,newsScore:_newsScore,usdtChg7d:_usdt7d});
+  }else{
+    moodScore=50;moodScore+=(fgValue-50)*0.3;moodScore+=(greenPct-50)*0.2;moodScore+=btcChg*2;
+    moodScore+=(_newsScore-50)*0.15;moodScore+=_usdt7d*3;
+    moodScore=Math.max(0,Math.min(100,Math.round(moodScore)));
+  }
   var moodCol=moodScore>=65?'var(--up)':moodScore>=40?'var(--warn)':'var(--dn)';
   var moodLabel=moodScore>=75?(ar?'طمع':'Greedy'):moodScore>=55?(ar?'تفاؤل':'Optimistic'):moodScore>=40?(ar?'محايد':'Neutral'):moodScore>=25?(ar?'خوف':'Fearful'):(ar?'ذعر':'Panic');
   h+='<div class="cd" style="padding:12px;text-align:center">';

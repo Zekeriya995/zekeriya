@@ -1828,8 +1828,16 @@ function renderTagPerfChips(){
 
 function renderTrading(sigs){var f=sigs;if(curTradeFilter==='fast')f=sigs.filter(function(x){return x.type==='fast'});else if(curTradeFilter==='daily')f=sigs.filter(function(x){return x.type==='daily'});else if(curTradeFilter!=='all'){f=sigs.filter(function(x){return x.sec===curTradeFilter})}
   if(scannerSetup!=='all'){f=f.filter(function(x){return x.setup===scannerSetup})}
-  /* Part B: Quality filter — min 40% confidence, max 7 — adaptive */
-  var minConf=monitorState&&monitorState.minConf?Math.max(35,monitorState.minConf-10):40;
+  /* Part B: confidence sanity floor. Separate scopes (2026-06): the scalp list
+     is gated SOLELY by the regime-adaptive quality filter (applyScanMinScore,
+     #174). The legacy second floor — monitorState.minConf, auto-tuned by the
+     Monitor from the user's MANUAL trades — stacked a second adaptive gate that
+     could tighten WITH the regime filter and over-suppress signals (and never
+     learned for a scanner-only user). scalpConfFloor decouples it to a fixed
+     sanity floor so the Monitor returns to pure observe/measure. Behind
+     nxScannerFix_scalp_single_gate (default on); 'off' = legacy Monitor floor. */
+  var _singleGate=localStorage.getItem('nxScannerFix_scalp_single_gate')!=='off';
+  var minConf=(typeof scalpConfFloor==='function')?scalpConfFloor(monitorState&&monitorState.minConf,_singleGate):(monitorState&&monitorState.minConf?Math.max(35,monitorState.minConf-10):40);
   f=f.filter(function(s){return s.conf>=minConf});
   /* User-configurable minimum score from the slider in the scanner
      panel. Stored in localStorage so it survives reloads; default

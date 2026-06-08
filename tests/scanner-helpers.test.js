@@ -2191,3 +2191,28 @@ test('supervisorGrade — degraded data lowers the data grade; junk input is saf
   assert.equal(j.basis, 'data');
   assert.ok(j.grade >= 0 && j.grade <= 100);
 });
+
+/* ─── marketMoodScore (#8 monitor audit: bounded mood gauge) ──────────── */
+
+test('marketMoodScore — neutral inputs sit at 50', () => {
+  assert.equal(marketMoodScore({ fgValue: 50, greenPct: 50, btcChg: 0 }), 50);
+  assert.equal(marketMoodScore({}), 50);
+});
+
+test('marketMoodScore — greed tilts up, fear tilts down', () => {
+  assert.ok(marketMoodScore({ fgValue: 85, greenPct: 75, btcChg: 4 }) > 60);
+  assert.ok(marketMoodScore({ fgValue: 15, greenPct: 25, btcChg: -4 }) < 40);
+});
+
+test('marketMoodScore — extreme BTC / USDT can no longer peg the gauge (the #8 fix)', () => {
+  /* a −50% BTC flash + a +20% USDT spike are capped (BTC ±8·1.5, USDT ±2·1.5)
+     so the gauge stays bounded near neutral instead of slamming to an extreme. */
+  const crash = marketMoodScore({ fgValue: 50, greenPct: 50, btcChg: -50, usdtChg7d: 20 });
+  assert.ok(crash >= 35 && crash <= 50, 'crash mood out of bounded range: ' + crash);
+});
+
+test('marketMoodScore — clamps to 0..100 and tolerates junk', () => {
+  assert.equal(marketMoodScore({ fgValue: 999, greenPct: 999, btcChg: 999 }), 100);
+  assert.equal(marketMoodScore({ fgValue: NaN, btcChg: 'x' }), 50);
+  assert.equal(marketMoodScore(null), 50);
+});

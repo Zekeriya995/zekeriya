@@ -1477,6 +1477,28 @@ function supervisorGrade(m) {
   return { grade: g, gradeLabel: _svGradeLabel(g), basis: 'performance', tradeSample: tradeSample };
 }
 
+/* marketMoodScore — the Monitor's 0-100 mood gauge with BOUNDED inputs
+   (#8 monitor audit). The legacy sum added btcChg ×2 and USDT-7d ×3 with NO cap,
+   so a flash crash (−20% BTC = −40) or a stablecoin spike (5% = ±15) could peg or
+   wildly swing a gauge that's supposed to read sentiment. This keeps the same
+   factors and directionality but caps the volatile ones (BTC ±8, USDT-7d ±2)
+   before weighting, then clamps 0..100. Missing inputs default to neutral (50)
+   or 0 so an absent feed contributes nothing. Pure: inputs in, 0..100 out;
+   unit-tested in tests/scanner-helpers.test.js. */
+function marketMoodScore(m) {
+  m = m || {};
+  var fg = isFinite(+m.fgValue) ? +m.fgValue : 50;
+  var green = isFinite(+m.greenPct) ? +m.greenPct : 50;
+  var btc = isFinite(+m.btcChg) ? +m.btcChg : 0;
+  var news = isFinite(+m.newsScore) ? +m.newsScore : 50;
+  var usdt = isFinite(+m.usdtChg7d) ? +m.usdtChg7d : 0;
+  var bc = btc < -8 ? -8 : btc > 8 ? 8 : btc;
+  var uc = usdt < -2 ? -2 : usdt > 2 ? 2 : usdt;
+  var s = 50 + (fg - 50) * 0.3 + (green - 50) * 0.2 + bc * 1.5 + (news - 50) * 0.15 + uc * 1.5;
+  s = Math.round(s);
+  return s < 0 ? 0 : s > 100 ? 100 : s;
+}
+
 /* gemMcGate — should a gem candidate be REJECTED on market-cap grounds?
    (G3 scanner audit.)
 

@@ -2073,3 +2073,20 @@ test('fallingKnifePenalty — junk input is 0; no-whale-data is NOT exempt; thre
   assert.equal(fallingKnifePenalty(-6, NaN), -10); /* unknown whale → not exempt */
   assert.equal(fallingKnifePenalty(-6, 0, { dumpPct: -10 }), 0); /* raise the dump bar */
 });
+
+/* ─── scalpConfFloor (separate-scopes: decouple the scalp gate from Monitor) ── */
+
+test('scalpConfFloor — single-gate (default on) is a fixed 40, ignoring the Monitor', () => {
+  assert.equal(scalpConfFloor(55, true), 40);
+  assert.equal(scalpConfFloor(75, true), 40); /* Monitor raised to 75 → ignored */
+  assert.equal(scalpConfFloor(undefined, true), 40);
+  assert.equal(scalpConfFloor(NaN, true), 40);
+});
+
+test('scalpConfFloor — legacy (off) tracks the Monitor floor (minConf-10, min 35)', () => {
+  assert.equal(scalpConfFloor(55, false), 45); /* default Monitor minConf */
+  assert.equal(scalpConfFloor(75, false), 65); /* Monitor tightened after losses */
+  assert.equal(scalpConfFloor(40, false), 35); /* max(35, 30) clamps at 35 */
+  assert.equal(scalpConfFloor(undefined, false), 40); /* no Monitor → legacy 40 */
+  assert.equal(scalpConfFloor(NaN, false), 40);
+});

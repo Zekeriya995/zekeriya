@@ -1392,6 +1392,25 @@ function fallingKnifePenalty(change24h, whaleConf, opts) {
   return c <= deepDump ? -18 : -10;
 }
 
+/* scalpConfFloor — the scalp list's confidence floor, DECOUPLED from the Monitor
+   ("separate scopes" architecture fix, 2026-06). renderTrading gated the list by
+   max(35, monitorState.minConf - 10) — a SECOND adaptive floor the Monitor
+   auto-tuned from the user's MANUAL trades, stacked on top of the regime-adaptive
+   quality filter (applyScanMinScore, #174). Both could tighten together in a bad
+   streak and over-suppress signals, and a scanner-only user's Monitor never
+   learns so the floor was just static noise.
+
+   With singleGate on (default) the floor is a FIXED sanity baseline (40) with NO
+   Monitor influence, so the regime filter is the SOLE adaptive gate and the
+   Monitor returns to pure observe/measure. 'off' restores the legacy
+   Monitor-driven floor. Pure: number + bool in, a floor out; unit-tested. */
+function scalpConfFloor(monitorMinConf, singleGate) {
+  if (singleGate) return 40;
+  var m = +monitorMinConf;
+  if (!isFinite(m)) return 40;
+  return Math.max(35, m - 10);
+}
+
 /* gemMcGate — should a gem candidate be REJECTED on market-cap grounds?
    (G3 scanner audit.)
 

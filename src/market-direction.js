@@ -274,6 +274,42 @@ function scoreDirection(input) {
   };
 }
 
+/* priceTargets — split key levels into upside / downside ladders relative to the
+   current price, each ordered by PROXIMITY (nearest first). Powers the pro
+   conclusion's scenario map: levels above price are the upside targets, those
+   below are the downside targets. Pure: price + [{price,label}] in,
+   { up:[], down:[] } out; non-finite / equal-to-price levels are skipped. */
+function priceTargets(price, levels) {
+  const p = Number(price);
+  const up = [];
+  const down = [];
+  if (!Number.isFinite(p)) return { up, down }; // no anchor → no meaningful split
+  (Array.isArray(levels) ? levels : []).forEach((lv) => {
+    if (!lv) return;
+    const lp = Number(lv.price);
+    if (!Number.isFinite(lp) || lp === p) return;
+    (lp > p ? up : down).push({ price: lp, label: lv.label });
+  });
+  up.sort((a, b) => a.price - b.price);
+  down.sort((a, b) => b.price - a.price);
+  return { up, down };
+}
+
+/* candleLevelEvent — did the last CLOSED candle confirm a break of the key
+   range? close above resistance = bullish breakout; below support = bearish
+   breakdown; else in-range. Lets the pro conclusion say "closed a 4H below
+   support $X" instead of a vague "bearish". Pure; a non-finite close is
+   in-range (no false break). */
+function candleLevelEvent(close, supp, resist) {
+  const c = Number(close);
+  if (!Number.isFinite(c)) return { event: 'in_range', level: null };
+  const s = Number(supp);
+  const r = Number(resist);
+  if (Number.isFinite(r) && c > r) return { event: 'break_up', level: r };
+  if (Number.isFinite(s) && c < s) return { event: 'break_down', level: s };
+  return { event: 'in_range', level: null };
+}
+
 const MARKET_DIRECTION_API = {
   TS_STRONG_BULL,
   TS_BULL,
@@ -288,6 +324,8 @@ const MARKET_DIRECTION_API = {
   scaleTs,
   strengthScore,
   scoreDirection,
+  priceTargets,
+  candleLevelEvent,
 };
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = MARKET_DIRECTION_API;

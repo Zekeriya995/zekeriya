@@ -6426,6 +6426,129 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   /* ════════ SECTION 15: ختام التحليل (CONCLUSION — AT BOTTOM) ════════ */
   h+='<div class="mkt-section"><h3 class="mkt-section-t" style="font-size:14px;color:'+data.dCol+'">📝 15. '+(isAr?'ختام التحليل':'Analysis Conclusion')+'</h3>';
   var isBull=data.ts>=2;var isBear=data.ts<=-2;
+  if(localStorage.getItem('nxMktFix_pro_conclusion')!=='off'&&typeof MarketDirection!=='undefined'){
+  /* ══ PRO CONCLUSION — institutional desk note (flag nxMktFix_pro_conclusion).
+     Tiered evidence + scenario map (priceTargets) + large-ops liquidity +
+     candle-level WHY (candleLevelEvent on the last CLOSED 4H / daily candle).
+     Both helpers are pure + proven in tests/market-direction.test.js. Falls
+     back to the legacy 5-block below when the flag is 'off'. ══ */
+  var _conv=(data.sc10!=null?data.sc10:(data.sc||0));
+  var _convLbl=_conv>=7?(isAr?'قناعة عالية':'High conviction'):_conv>=4?(isAr?'قناعة متوسطة':'Moderate conviction'):(isAr?'قناعة منخفضة':'Low conviction');
+  var _bullets=function(arr){var s='';arr.forEach(function(r){s+='<div style="font-size:10px;color:var(--t1);line-height:1.75;padding:3px 0">▸ '+r+'</div>';});return s;};
+  /* last CLOSED candle (index -2; -1 is still forming) vs the key range — the
+     "closed a 4H/daily below support $X" WHY the operator asked for. */
+  var _closedClose=function(kl){return(kl&&kl.length>=2)?+kl[kl.length-2][4]:NaN;};
+  var _ev1d=MarketDirection.candleLevelEvent(_closedClose(data.kl1d),data.supp,data.resist);
+  var _ev4=MarketDirection.candleLevelEvent(_closedClose(data.kl4h),data.supp,data.resist);
+  var _ev=_ev1d.event!=='in_range'?_ev1d:_ev4;
+  var _evTf=_ev1d.event!=='in_range'?(isAr?'يومية':'daily'):(isAr?'4 ساعات':'4H');
+  var _leadWhy;
+  if(_ev.event==='break_down')_leadWhy=isAr?'أغلق '+cn+' شمعة '+_evTf+' تحت دعم '+rP(_ev.level)+' — كسرٌ هيكلي يؤكد انتقال السيطرة إلى البائعين وفشل الطلب عند هذا المستوى.':cn+' closed a '+_evTf+' candle below support '+rP(_ev.level)+' — a structural break confirming sellers seized control and demand failed here.';
+  else if(_ev.event==='break_up')_leadWhy=isAr?'أغلق '+cn+' شمعة '+_evTf+' فوق مقاومة '+rP(_ev.level)+' — اختراقٌ مؤكد ينقل السيطرة إلى المشترين فوق هذا المستوى.':cn+' closed a '+_evTf+' candle above resistance '+rP(_ev.level)+' — a confirmed breakout handing control to buyers above here.';
+  else _leadWhy=isAr?cn+' يتداول داخل نطاق '+rP(data.supp)+' – '+rP(data.resist)+' دون كسر مؤكد بعد؛ والميل الحالي ('+data.dir+') مدفوع بالزخم والتموضع أدناه.':cn+' is trading inside the '+rP(data.supp)+'–'+rP(data.resist)+' range with no confirmed break yet; the current lean ('+data.dir+') is driven by momentum and positioning below.';
+  /* downside / upside target ladders, proximity-ordered (priceTargets). f100D
+     mirrors f100U around price (analyzeCoinRpt ships f100U, not f100D). */
+  var _f100D=2*data.price-data.f100U;
+  var _tg=MarketDirection.priceTargets(data.price,[{price:data.supp},{price:data.resist},{price:data.f618U},{price:data.f100U},{price:data.f618D},{price:_f100D}]);
+  var _lad=function(a,nM){return a.slice(0,nM||3).map(function(x){return rP(x.price);}).join(' → ');};
+  var _downLad=_lad(_tg.down,3),_upLad=_lad(_tg.up,3);
+  /* ── primary drivers (price / momentum / structure) ── */
+  var _primary=[];
+  if(data.price>data.ema20&&data.price>data.ema50)_primary.push(isAr?'السعر فوق EMA20/50 ('+rP(data.ema20)+' / '+rP(data.ema50)+') — هيكل المتوسطات صاعد':'Price above EMA20/50 ('+rP(data.ema20)+' / '+rP(data.ema50)+') — MA structure up');
+  else if(data.price<data.ema20&&data.price<data.ema50)_primary.push(isAr?'السعر تحت EMA20/50 ('+rP(data.ema20)+' / '+rP(data.ema50)+') — المتوسطات تضغط كمقاومة':'Price below EMA20/50 ('+rP(data.ema20)+' / '+rP(data.ema50)+') — MAs capping as resistance');
+  if(data.macd&&data.macd.cross==='bull')_primary.push(isAr?'تقاطع MACD صعودي جديد على 4H — تحوّل الزخم لصالح المشترين':'Fresh 4H MACD bull cross — momentum turning to buyers');
+  else if(data.macd&&data.macd.cross==='bear')_primary.push(isAr?'تقاطع MACD هبوطي جديد على 4H — تحوّل الزخم لصالح البائعين':'Fresh 4H MACD bear cross — momentum turning to sellers');
+  else if(data.macd&&data.macd.h>0)_primary.push(isAr?'هيستوغرام MACD موجب — زخم صاعد قائم':'MACD histogram positive — momentum up');
+  else if(data.macd&&data.macd.h<0)_primary.push(isAr?'هيستوغرام MACD سالب — زخم هابط قائم':'MACD histogram negative — momentum down');
+  if(data.choch)_primary.push(isAr?'ChoCH ('+data.choch+') — تغيّر شخصية السوق، إشارة انعكاس مبكرة':'ChoCH ('+data.choch+') — change of character, early reversal');
+  else if(data.bos)_primary.push(isAr?'BOS ('+data.bos+') — كسر هيكلي يؤكد استمرار الاتجاه':'BOS ('+data.bos+') — structural break confirming the trend');
+  else if(data.struct==='HH/HL')_primary.push(isAr?'هيكل صاعد: قمم وقيعان أعلى (HH/HL)':'HH/HL — higher highs & higher lows');
+  else if(data.struct==='LH/LL')_primary.push(isAr?'هيكل هابط: قمم وقيعان أدنى (LH/LL)':'LH/LL — lower highs & lower lows');
+  if(data.divRSI==='bearish'||data.divRSI1d==='bearish')_primary.push(isAr?'دايفرجنس RSI هابط — تباعد سلبي بين السعر والزخم':'Bearish RSI divergence — price/momentum diverging');
+  else if(data.divRSI==='bullish'||data.divRSI1d==='bullish')_primary.push(isAr?'دايفرجنس RSI صاعد — تباعد إيجابي بين السعر والزخم':'Bullish RSI divergence — price/momentum diverging');
+  else if(data.rsi>=70)_primary.push(isAr?'RSI '+Math.round(data.rsi)+' — تشبّع شرائي، مخاطرة تصحيح':'RSI '+Math.round(data.rsi)+' — overbought, pullback risk');
+  else if(data.rsi<=30)_primary.push(isAr?'RSI '+Math.round(data.rsi)+' — تشبّع بيعي، احتمال ارتداد':'RSI '+Math.round(data.rsi)+' — oversold, bounce risk');
+  _primary=_primary.slice(0,4);
+  /* ── flow / positioning confirmations ── */
+  var _conf=[];
+  if(data.wConf>=40)_conf.push(isAr?'الحيتان: ثقة تجميع '+data.wConf+'% — المحافظ الكبيرة تشتري':'Whales: '+data.wConf+'% accumulation — large wallets buying');
+  if(data.whalePnL&&data.whalePnL.pct<-3)_conf.push(isAr?'حيتان خاسرة ('+data.whalePnL.pct.toFixed(1)+'%) — ضغط بيع محتمل من المحافظ الكبيرة':'Whales underwater ('+data.whalePnL.pct.toFixed(1)+'%) — potential sell pressure from big wallets');
+  else if(data.whalePnL&&data.whalePnL.pct>3)_conf.push(isAr?'حيتان رابحة (+'+data.whalePnL.pct.toFixed(1)+'%) — لا بيع اضطراري':'Whales in profit (+'+data.whalePnL.pct.toFixed(1)+'%) — no forced selling');
+  if(data.topTraders&&data.topTraders.long>0.55)_conf.push(isAr?'كبار المتداولين '+Math.round(data.topTraders.long*100)+'% Long على Binance':'Top traders '+Math.round(data.topTraders.long*100)+'% long on Binance');
+  else if(data.topTraders&&data.topTraders.long<0.45)_conf.push(isAr?'كبار المتداولين '+Math.round(data.topTraders.short*100)+'% Short على Binance':'Top traders '+Math.round(data.topTraders.short*100)+'% short on Binance');
+  if(data.cbPrem&&data.cbPrem.pct>0.1)_conf.push(isAr?'بريميوم Coinbase موجب (+'+data.cbPrem.pct.toFixed(3)+'%) — طلب مؤسسي أمريكي':'Coinbase premium +'+data.cbPrem.pct.toFixed(3)+'% — US institutional bid');
+  else if(data.cbPrem&&data.cbPrem.pct<-0.1)_conf.push(isAr?'بريميوم Coinbase سالب ('+data.cbPrem.pct.toFixed(3)+'%) — عرض مؤسسي أمريكي':'Coinbase premium '+data.cbPrem.pct.toFixed(3)+'% — US institutional offer');
+  if(data.cvd&&data.cvd.divergence&&data.cvd.divergence!=='NONE')_conf.push(isAr?'CVD: تباعد '+(data.cvd.divergence==='BULLISH'?'صاعد — شراء خفي تحت السطح':'هابط — بيع خفي تحت السطح'):'CVD '+data.cvd.divergence+' divergence');
+  if(data.frHist&&data.frHist.negCount>=7)_conf.push(isAr?'تمويل سلبي متكرر ('+data.frHist.negCount+'/'+data.frHist.totalCount+') — الشورت يدفع باستمرار':'Persistent negative funding ('+data.frHist.negCount+'/'+data.frHist.totalCount+') — shorts paying continuously');
+  _conf=_conf.slice(0,4);
+  /* ── liquidity & large operations (real $ flows) ── */
+  var _ops=[];
+  var _longLiq=0,_shortLiq=0;
+  if(data.liqZones&&data.liqZones.length)data.liqZones.forEach(function(lz){if(lz.side==='Long')_longLiq+=lz.amt;else _shortLiq+=lz.amt;});
+  if(data.aggLiq){_longLiq+=data.aggLiq.longVol||0;_shortLiq+=data.aggLiq.shortVol||0;}
+  if(_longLiq>0||_shortLiq>0){
+    if(_longLiq>_shortLiq*1.3)_ops.push(isAr?'تصفية Long بقيمة '+fmtB(_longLiq)+' (بيع قسري) — وقود هبوطي تحت السعر':'Long liquidations '+fmtB(_longLiq)+' (forced selling) — downside fuel below');
+    else if(_shortLiq>_longLiq*1.3)_ops.push(isAr?'تصفية Short بقيمة '+fmtB(_shortLiq)+' (شراء قسري) — وقود صعودي فوق السعر':'Short liquidations '+fmtB(_shortLiq)+' (forced buying) — upside fuel above');
+    else _ops.push(isAr?'تصفيات متوازنة (Long '+fmtB(_longLiq)+' / Short '+fmtB(_shortLiq)+')':'Balanced liquidations (Long '+fmtB(_longLiq)+' / Short '+fmtB(_shortLiq)+')');
+  }
+  if(data.taker&&data.taker.ratio>1.3)_ops.push(isAr?'تدفّق Taker شراء عدواني (نسبة '+data.taker.ratio.toFixed(2)+') — أوامر سوق شراء ضخمة':'Aggressive taker buying (ratio '+data.taker.ratio.toFixed(2)+') — large market buys');
+  else if(data.taker&&data.taker.ratio>0&&data.taker.ratio<0.77)_ops.push(isAr?'تدفّق Taker بيع عدواني (نسبة '+data.taker.ratio.toFixed(2)+') — أوامر سوق بيع ضخمة':'Aggressive taker selling (ratio '+data.taker.ratio.toFixed(2)+') — large market sells');
+  if(data.iceberg&&data.iceberg.signal==='ICEBERG_BUY')_ops.push(isAr?'أوامر جبل جليدي شراء — تجميع مؤسسي مخفي':'Iceberg buys — hidden institutional accumulation');
+  else if(data.iceberg&&data.iceberg.signal==='ICEBERG_SELL')_ops.push(isAr?'أوامر جبل جليدي بيع — توزيع مؤسسي مخفي':'Iceberg sells — hidden institutional distribution');
+  if(data.absorption&&data.absorption.signal==='BULLISH_ABSORPTION')_ops.push(isAr?'امتصاص صعودي — أوامر شراء ضخمة تمتص ضغط البيع':'Bullish absorption — large bids soaking up selling');
+  else if(data.absorption&&data.absorption.signal==='BEARISH_ABSORPTION')_ops.push(isAr?'امتصاص هبوطي — أوامر بيع ضخمة تكبح الشراء':'Bearish absorption — large offers capping buying');
+  if(data.orderBlocks&&data.orderBlocks.length){var _obB=0,_obS=0;data.orderBlocks.forEach(function(o){if(o.type==='bullish')_obB++;else _obS++;});_ops.push(isAr?'Order Blocks: '+_obB+' صعودي / '+_obS+' هبوطي — مناطق سيولة مؤسسية':'Order Blocks: '+_obB+' bull / '+_obS+' bear — institutional liquidity zones');}
+  _ops=_ops.slice(0,4);
+  /* ── scenario map (base + alternate, targets via priceTargets) ── */
+  var _baseTitle,_baseTxt,_altTitle,_altTxt;
+  if(isBear){
+    _baseTitle=isAr?'الأساسي — استمرار الهبوط':'Base — bearish continuation';
+    _baseTxt=isAr?'كسر دعم '+rP(data.supp)+' بإغلاق 4H يفتح أهدافاً نحو '+(_downLad||rP(data.f618D)+' → '+rP(_f100D))+'.':'A 4H close below support '+rP(data.supp)+' opens targets toward '+(_downLad||rP(data.f618D)+' → '+rP(_f100D))+'.';
+    _altTitle=isAr?'البديل — إلغاء السيناريو':'Alternate — invalidation';
+    _altTxt=isAr?'إغلاق 4H فوق '+rP(data.resist)+' بحجم يُبطل الهبوط ويفتح '+(_upLad||rP(data.f618U)+' → '+rP(data.f100U))+'.':'A 4H close above '+rP(data.resist)+' on volume invalidates the move and opens '+(_upLad||rP(data.f618U)+' → '+rP(data.f100U))+'.';
+  }else if(isBull){
+    _baseTitle=isAr?'الأساسي — استمرار الصعود':'Base — bullish continuation';
+    _baseTxt=isAr?'اختراق مقاومة '+rP(data.resist)+' بإغلاق 4H وحجم يفتح أهدافاً نحو '+(_upLad||rP(data.f618U)+' → '+rP(data.f100U))+'.':'A 4H close above resistance '+rP(data.resist)+' on volume opens targets toward '+(_upLad||rP(data.f618U)+' → '+rP(data.f100U))+'.';
+    _altTitle=isAr?'البديل — إلغاء السيناريو':'Alternate — invalidation';
+    _altTxt=isAr?'كسر دعم '+rP(data.supp)+' بإغلاق 4H يُبطل الصعود ويفتح '+(_downLad||rP(data.f618D)+' → '+rP(_f100D))+'.':'A 4H close below support '+rP(data.supp)+' invalidates the move and opens '+(_downLad||rP(data.f618D)+' → '+rP(_f100D))+'.';
+  }else{
+    _baseTitle=isAr?'النطاق الحالي':'Current range';
+    _baseTxt=isAr?'السعر محصور بين '+rP(data.supp)+' و '+rP(data.resist)+'؛ يُحسم الاتجاه باختراق أحد الحدّين بإغلاق 4H مؤكد.':'Price is boxed between '+rP(data.supp)+' and '+rP(data.resist)+'; direction resolves on a confirmed 4H close beyond either bound.';
+    _altTitle=isAr?'كلا الاتجاهين':'Both ways';
+    _altTxt=isAr?'فوق '+rP(data.resist)+' → '+(_upLad||rP(data.f618U))+' · دون '+rP(data.supp)+' → '+(_downLad||rP(data.f618D))+'.':'Above '+rP(data.resist)+' → '+(_upLad||rP(data.f618U))+' · below '+rP(data.supp)+' → '+(_downLad||rP(data.f618D))+'.';
+  }
+  /* ── critical level (the decision line in the thesis direction) ── */
+  var _critLvl,_critTxt;
+  if(isBear){_critLvl=data.supp;_critTxt=isAr?'كسره بإغلاق 4H يؤكد استمرار الهبوط؛ استعادة '+rP(data.resist)+' تُبطل السيناريو الهبوطي.':'A 4H close below confirms the downtrend; reclaiming '+rP(data.resist)+' invalidates the bearish case.';}
+  else if(isBull){_critLvl=data.resist;_critTxt=isAr?'اختراقه بحجم يؤكد استمرار الصعود؛ فقدان '+rP(data.supp)+' يُبطل السيناريو الصعودي.':'A close above on volume confirms the uptrend; losing '+rP(data.supp)+' invalidates the bullish case.';}
+  else{_critLvl=null;_critTxt=isAr?'راقب حدّي النطاق: '+rP(data.supp)+' دعماً و '+rP(data.resist)+' مقاومة — الاختراق يحدد الاتجاه.':'Watch the range bounds: '+rP(data.supp)+' support and '+rP(data.resist)+' resistance — the break sets direction.';}
+  /* ── render the desk note ── */
+  h+='<div style="padding:12px;background:'+(isBull?'rgba(0,255,136,.06)':isBear?'rgba(255,56,96,.06)':'rgba(255,184,0,.06)')+';border:1px solid '+(isBull?'rgba(0,255,136,.15)':isBear?'rgba(255,56,96,.15)':'rgba(255,184,0,.15)')+';border-radius:10px;margin-bottom:8px">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:16px;font-weight:800;color:'+data.dCol+'">'+data.dIc+' '+(isAr?'الأطروحة: ':'Thesis: ')+data.dir+'</span><span style="font-size:10px;font-weight:700;color:'+data.dCol+';white-space:nowrap">'+_convLbl+' ('+_conv+'/10)</span></div>';
+  h+='<div style="font-size:11px;color:var(--t1);line-height:1.7">'+_leadWhy+'</div>';
+  h+='</div>';
+  h+='<div style="padding:10px;background:rgba(255,255,255,.02);border-radius:10px;margin-bottom:8px">';
+  h+='<div style="font-size:12px;font-weight:800;color:'+data.dCol+';margin-bottom:4px">📐 '+(isAr?'الأدلّة (بالأولوية)':'Evidence (by priority)')+'</div>';
+  if(_primary.length)h+='<div style="font-size:10px;font-weight:700;color:var(--t2);margin:4px 0 2px">'+(isAr?'محرّكات أساسية — سعر/زخم/هيكل':'Primary drivers — price/momentum/structure')+'</div>'+_bullets(_primary);
+  if(_conf.length)h+='<div style="font-size:10px;font-weight:700;color:var(--t2);margin:6px 0 2px">'+(isAr?'تأكيدات — تدفّق/تموضع':'Confirmations — flow/positioning')+'</div>'+_bullets(_conf);
+  if(!_primary.length&&!_conf.length)h+='<div style="font-size:10px;color:var(--t2)">'+(isAr?'لا أدلّة قوية كافية حالياً — إشارات مختلطة.':'No strong evidence yet — mixed signals.')+'</div>';
+  h+='</div>';
+  h+='<div style="padding:10px;background:rgba(91,156,255,.05);border:1px solid rgba(91,156,255,.12);border-radius:10px;margin-bottom:8px">';
+  h+='<div style="font-size:12px;font-weight:800;color:var(--blue);margin-bottom:6px">🎯 '+(isAr?'خريطة السيناريو':'Scenario map')+'</div>';
+  h+='<div style="font-size:10px;color:var(--t1);line-height:1.7;padding:3px 0"><b style="color:'+data.dCol+'">'+_baseTitle+':</b> '+_baseTxt+'</div>';
+  h+='<div style="font-size:10px;color:var(--t1);line-height:1.7;padding:5px 0 3px;border-top:1px solid rgba(255,255,255,.05)"><b style="color:var(--t2)">'+_altTitle+':</b> '+_altTxt+'</div>';
+  h+='</div>';
+  if(_ops.length){
+    h+='<div style="padding:10px;background:rgba(155,109,255,.05);border:1px solid rgba(155,109,255,.12);border-radius:10px;margin-bottom:8px">';
+    h+='<div style="font-size:12px;font-weight:800;color:var(--purple);margin-bottom:4px">💧 '+(isAr?'السيولة والعمليات الكبيرة':'Liquidity & large operations')+'</div>'+_bullets(_ops);
+    h+='</div>';
+  }
+  h+='<div style="padding:10px;background:rgba(255,184,0,.06);border:1px solid rgba(255,184,0,.15);border-radius:10px;margin-bottom:8px">';
+  h+='<div style="font-size:12px;font-weight:800;color:var(--warn);margin-bottom:4px">🧭 '+(isAr?'المستوى الحاسم':'Critical level')+(_critLvl!=null?': <span style="font-family:var(--fm);color:var(--t0)">'+rP(_critLvl)+'</span>':'')+'</div>';
+  h+='<div style="font-size:10px;color:var(--t1);line-height:1.7">'+_critTxt+'</div>';
+  h+='</div>';
+  h+='<div style="padding:8px;background:rgba(255,184,0,.08);border:1px solid rgba(255,184,0,.2);border-radius:8px;text-align:center;font-size:11px;font-weight:700;color:var(--warn)">⚠️ '+(isAr?'هذه ملاحظات فنية للاطلاع والتحليل فقط — ليست نصيحة استثمارية.':'Technical observations for informational use only — not investment advice.')+'</div>';
+  }else{
   /* 1. Verdict */
   h+='<div style="padding:12px;background:'+(isBull?'rgba(0,255,136,.06)':isBear?'rgba(255,56,96,.06)':'rgba(255,184,0,.06)')+';border:1px solid '+(isBull?'rgba(0,255,136,.15)':isBear?'rgba(255,56,96,.15)':'rgba(255,184,0,.15)')+';border-radius:10px;text-align:center;margin-bottom:8px">';
   h+='<div style="font-size:18px;font-weight:800;color:'+data.dCol+';margin-bottom:4px">'+data.dIc+' '+data.dir+'</div>';
@@ -6504,6 +6627,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='</div>';
   /* 5. Disclaimer — informational platform, no investment advice. */
   h+='<div style="padding:8px;background:rgba(255,184,0,.08);border:1px solid rgba(255,184,0,.2);border-radius:8px;text-align:center;font-size:11px;font-weight:700;color:var(--warn)">⚠️ '+(isAr?'هذه ملاحظات فنية للاطلاع والتحليل فقط — ليست نصيحة استثمارية.':'Technical observations for informational use only — not investment advice.')+'</div>';
+  }
   h+='</div>';
 
   /* Footer */

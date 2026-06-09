@@ -178,3 +178,58 @@ test('scoreDirection — bullish and its mirror give mirrored scaled ts (bias-fr
   assert.equal(b.ts, -s.ts); // symmetry survives scaling
   assert.equal(b.tsRaw, -s.tsRaw);
 });
+
+/* ── pro-conclusion helpers (scenario map + candle-event WHY) ───────────── */
+
+test('priceTargets — splits levels into upside/downside ladders, nearest first', () => {
+  const r = md.priceTargets(100, [
+    { price: 108, label: 'R' },
+    { price: 95, label: 'S' },
+    { price: 120, label: 'f100U' },
+    { price: 88, label: 'f100D' },
+    { price: 103, label: 'f618U' },
+  ]);
+  assert.deepEqual(
+    r.up.map((x) => x.price),
+    [103, 108, 120]
+  ); // ascending → nearest upside first
+  assert.deepEqual(
+    r.down.map((x) => x.price),
+    [95, 88]
+  ); // descending → nearest downside first
+  assert.equal(r.up[0].label, 'f618U'); // labels carried through
+  assert.equal(r.down[0].label, 'S');
+});
+
+test('priceTargets — skips non-finite, equal-to-price, and falsy levels', () => {
+  const r = md.priceTargets(100, [
+    { price: 100, label: 'at-price' }, // equal → skipped (neither side)
+    { price: NaN, label: 'bad' }, // non-finite → skipped
+    null, // falsy → skipped
+    { price: 110, label: 'R' },
+  ]);
+  assert.equal(r.up.length, 1);
+  assert.equal(r.down.length, 0);
+  assert.equal(r.up[0].price, 110);
+});
+
+test('priceTargets — non-array levels / bad price yield empty ladders', () => {
+  assert.deepEqual(md.priceTargets(100, null), { up: [], down: [] });
+  assert.deepEqual(md.priceTargets(NaN, [{ price: 110 }]), { up: [], down: [] });
+});
+
+test('candleLevelEvent — close above resistance is a bullish breakout', () => {
+  assert.deepEqual(md.candleLevelEvent(110, 90, 105), { event: 'break_up', level: 105 });
+});
+
+test('candleLevelEvent — close below support is a bearish breakdown', () => {
+  assert.deepEqual(md.candleLevelEvent(80, 90, 105), { event: 'break_down', level: 90 });
+});
+
+test('candleLevelEvent — close inside the range is in_range', () => {
+  assert.deepEqual(md.candleLevelEvent(97, 90, 105), { event: 'in_range', level: null });
+});
+
+test('candleLevelEvent — non-finite close never fabricates a break', () => {
+  assert.deepEqual(md.candleLevelEvent(NaN, 90, 105), { event: 'in_range', level: null });
+});

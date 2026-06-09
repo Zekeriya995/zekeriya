@@ -2216,3 +2216,25 @@ test('marketMoodScore — clamps to 0..100 and tolerates junk', () => {
   assert.equal(marketMoodScore({ fgValue: NaN, btcChg: 'x' }), 50);
   assert.equal(marketMoodScore(null), 50);
 });
+
+/* ── version helpers (Account-page readout + force-update button) ──────── */
+
+test('parseCacheVersion — extracts the version from a sw.js body', () => {
+  const sw = "/* head */\nvar CACHE_VERSION = 'v10.40.0-foo-2026-06-09';\nvar X=1;";
+  assert.equal(parseCacheVersion(sw), 'v10.40.0-foo-2026-06-09');
+  assert.equal(parseCacheVersion('var CACHE_VERSION = "v9.9.9";'), 'v9.9.9');
+});
+
+test('parseCacheVersion — null on absent / non-string / no match', () => {
+  assert.equal(parseCacheVersion('no version here'), null);
+  assert.equal(parseCacheVersion(null), null);
+  assert.equal(parseCacheVersion(123), null);
+});
+
+test('versionStatus — current / behind / unknown', () => {
+  assert.equal(versionStatus('v1', 'v1'), 'current');
+  assert.equal(versionStatus('v1', 'v2'), 'behind');
+  assert.equal(versionStatus(null, 'v2'), 'behind'); // installed unknown → prompt update
+  assert.equal(versionStatus('v1', null), 'unknown'); // latest unknown → offline
+  assert.equal(versionStatus(null, null), 'unknown');
+});

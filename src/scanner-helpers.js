@@ -1526,3 +1526,24 @@ function gemMcGate(mc, min, max, strict) {
   if (known) return mc < min || mc > max;
   return !!strict;
 }
+
+/* parseCacheVersion — pull the CACHE_VERSION string out of a sw.js body.
+   Powers the Account-page version readout + the "force update" button: the
+   app fetches /sw.js (no-cache) and shows the server's latest build so the
+   user can tell at a glance whether the installed PWA is behind. Pure: text
+   in, the version string (or null when absent/!string) out. */
+function parseCacheVersion(text) {
+  if (typeof text !== 'string') return null;
+  var m = text.match(/CACHE_VERSION\s*=\s*['"]([^'"]+)['"]/);
+  return m ? m[1] : null;
+}
+
+/* versionStatus — compare the installed build against the latest one.
+   'current' (identical), 'behind' (differ — an update is waiting, or the
+   installed version is unknown so we prompt to be safe), or 'unknown' when
+   the latest can't be determined (offline). Pure, string-only. */
+function versionStatus(installed, latest) {
+  if (!latest) return 'unknown';
+  if (!installed) return 'behind';
+  return installed === latest ? 'current' : 'behind';
+}

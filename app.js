@@ -7648,6 +7648,135 @@ function nxShowUpdateBanner() {
   div.appendChild(btnLater);
   document.body.appendChild(div);
 }
+/* ─── App version readout + Force update (Account page “About”) ───────
+   An installed PWA can lag the server when a stale Service Worker keeps
+   serving an old app.js. This surfaces the running build vs the server's
+   latest, and gives a one-tap recovery: refresh the HTTP cache, drop the
+   SW caches, unregister the workers, then reload — fresh bytes WITHOUT
+   touching localStorage (language / flags / portfolio survive). */
+function nxAskSwVersion() {
+  return new Promise(function (resolve) {
+    try {
+      var sw = navigator.serviceWorker && navigator.serviceWorker.controller;
+      if (!sw) {
+        resolve(null);
+        return;
+      }
+      var ch = new MessageChannel();
+      var done = false;
+      ch.port1.onmessage = function (ev) {
+        done = true;
+        resolve((ev.data && ev.data.version) || null);
+      };
+      sw.postMessage('nxVersion', [ch.port2]);
+      setTimeout(function () {
+        if (!done) resolve(null);
+      }, 1200);
+    } catch (e) {
+      resolve(null);
+    }
+  });
+}
+function nxShortVer(v) {
+  if (!v) return null;
+  return String(v)
+    .replace(/^v/, '')
+    .split('-')[0];
+}
+async function nxRenderVersion() {
+  var el = document.getElementById('nxVersionLine');
+  if (!el) return;
+  var isAr = (typeof lang === 'string' ? lang : 'ar') === 'ar';
+  var installed = await nxAskSwVersion();
+  var latest = null;
+  try {
+    var r = await fetch('./sw.js', { cache: 'no-cache' });
+    if (r && r.ok) latest = typeof parseCacheVersion === 'function' ? parseCacheVersion(await r.text()) : null;
+  } catch (e) {
+    /* offline — leave latest null */
+  }
+  var status =
+    typeof versionStatus === 'function'
+      ? versionStatus(installed, latest)
+      : latest
+        ? installed === latest
+          ? 'current'
+          : 'behind'
+        : 'unknown';
+  var yours = nxShortVer(installed) || (isAr ? 'قديمة' : 'old');
+  var newest = nxShortVer(latest) || '—';
+  var badge =
+    status === 'current'
+      ? isAr
+        ? '✅ محدّث'
+        : '✅ up to date'
+      : status === 'behind'
+        ? isAr
+          ? '🔄 تحديث متاح — اضغط «فرض التحديث»'
+          : '🔄 Update available — tap “Force update”'
+        : isAr
+          ? '⚠️ تعذّر التحقق (غير متصل؟)'
+          : '⚠️ Could not check (offline?)';
+  var col = status === 'current' ? 'var(--up)' : status === 'behind' ? 'var(--warn)' : 'var(--t3)';
+  el.innerHTML =
+    '<div>' +
+    (isAr ? 'نسختك: ' : 'Yours: ') +
+    yours +
+    ' · ' +
+    (isAr ? 'الأحدث: ' : 'Latest: ') +
+    newest +
+    '</div><div style="color:' +
+    col +
+    ';margin-top:2px">' +
+    badge +
+    '</div>';
+}
+async function nxForceUpdate(btn) {
+  if (btn && btn.tagName) {
+    btn.disabled = true;
+    btn.dataset._o = btn.innerHTML;
+    btn.innerHTML = '⏳ ' + (typeof lang === 'string' && lang === 'ar' ? 'جارٍ التحديث…' : 'Updating…');
+  }
+  try {
+    /* 1) Refresh the browser HTTP cache for the shell — defeats nginx's 7-day
+       max-age on the unhashed app.js/src so the reload below gets new bytes. */
+    var shell = ['./', './index.html', './app.js', './sw.js', './style.css'];
+    await Promise.all(
+      shell.map(function (u) {
+        return fetch(u, { cache: 'reload' }).catch(function () {});
+      })
+    );
+    /* 2) Drop every SW cache (the stale shell lives here). */
+    if (self.caches && caches.keys) {
+      var keys = await caches.keys();
+      await Promise.all(
+        keys.map(function (k) {
+          return caches.delete(k);
+        })
+      );
+    }
+    /* 3) Unregister all workers so a fresh one installs on reload. */
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      var regs = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(
+        regs.map(function (r) {
+          return r.unregister();
+        })
+      );
+    }
+  } catch (e) {
+    /* best-effort */
+  }
+  try {
+    location.reload();
+  } catch (e) {
+    /* noop */
+  }
+}
+if (typeof window !== 'undefined') {
+  window.nxForceUpdate = nxForceUpdate;
+  window.nxRenderVersion = nxRenderVersion;
+}
 /* Delegated event dispatcher (foundation for P3.3 phase A) — when an
    element carries data-action="fnName", a single click listener on
    document looks the function up on `window`, splits data-args on '|'
@@ -7733,6 +7862,16 @@ if ('serviceWorker' in navigator) {
     }).catch(function () { /* noop */ });
   } catch (e) { /* noop */ }
 }
+/* Populate the Account-page version readout once the shell has settled.
+   The #nxVersionLine element is static in index.html, so this fills it
+   regardless of which tab is active when the user later opens “About”. */
+setTimeout(function () {
+  try {
+    nxRenderVersion();
+  } catch (e) {
+    /* noop */
+  }
+}, 1500);
 
 /* ─── Web Push opt-in UI ──────────────────────────────────────────
    Renders the #pushCard block on the Alerts page based on the

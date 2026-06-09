@@ -2,7 +2,7 @@
    the previous generation atomically. The old string ('nexus-v10-v14-modules')
    was static, which meant a hot-fix to app.js was never fetched from the
    network until users hard-refreshed. */
-var CACHE_VERSION = 'v10.39.0-pwa-swr-revalidate-2026-06-09';
+var CACHE_VERSION = 'v10.40.0-force-update-2026-06-09';
 var CACHE_NAME = 'nexus-' + CACHE_VERSION;
 /* Critical assets — install fails if any fail */
 var CRITICAL_ASSETS = [
@@ -212,6 +212,20 @@ self.addEventListener('push', function (e) {
     vibrate: data.vibrate || [80, 40, 80],
   };
   e.waitUntil(self.registration.showNotification(title, options));
+});
+
+/* Message channel — the page asks the controlling worker for its version
+   (Account-page readout) and can tell a waiting worker to take over now. */
+self.addEventListener('message', function (e) {
+  var d = e.data;
+  if (!d) return;
+  if (d === 'nxSkipWaiting' || d.type === 'nxSkipWaiting') {
+    self.skipWaiting();
+    return;
+  }
+  if ((d === 'nxVersion' || d.type === 'nxVersion') && e.ports && e.ports[0]) {
+    e.ports[0].postMessage({ version: CACHE_VERSION });
+  }
 });
 
 self.addEventListener('notificationclick', function (e) {

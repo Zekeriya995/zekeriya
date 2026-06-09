@@ -174,6 +174,7 @@ const TR = {
   t_silent: { ar: 'صامت', en: 'Silent' },
   about: { ar: 'عن المنصة', en: 'About' },
   clear_data: { ar: 'مسح البيانات', en: 'Clear Data' },
+  force_update: { ar: 'فرض التحديث', en: 'Force update' },
   data_sources: { ar: 'مصادر البيانات', en: 'Data Sources' },
   check_sources: { ar: 'فحص المصادر الآن', en: 'Check sources now' },
   checking: { ar: 'جاري الفحص...', en: 'Checking...' },

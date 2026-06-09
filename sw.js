@@ -2,7 +2,7 @@
    the previous generation atomically. The old string ('nexus-v10-v14-modules')
    was static, which meant a hot-fix to app.js was never fetched from the
    network until users hard-refreshed. */
-var CACHE_VERSION = 'v10.38.0-mkt-regime-aware-2026-06-09';
+var CACHE_VERSION = 'v10.39.0-pwa-swr-revalidate-2026-06-09';
 var CACHE_NAME = 'nexus-' + CACHE_VERSION;
 /* Critical assets — install fails if any fail */
 var CRITICAL_ASSETS = [
@@ -127,6 +127,17 @@ function isApiRequest(url) {
       revalidate, and fall back to the network when there is no cache
       entry. This eliminates the 1-RTT cost on every navigation.
 
+      The background revalidate uses {cache:'no-cache'} so it ALWAYS
+      validates against the server (conditional request) instead of the
+      browser HTTP cache. nginx serves the unhashed shell (app.js, src/*)
+      with max-age=7d, so a plain fetch() here was served the STILL-FRESH
+      old bytes from the HTTP cache and wrote them back over the new app.js
+      that install() had just precached with {cache:'reload'} — the app
+      silently reverted to the previous version for up to a week ("updates
+      never reach the installed PWA"). 'no-cache' yields a cheap 304 when
+      unchanged and the real new bytes the moment a deploy lands, so the SW
+      cache always converges to the latest without any nginx change.
+
    3. Other assets (fonts, manifest, icons): cache-first with network
       fallback. */
 self.addEventListener('fetch', function (e) {
@@ -147,7 +158,7 @@ self.addEventListener('fetch', function (e) {
 
   e.respondWith(
     caches.match(e.request).then(function (cached) {
-      var network = fetch(e.request)
+      var network = fetch(e.request, { cache: 'no-cache' })
         .then(function (res) {
           if (res && res.status === 200) {
             var clone = res.clone();

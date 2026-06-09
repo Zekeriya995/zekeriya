@@ -310,6 +310,67 @@ function candleLevelEvent(close, supp, resist) {
   return { event: 'in_range', level: null };
 }
 
+/* regimeAwareThesis — align the chart's macro verdict with the LIVE market
+   regime the scanner already adapts to (momentum in a trend, contrarian/fade
+   in a range, risk-off when volatile — src/scanner-regime.js, surfaced on
+   /api/all and read client-side as window.__marketRegime). The same signal
+   means different things by regime: a breakdown in a trending-down tape is
+   high-conviction continuation; the same breakdown in a chop is a fade
+   candidate. This nudges the conviction and flags which scenario the regime
+   favors so the chart and the scanner stop contradicting each other.
+
+   ONE-DIRECTIONAL by design: the regime frames the conclusion; the conclusion
+   never feeds back into regime detection or scanner weights (separate scopes).
+
+   Pure: (thesis + regime signals) in, (adjusted conviction + a state KEY the
+   UI localizes) out. A missing/!shaped regime degrades to state 'unknown' with
+   the conviction untouched, so the caller renders exactly as before. */
+function regimeAwareThesis(input) {
+  const i = input || {};
+  const thesisDir = i.thesisDir === 'bull' || i.thesisDir === 'bear' ? i.thesisDir : 'neutral';
+  let conv = Number(i.conviction);
+  if (!Number.isFinite(conv)) conv = 0;
+  const conv0 = conv;
+  const regime = i.regime === 'trending' || i.regime === 'ranging' ? i.regime : null;
+  const dir = i.direction === 'bull' || i.direction === 'bear' ? i.direction : 'none';
+  const riskOff = i.volatility === 'high';
+
+  /* State (the framing the UI explains):
+       aligned       — trending, regime direction == thesis (supportive).
+       conflict      — trending, regime direction opposes the thesis.
+       range_fade    — ranging tape + a directional thesis (false-break risk).
+       range_neutral — ranging (or trend w/o a clean direction) + neutral thesis.
+       unknown       — no usable regime → no change. */
+  let state = 'unknown';
+  if (regime === 'trending' && dir !== 'none' && thesisDir !== 'neutral') {
+    state = dir === thesisDir ? 'aligned' : 'conflict';
+  } else if (regime === 'ranging') {
+    state = thesisDir === 'neutral' ? 'range_neutral' : 'range_fade';
+  } else if (regime === 'trending') {
+    state = 'range_neutral';
+  }
+
+  /* Conviction nudges mirror the scanner's momentum-vs-contrarian switch:
+     back an aligned trend, trim a counter-trend or a faded-breakout thesis,
+     and shave a touch more when the tape is volatile (risk-off). */
+  if (state === 'aligned') conv += 1;
+  else if (state === 'conflict') conv -= 2;
+  else if (state === 'range_fade') conv -= 2;
+  if (riskOff) conv -= 1;
+  conv = Math.max(0, Math.min(10, Math.round(conv * 10) / 10));
+
+  /* In a range or a conflict the "alternate" (mean-revert / with-the-market)
+     leg is no longer secondary — tell the UI to give it equal billing. */
+  const basePromote = state === 'range_fade' || state === 'conflict';
+  return {
+    conviction: conv,
+    state,
+    basePromote,
+    riskOff,
+    delta: Math.round((conv - conv0) * 10) / 10,
+  };
+}
+
 const MARKET_DIRECTION_API = {
   TS_STRONG_BULL,
   TS_BULL,
@@ -326,6 +387,7 @@ const MARKET_DIRECTION_API = {
   scoreDirection,
   priceTargets,
   candleLevelEvent,
+  regimeAwareThesis,
 };
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = MARKET_DIRECTION_API;

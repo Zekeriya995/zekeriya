@@ -233,3 +233,93 @@ test('candleLevelEvent — close inside the range is in_range', () => {
 test('candleLevelEvent — non-finite close never fabricates a break', () => {
   assert.deepEqual(md.candleLevelEvent(NaN, 90, 105), { event: 'in_range', level: null });
 });
+
+/* ── regimeAwareThesis (live-regime framing of the conclusion) ──────────── */
+
+test('regimeAwareThesis — aligned trend boosts conviction, no alt promotion', () => {
+  const r = md.regimeAwareThesis({
+    thesisDir: 'bear',
+    conviction: 7,
+    regime: 'trending',
+    direction: 'bear',
+    volatility: 'normal',
+  });
+  assert.equal(r.state, 'aligned');
+  assert.equal(r.conviction, 8); // +1
+  assert.equal(r.delta, 1);
+  assert.equal(r.basePromote, false);
+  assert.equal(r.riskOff, false);
+});
+
+test('regimeAwareThesis — counter-trend conflict trims conviction and promotes the alternate', () => {
+  const r = md.regimeAwareThesis({
+    thesisDir: 'bull',
+    conviction: 7,
+    regime: 'trending',
+    direction: 'bear', // BTC trend opposes a bull thesis
+    volatility: 'normal',
+  });
+  assert.equal(r.state, 'conflict');
+  assert.equal(r.conviction, 5); // -2
+  assert.equal(r.basePromote, true);
+});
+
+test('regimeAwareThesis — ranging tape fades a directional thesis and promotes the alternate', () => {
+  const r = md.regimeAwareThesis({
+    thesisDir: 'bear',
+    conviction: 7,
+    regime: 'ranging',
+    direction: 'none',
+    volatility: 'normal',
+  });
+  assert.equal(r.state, 'range_fade');
+  assert.equal(r.conviction, 5); // -2
+  assert.equal(r.basePromote, true);
+});
+
+test('regimeAwareThesis — neutral thesis in a range is coherent (no change)', () => {
+  const r = md.regimeAwareThesis({
+    thesisDir: 'neutral',
+    conviction: 4,
+    regime: 'ranging',
+    direction: 'none',
+    volatility: 'normal',
+  });
+  assert.equal(r.state, 'range_neutral');
+  assert.equal(r.conviction, 4); // unchanged
+  assert.equal(r.basePromote, false);
+});
+
+test('regimeAwareThesis — high volatility stacks a risk-off trim and clamps at 0', () => {
+  const r = md.regimeAwareThesis({
+    thesisDir: 'bull',
+    conviction: 2,
+    regime: 'trending',
+    direction: 'bear', // conflict (-2)
+    volatility: 'high', // risk-off (-1)
+  });
+  assert.equal(r.state, 'conflict');
+  assert.equal(r.riskOff, true);
+  assert.equal(r.conviction, 0); // 2 - 2 - 1 = -1 → clamped to 0
+});
+
+test('regimeAwareThesis — aligned conviction never exceeds 10', () => {
+  const r = md.regimeAwareThesis({
+    thesisDir: 'bull',
+    conviction: 10,
+    regime: 'trending',
+    direction: 'bull',
+    volatility: 'normal',
+  });
+  assert.equal(r.conviction, 10); // +1 then clamped
+});
+
+test('regimeAwareThesis — missing/!shaped regime is a safe no-op (unknown)', () => {
+  const r = md.regimeAwareThesis({ thesisDir: 'bear', conviction: 6 });
+  assert.equal(r.state, 'unknown');
+  assert.equal(r.conviction, 6); // untouched → caller renders exactly as before
+  assert.equal(r.basePromote, false);
+  const bad = md.regimeAwareThesis({ thesisDir: 'bear', conviction: NaN, regime: 'weird' });
+  assert.equal(bad.state, 'unknown');
+  assert.equal(bad.conviction, 0); // non-finite conviction → 0
+});

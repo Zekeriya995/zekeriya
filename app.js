@@ -6433,6 +6433,23 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
      Both helpers are pure + proven in tests/market-direction.test.js. Falls
      back to the legacy 5-block below when the flag is 'off'. ══ */
   var _conv=(data.sc10!=null?data.sc10:(data.sc||0));
+  /* ══ LIVE-REGIME framing (flag nxMktFix_regime_aware) — align the macro
+     verdict with the regime the scanner already adapts to (window.__marketRegime
+     from /api/all). One-directional: regime → conclusion only. Falls back to the
+     raw (regime-blind) conviction when the flag is off or no regime is live. ══ */
+  var _rg=(localStorage.getItem('nxMktFix_regime_aware')!=='off'&&typeof window!=='undefined'&&window.__marketRegime)?window.__marketRegime:null;
+  var _ra=_rg?MarketDirection.regimeAwareThesis({thesisDir:isBull?'bull':isBear?'bear':'neutral',conviction:_conv,regime:_rg.regime,direction:_rg.direction,volatility:_rg.volatility}):null;
+  if(_ra)_conv=_ra.conviction;
+  /* localized regime banner (state key → text); BTC-derived but the dominant
+     macro driver for ETH too (high beta), so it applies to both charts. */
+  var _rgIc='',_rgCol='var(--t2)',_rgTxt='';
+  if(_ra&&_ra.state!=='unknown'){
+    if(_ra.state==='aligned'){_rgIc='✓';_rgCol='var(--up)';_rgTxt=isAr?'النظام اتجاهي ومتوافق مع الأطروحة — بيئة داعمة للاستمرار':'Trending regime aligned with the thesis — supportive of continuation';}
+    else if(_ra.state==='conflict'){_rgIc='⚠️';_rgCol='var(--dn)';_rgTxt=isAr?'النظام اتجاهي لكن معاكس للأطروحة (اتجاه BTC ضدّها) — حذر، السيناريو البديل مرجّح':'Trending regime opposes the thesis (BTC trend against it) — caution, the alternate is favored';}
+    else if(_ra.state==='range_fade'){_rgIc='⚠️';_rgCol='var(--warn)';_rgTxt=isAr?'النظام تذبذبي — احذر الاختراق الكاذب؛ الارتداد داخل النطاق مرجّح':'Ranging regime — beware false breakouts; range reversion is favored';}
+    else if(_ra.state==='range_neutral'){_rgIc='•';_rgCol='var(--t2)';_rgTxt=isAr?'النظام تذبذبي — لا تحيّز اتجاهي واضح':'Ranging regime — no clear directional bias';}
+    if(_ra.riskOff)_rgTxt+=(isAr?' · ⚡ تقلّب مرتفع: ركّز على المستوى الحاسم، الأهداف الممتدة أقل ترجيحاً':' · ⚡ High volatility: focus on the critical level, extended targets less likely');
+  }
   var _convLbl=_conv>=7?(isAr?'قناعة عالية':'High conviction'):_conv>=4?(isAr?'قناعة متوسطة':'Moderate conviction'):(isAr?'قناعة منخفضة':'Low conviction');
   var _bullets=function(arr){var s='';arr.forEach(function(r){s+='<div style="font-size:10px;color:var(--t1);line-height:1.75;padding:3px 0">▸ '+r+'</div>';});return s;};
   /* last CLOSED candle (index -2; -1 is still forming) vs the key range — the
@@ -6524,8 +6541,9 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   else{_critLvl=null;_critTxt=isAr?'راقب حدّي النطاق: '+rP(data.supp)+' دعماً و '+rP(data.resist)+' مقاومة — الاختراق يحدد الاتجاه.':'Watch the range bounds: '+rP(data.supp)+' support and '+rP(data.resist)+' resistance — the break sets direction.';}
   /* ── render the desk note ── */
   h+='<div style="padding:12px;background:'+(isBull?'rgba(0,255,136,.06)':isBear?'rgba(255,56,96,.06)':'rgba(255,184,0,.06)')+';border:1px solid '+(isBull?'rgba(0,255,136,.15)':isBear?'rgba(255,56,96,.15)':'rgba(255,184,0,.15)')+';border-radius:10px;margin-bottom:8px">';
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:16px;font-weight:800;color:'+data.dCol+'">'+data.dIc+' '+(isAr?'الأطروحة: ':'Thesis: ')+data.dir+'</span><span style="font-size:10px;font-weight:700;color:'+data.dCol+';white-space:nowrap">'+_convLbl+' ('+_conv+'/10)</span></div>';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px"><span style="font-size:16px;font-weight:800;color:'+data.dCol+'">'+data.dIc+' '+(isAr?'الأطروحة: ':'Thesis: ')+data.dir+'</span><span style="font-size:10px;font-weight:700;color:'+data.dCol+';white-space:nowrap">'+_convLbl+' ('+_conv+'/10'+(_ra&&_ra.delta?', '+(_ra.delta>0?'+':'')+_ra.delta+' '+(isAr?'للنظام':'regime'):'')+')</span></div>';
   h+='<div style="font-size:11px;color:var(--t1);line-height:1.7">'+_leadWhy+'</div>';
+  if(_rgTxt)h+='<div style="margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,.06);font-size:10px;color:'+_rgCol+';line-height:1.6"><b>'+_rgIc+' '+(isAr?'النظام الحي: ':'Live regime: ')+'</b>'+_rgTxt+'</div>';
   h+='</div>';
   h+='<div style="padding:10px;background:rgba(255,255,255,.02);border-radius:10px;margin-bottom:8px">';
   h+='<div style="font-size:12px;font-weight:800;color:'+data.dCol+';margin-bottom:4px">📐 '+(isAr?'الأدلّة (بالأولوية)':'Evidence (by priority)')+'</div>';
@@ -6537,6 +6555,7 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   h+='<div style="font-size:12px;font-weight:800;color:var(--blue);margin-bottom:6px">🎯 '+(isAr?'خريطة السيناريو':'Scenario map')+'</div>';
   h+='<div style="font-size:10px;color:var(--t1);line-height:1.7;padding:3px 0"><b style="color:'+data.dCol+'">'+_baseTitle+':</b> '+_baseTxt+'</div>';
   h+='<div style="font-size:10px;color:var(--t1);line-height:1.7;padding:5px 0 3px;border-top:1px solid rgba(255,255,255,.05)"><b style="color:var(--t2)">'+_altTitle+':</b> '+_altTxt+'</div>';
+  if(_ra&&_ra.basePromote)h+='<div style="margin-top:5px;font-size:9px;color:var(--warn);line-height:1.5">⚠️ '+(isAr?'النظام الحالي يرجّح السيناريو البديل — لا تعامله كاحتمال ثانوي.':'The current regime favors the alternate scenario — do not treat it as secondary.')+'</div>';
   h+='</div>';
   if(_ops.length){
     h+='<div style="padding:10px;background:rgba(155,109,255,.05);border:1px solid rgba(155,109,255,.12);border-radius:10px;margin-bottom:8px">';

@@ -7738,11 +7738,24 @@ async function nxForceUpdate(btn) {
     btn.innerHTML = '⏳ ' + (typeof lang === 'string' && lang === 'ar' ? 'جارٍ التحديث…' : 'Updating…');
   }
   try {
-    /* 1) Refresh the browser HTTP cache for the shell — defeats nginx's 7-day
-       max-age on the unhashed app.js/src so the reload below gets new bytes. */
-    var shell = ['./', './index.html', './app.js', './sw.js', './style.css'];
+    /* 1) Refresh the browser HTTP cache for the WHOLE app — shell + every
+       same-origin module the page loaded. The shell alone wasn't enough: a
+       fresh app.js with a STALE src/market-direction.js leaves MarketDirection
+       missing its new functions, so the conclusion silently falls back to the
+       legacy block. Discover the modules from the live <script>/<link> tags so
+       this stays correct as files are added. {cache:'reload'} bypasses nginx's
+       7-day max-age so the reload below gets new bytes. */
+    var assets = { './': 1, './index.html': 1, './app.js': 1, './sw.js': 1, './style.css': 1 };
+    try {
+      document.querySelectorAll('script[src],link[rel="stylesheet"][href]').forEach(function (el) {
+        var u = el.src || el.href; // resolved absolute URL
+        if (u && typeof location !== 'undefined' && u.indexOf(location.origin) === 0) assets[u] = 1;
+      });
+    } catch (e) {
+      /* DOM unavailable — fall back to the shell list */
+    }
     await Promise.all(
-      shell.map(function (u) {
+      Object.keys(assets).map(function (u) {
         return fetch(u, { cache: 'reload' }).catch(function () {});
       })
     );

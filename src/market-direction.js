@@ -391,6 +391,14 @@ const MARKET_DIRECTION_API = {
 };
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = MARKET_DIRECTION_API;
-} else if (typeof window !== 'undefined') {
+}
+/* Set the browser global UNCONDITIONALLY (not in an `else`): if some other
+   script has defined a global `module` (a CommonJS shim, a stray top-level
+   `var module`, an injected library), the old `else if` branch never ran and
+   window.MarketDirection stayed undefined — so the chart's pro-conclusion gate
+   (`typeof MarketDirection !== 'undefined'`) failed on EVERY device, fresh ones
+   included, and silently rendered the legacy block. Assigning here too is
+   harmless in Node (window is undefined) and bulletproof in the browser. */
+if (typeof window !== 'undefined') {
   window.MarketDirection = MARKET_DIRECTION_API;
 }

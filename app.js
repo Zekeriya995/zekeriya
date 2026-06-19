@@ -7730,6 +7730,35 @@ async function nxRenderVersion() {
     ';margin-top:2px">' +
     badge +
     '</div>';
+  /* Temporary runtime diagnostic — surfaces WHY the chart conclusion may fall
+     back to legacy (MarketDirection global missing, a global `module` hijacking
+     the UMD export, or the flag turned off). Removed once confirmed fixed. */
+  try {
+    var _dxMd = typeof MarketDirection !== 'undefined' ? 'ok' : 'MISSING';
+    var _dxCle =
+      typeof MarketDirection !== 'undefined' &&
+      MarketDirection &&
+      typeof MarketDirection.candleLevelEvent === 'function'
+        ? 'ok'
+        : 'no';
+    var _dxMod = typeof module;
+    var _dxFlag =
+      typeof localStorage !== 'undefined'
+        ? localStorage.getItem('nxMktFix_pro_conclusion') || '∅'
+        : '?';
+    el.innerHTML +=
+      '<div style="font-size:8px;color:var(--t3);margin-top:3px;font-family:var(--fm)" dir="ltr">dx: MD=' +
+      _dxMd +
+      ' cle=' +
+      _dxCle +
+      ' mod=' +
+      _dxMod +
+      ' flag=' +
+      _dxFlag +
+      '</div>';
+  } catch (e) {
+    /* noop */
+  }
 }
 async function nxForceUpdate(btn) {
   if (btn && btn.tagName) {

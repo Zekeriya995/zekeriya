@@ -5679,13 +5679,19 @@ async function analyzeCoinRpt(sym){
      trader draws; suppT/resistT carry the touch count, and supp2/resist2 hold
      the next tested level for the S2/R2 rows. */
   var resist=Math.max.apply(null,h1d.length>=14?h1d.slice(-14):h4.slice(-20));var supp=Math.min.apply(null,l1d.length>=14?l1d.slice(-14):l4.slice(-20));
-  var suppT=0,resistT=0,supp2=null,resist2=null;
+  var suppT=0,resistT=0,supp2=null,resist2=null,suppProjected=false,resistProjected=false;
   if(typeof MarketDirection!=='undefined'&&MarketDirection.swingLevels&&localStorage.getItem('nxMktFix_swing_levels')!=='off'){
     try{
       var _swKl=(kl1d&&kl1d.length>=12)?kl1d:kl4h;
       var _sw=MarketDirection.swingLevels(_swKl,{price:price,left:2,right:2,tol:0.006});
-      if(_sw.support.length){supp=_sw.support[0].price;suppT=_sw.support[0].touches;if(_sw.support[1])supp2=_sw.support[1];}
+      /* RESISTANCE: a tested pivot above price wins. Else, if the recent high
+         sits clearly above price keep it (range high). Else price is breaking
+         into territory it never traded → project psychological round levels. */
       if(_sw.resistance.length){resist=_sw.resistance[0].price;resistT=_sw.resistance[0].touches;if(_sw.resistance[1])resist2=_sw.resistance[1];}
+      else if(resist<=price*1.004&&MarketDirection.roundLevels){var _rr=MarketDirection.roundLevels(price,'up',2);if(_rr.length){resist=_rr[0];resist2={price:_rr[1]||_rr[0],touches:0};resistProjected=true;}}
+      /* SUPPORT mirrors: tested pivot below → recent low → breakdown projection. */
+      if(_sw.support.length){supp=_sw.support[0].price;suppT=_sw.support[0].touches;if(_sw.support[1])supp2=_sw.support[1];}
+      else if(supp>=price*0.996&&MarketDirection.roundLevels){var _ss=MarketDirection.roundLevels(price,'down',2);if(_ss.length){supp=_ss[0];supp2={price:_ss[1]||_ss[0],touches:0};suppProjected=true;}}
     }catch(e){}
   }
   var fRng=resist-supp;if(fRng<=0)fRng=price*0.03;var f618U=price+fRng*0.618;var f100U=price+fRng;var f618D=price-fRng*0.618;
@@ -5915,7 +5921,7 @@ async function analyzeCoinRpt(sym){
   /* Aggregate liquidation data from coinalyze */
   var aggLiq=null;try{if(typeof coinalyzeLiq!=='undefined'&&coinalyzeLiq[sym])aggLiq={longVol:coinalyzeLiq[sym].longVol||0,shortVol:coinalyzeLiq[sym].shortVol||0};}catch(e){}
 
-  return{sym:sym,price:price,d:d,ts:ts,dir:dir,dCol:dCol,dIc:dIc,rsi:rsi,rsi1d:rsi1d,macd:macd,macd1d:macd1d,ema20:ema20,ema50:ema50,volT:volT,resist:resist,supp:supp,suppT:suppT,resistT:resistT,supp2:supp2,resist2:resist2,f618U:f618U,f100U:f100U,f618D:f618D,fr:fr,ls:ls,oi:OI[sym],wConf:wConf,cvd:cvd,tf:{h1:tf1h,h4:tf4h,d:tf1d,w:tfW},bullTFs:bullTFs,ch:{h1:ch1h,h4:ch4h,h24:ch24,d7:ch7d},divRSI:divRSI,divRSI1d:divRSI1d,reasons:reasons,warning:warning,bullP:bullP,bearP:bearP,neutP:neutP,bullCond:bullCond,bearCond:bearCond,bullInv:bullInv,bearInv:bearInv,sc:+sc.toFixed(1),sc10:sc10,scB:scB,rec:rec,recIc:recIc,struct:struct,bos:bos,choch:choch,riskPct:riskPct,orderBlocks:orderBlocks,fvgs:fvgs,histMatch:histMatch,liqZones:liqZones,kl4h:kl4h,kl1d:kl1d,kl1h:kl1h,
+  return{sym:sym,price:price,d:d,ts:ts,dir:dir,dCol:dCol,dIc:dIc,rsi:rsi,rsi1d:rsi1d,macd:macd,macd1d:macd1d,ema20:ema20,ema50:ema50,volT:volT,resist:resist,supp:supp,suppT:suppT,resistT:resistT,supp2:supp2,resist2:resist2,suppProjected:suppProjected,resistProjected:resistProjected,f618U:f618U,f100U:f100U,f618D:f618D,fr:fr,ls:ls,oi:OI[sym],wConf:wConf,cvd:cvd,tf:{h1:tf1h,h4:tf4h,d:tf1d,w:tfW},bullTFs:bullTFs,ch:{h1:ch1h,h4:ch4h,h24:ch24,d7:ch7d},divRSI:divRSI,divRSI1d:divRSI1d,reasons:reasons,warning:warning,bullP:bullP,bearP:bearP,neutP:neutP,bullCond:bullCond,bearCond:bearCond,bullInv:bullInv,bearInv:bearInv,sc:+sc.toFixed(1),sc10:sc10,scB:scB,rec:rec,recIc:recIc,struct:struct,bos:bos,choch:choch,riskPct:riskPct,orderBlocks:orderBlocks,fvgs:fvgs,histMatch:histMatch,liqZones:liqZones,kl4h:kl4h,kl1d:kl1d,kl1h:kl1h,
     /* NEW return fields */
     topTraders:topTraders,gLS:gLS,cbPrem:cbPrem,bfxMargin:bfxMargin,hlFunding:hlFunding,frHist:frHist,oiHist:oiHist,taker:taker,depth:depth,iceberg:iceberg,vpinData:vpinData,whalePnL:whalePnL,flowRate:flowRate,predArrow:predArrow,absorption:absorption,stableFlow:stableFlow,unlocks:unlocks,newsScore:newsScore,onChain:onChain,ethBtcRatio:ethBtcRatio,btcChange:btcChange,ethChange:ethChange,aggLiq:aggLiq}}
 
@@ -6116,12 +6122,17 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   /* ════════ SECTION 6: Key Levels Map ════════ */
   h+='<div class="mkt-section"><h3 class="mkt-section-t">🗺️ 6. '+(isAr?'المستويات الرئيسية':'Key Levels')+'</h3>';
   h+='<div class="mkt-box">';
+  var _lblN=function(touches,projected,isRes,fallback){
+    if(touches&&touches>0)return (isAr?(isRes?'مقاومة مُختبَرة':'دعم مُختبَر'):(isRes?'Tested Resistance':'Tested Support'))+' ·'+touches+'×';
+    if(projected)return isAr?(isRes?'مقاومة متوقّعة':'دعم متوقّع'):(isRes?'Projected Resistance':'Projected Support');
+    return fallback;
+  };
   var levels=[];
-  if(data.resist2)levels.push({tag:'R2',label:(isAr?'مقاومة مُختبَرة':'Tested Resistance')+(data.resist2.touches?' ·'+data.resist2.touches+'×':''),price:data.resist2.price,col:'var(--dn)'});
+  if(data.resist2)levels.push({tag:'R2',label:_lblN(data.resist2.touches,data.resistProjected,true,isAr?'مقاومة 2':'Resistance 2'),price:data.resist2.price,col:'var(--dn)'});
   else levels.push({tag:'R2',label:isAr?'هدف فيبوناتشي':'Fibonacci target',price:data.f100U,col:'var(--dn)'});
-  levels.push({tag:'R1',label:(data.resistT>0?(isAr?'مقاومة مُختبَرة':'Tested Resistance')+' ·'+data.resistT+'×':(isAr?'مقاومة / منطقة عرض':'Resistance / Supply')),price:data.resist,col:'var(--dn)'});
+  levels.push({tag:'R1',label:_lblN(data.resistT,data.resistProjected,true,isAr?'مقاومة / منطقة عرض':'Resistance / Supply'),price:data.resist,col:'var(--dn)'});
   levels.push({tag:'▶',label:isAr?'السعر الحالي':'Current Price',price:data.price,col:'var(--blue)',highlight:true});
-  levels.push({tag:'S1',label:(data.suppT>0?(isAr?'دعم مُختبَر':'Tested Support')+' ·'+data.suppT+'×':(isAr?'دعم / منطقة طلب':'Support / Demand')),price:data.supp,col:'var(--up)'});
+  levels.push({tag:'S1',label:_lblN(data.suppT,data.suppProjected,false,isAr?'دعم / منطقة طلب':'Support / Demand'),price:data.supp,col:'var(--up)'});
   if(data.ema50&&data.ema50<data.supp)levels.push({tag:'S2',label:'EMA50',price:data.ema50,col:'var(--warn)'});
   levels.sort(function(a,b){return b.price-a.price});
   levels.forEach(function(lv){
@@ -6422,17 +6433,22 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
      or R:R — this section used to conflict with the bearish conclusion
      in section 15 by always presenting "buy zones" regardless of trend. */
   h+='<div class="mkt-section"><h3 class="mkt-section-t">📍 14. '+(isAr?'المستويات الرئيسية':'Key Levels')+'</h3>';
-  /* S1/R1 are the NEAREST tested pivot levels (touches shown); S2/R2 prefer the
-     next tested pivot and fall back to a Fibonacci extension — labelled honestly
-     as a "target" so a projection is never dressed up as a tested level. */
-  var _tch=function(t){return(t&&t>0)?(' · '+t+(isAr?' لمسات':'×')):'';};
+  /* S1/R1 = nearest TESTED pivot (touches shown). S2/R2 = next tested pivot,
+     else a labelled Fibonacci target. In breakout / new-low territory (no pivot
+     on that side) the level becomes a PROJECTED psychological round number,
+     labelled "متوقّعة" — a projection is never dressed up as a tested level. */
+  var _lvlNote=function(touches,projected,isRes){
+    if(touches&&touches>0)return (isAr?(isRes?'مقاومة مُختبَرة':'دعم مُختبَر'):(isRes?'Tested resistance':'Tested support'))+' · '+touches+(isAr?' لمسات':'×');
+    if(projected)return isAr?(isRes?'مقاومة متوقّعة (رقم نفسي)':'دعم متوقّع (رقم نفسي)'):(isRes?'Projected resistance (round #)':'Projected support (round #)');
+    return isAr?(isRes?'أعلى النطاق':'أدنى النطاق'):(isRes?'Range high':'Range low');
+  };
   var levels=[];
-  if(data.resist2)levels.push({lbl:'R2',price:data.resist2.price,col:'var(--dn)',bg:'rgba(255,56,96,.06)',note:(isAr?'مقاومة مُختبَرة':'Tested resistance')+_tch(data.resist2.touches)});
+  if(data.resist2)levels.push({lbl:'R2',price:data.resist2.price,col:'var(--dn)',bg:'rgba(255,56,96,.06)',note:_lvlNote(data.resist2.touches,data.resistProjected,true)});
   else levels.push({lbl:'R2',price:data.f100U,col:'var(--dn)',bg:'rgba(255,56,96,.06)',note:isAr?'هدف فيبوناتشي (امتداد)':'Fibonacci target'});
-  levels.push({lbl:'R1',price:data.resist,col:'var(--dn)',bg:'rgba(255,56,96,.04)',note:(data.resistT>0?(isAr?'مقاومة مُختبَرة':'Tested resistance'):(isAr?'أعلى النطاق':'Range high'))+_tch(data.resistT)});
+  levels.push({lbl:'R1',price:data.resist,col:'var(--dn)',bg:'rgba(255,56,96,.04)',note:_lvlNote(data.resistT,data.resistProjected,true)});
   levels.push({lbl:isAr?'السعر الحالي':'Current',price:data.price,col:'var(--blue)',bg:'rgba(91,156,255,.08)',note:isAr?'مرجع حالي':'Current reference'});
-  levels.push({lbl:'S1',price:data.supp,col:'var(--up)',bg:'rgba(0,255,136,.04)',note:(data.suppT>0?(isAr?'دعم مُختبَر':'Tested support'):(isAr?'أدنى النطاق':'Range low'))+_tch(data.suppT)});
-  if(data.supp2)levels.push({lbl:'S2',price:data.supp2.price,col:'var(--up)',bg:'rgba(0,255,136,.06)',note:(isAr?'دعم مُختبَر':'Tested support')+_tch(data.supp2.touches)});
+  levels.push({lbl:'S1',price:data.supp,col:'var(--up)',bg:'rgba(0,255,136,.04)',note:_lvlNote(data.suppT,data.suppProjected,false)});
+  if(data.supp2)levels.push({lbl:'S2',price:data.supp2.price,col:'var(--up)',bg:'rgba(0,255,136,.06)',note:_lvlNote(data.supp2.touches,data.suppProjected,false)});
   else levels.push({lbl:'S2',price:data.f618D,col:'var(--up)',bg:'rgba(0,255,136,.06)',note:isAr?'هدف فيبوناتشي (امتداد)':'Fibonacci target'});
   levels.forEach(function(lv){
     h+='<div style="padding:8px 10px;background:'+lv.bg+';border:1px solid '+lv.col+'20;border-left:3px solid '+lv.col+';border-radius:8px;margin-bottom:4px;display:flex;justify-content:space-between;align-items:center">';

@@ -401,3 +401,30 @@ test('swingLevels — nearest level comes first on each side', () => {
     );
   }
 });
+
+/* ── roundLevels (psychological levels for breakout / new-high territory) ── */
+
+test('roundLevels — scales the step with price magnitude', () => {
+  assert.deepEqual(md.roundLevels(80000, 'up', 3), [85000, 90000, 95000]); // $5k steps
+  assert.deepEqual(md.roundLevels(80000, 'down', 2), [75000, 70000]);
+  assert.deepEqual(md.roundLevels(3000, 'up', 2), [3200, 3400]); // $200 steps
+});
+
+test('roundLevels — nearest level is strictly beyond the price', () => {
+  const up = md.roundLevels(63036, 'up', 1)[0];
+  const down = md.roundLevels(63036, 'down', 1)[0];
+  assert.ok(up > 63036, 'up level is above price');
+  assert.ok(down < 63036, 'down level is below price');
+});
+
+test('roundLevels — small-cap prices get proportional steps', () => {
+  const r = md.roundLevels(0.5, 'up', 2);
+  assert.equal(r.length, 2);
+  assert.ok(r[0] > 0.5 && r[0] < 0.6, 'first level just above $0.50');
+});
+
+test('roundLevels — non-finite / zero price degrades to empty', () => {
+  assert.deepEqual(md.roundLevels(0, 'up', 2), []);
+  assert.deepEqual(md.roundLevels(NaN, 'up', 2), []);
+  assert.deepEqual(md.roundLevels(-5, 'up', 2), []);
+});

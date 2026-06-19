@@ -442,6 +442,52 @@
     return { support, resistance };
   }
 
+  /* niceStep — a "round" increment ~5% of price, snapped to 1/2/5/10 × 10^k, so
+     psychological levels scale with magnitude (BTC $80k → $5k steps; a $0.50 coin
+     → $0.02). Internal. */
+  function niceStep(price) {
+    const p = Math.abs(Number(price));
+    if (!(p > 0)) return 0;
+    const target = p * 0.05;
+    const mag = Math.pow(10, Math.floor(Math.log10(target)));
+    const norm = target / mag;
+    let s;
+    if (norm < 1.5) s = 1;
+    else if (norm < 3.5) s = 2;
+    else if (norm < 7.5) s = 5;
+    else s = 10;
+    return s * mag;
+  }
+
+  /* roundLevels — psychological round-number levels above ('up') or below
+     ('down') a price. Used when price breaks into territory it has never traded
+     (a fresh high / low), where there are NO tested pivots on that side — the
+     market then leans on round numbers ($85k, $90k, $100k…). Pure: price + dir
+     + count in, an array of level prices (nearest first) out. */
+  function roundLevels(price, dir, count) {
+    const p = Number(price);
+    const cnt = Number.isFinite(count) ? count : 2;
+    const step = niceStep(p);
+    if (!(step > 0) || !Number.isFinite(p) || p <= 0) return [];
+    const out = [];
+    if (dir === 'down') {
+      let lvl = Math.floor(p / step) * step;
+      if (lvl >= p) lvl -= step;
+      while (out.length < cnt && lvl > 0) {
+        out.push(Math.round(lvl / step) * step);
+        lvl -= step;
+      }
+    } else {
+      let lvl = Math.ceil(p / step) * step;
+      if (lvl <= p) lvl += step;
+      while (out.length < cnt) {
+        out.push(Math.round(lvl / step) * step);
+        lvl += step;
+      }
+    }
+    return out;
+  }
+
   const MARKET_DIRECTION_API = {
     TS_STRONG_BULL,
     TS_BULL,
@@ -460,6 +506,7 @@
     candleLevelEvent,
     regimeAwareThesis,
     swingLevels,
+    roundLevels,
   };
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = MARKET_DIRECTION_API;

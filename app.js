@@ -7730,39 +7730,6 @@ async function nxRenderVersion() {
     ';margin-top:2px">' +
     badge +
     '</div>';
-  /* Temporary runtime diagnostic — surfaces WHY the chart conclusion may fall
-     back to legacy (MarketDirection global missing, a global `module` hijacking
-     the UMD export, or the flag turned off). Removed once confirmed fixed. */
-  try {
-    var _dxMd = typeof MarketDirection !== 'undefined' ? 'ok' : 'MISSING';
-    var _dxCle =
-      typeof MarketDirection !== 'undefined' &&
-      MarketDirection &&
-      typeof MarketDirection.candleLevelEvent === 'function'
-        ? 'ok'
-        : 'no';
-    var _dxMod = typeof module;
-    var _dxFlag =
-      typeof localStorage !== 'undefined'
-        ? localStorage.getItem('nxMktFix_pro_conclusion') || '∅'
-        : '?';
-    el.innerHTML +=
-      '<div style="font-size:8px;color:var(--t3);margin-top:3px;font-family:var(--fm)" dir="ltr">dx: MD=' +
-      _dxMd +
-      ' cle=' +
-      _dxCle +
-      ' mod=' +
-      _dxMod +
-      ' flag=' +
-      _dxFlag +
-      '<br>load=' +
-      (typeof window !== 'undefined' && window.__nxMdLoad ? window.__nxMdLoad : 'pending') +
-      ' err=' +
-      (typeof window !== 'undefined' && window.__nxLastJsErr ? window.__nxLastJsErr : 'none') +
-      '</div>';
-  } catch (e) {
-    /* noop */
-  }
 }
 async function nxForceUpdate(btn) {
   if (btn && btn.tagName) {
@@ -7823,32 +7790,6 @@ if (typeof window !== 'undefined') {
   window.nxForceUpdate = nxForceUpdate;
   window.nxRenderVersion = nxRenderVersion;
 }
-/* TEMP diagnostic: capture JS load/parse errors so the dx line can report WHY a
-   module (MarketDirection) failed to define its global — set BEFORE the self-heal
-   re-injects the script, so a parse/runtime error in the re-injected copy is
-   caught here. Removed once the root cause is fixed. */
-if (typeof window !== 'undefined' && !window.__nxErrHook) {
-  window.__nxErrHook = true;
-  window.__nxLastJsErr = '';
-  window.addEventListener(
-    'error',
-    function (ev) {
-      try {
-        if (ev && ev.filename && /\.js(\?|$)/.test(ev.filename)) {
-          window.__nxLastJsErr =
-            (ev.message || 'err').slice(0, 60) +
-            '@' +
-            ev.filename.split('/').pop().split('?')[0] +
-            ':' +
-            (ev.lineno || '?');
-        }
-      } catch (e) {
-        /* noop */
-      }
-    },
-    true
-  );
-}
 /* ─── Self-heal a missing module ──────────────────────────────────────
    A stale, cached index.html can omit a newer module's <script> tag while
    app.js itself is fresh — leaving the module's global undefined. That is the
@@ -7864,19 +7805,7 @@ function nxEnsureModule(globalName, src, onReady) {
   s.src = src + (src.indexOf('?') === -1 ? '?' : '&') + 'heal=' + Date.now();
   s.onload = function () {
     try {
-      window.__nxMdLoad = typeof window[globalName] !== 'undefined' ? 'onload+set' : 'onload-NOTset';
-    } catch (e) {
-      /* noop */
-    }
-    try {
       if (onReady) onReady();
-    } catch (e) {
-      /* noop */
-    }
-  };
-  s.onerror = function () {
-    try {
-      window.__nxMdLoad = 'onerror(404/net)';
     } catch (e) {
       /* noop */
     }

@@ -323,3 +323,81 @@ test('regimeAwareThesis — missing/!shaped regime is a safe no-op (unknown)', (
   assert.equal(bad.state, 'unknown');
   assert.equal(bad.conviction, 0); // non-finite conviction → 0
 });
+
+/* ── swingLevels (tested support/resistance from pivots) ───────────────── */
+
+function _bar(h, l) {
+  return [0, 0, h, l, 0, 0];
+}
+
+test('swingLevels — finds pivot high/low and splits by current price', () => {
+  /* a clean swing high near 112 and swing low near 88, price now 100 */
+  const rows = [
+    _bar(102, 98),
+    _bar(108, 100),
+    _bar(112, 104), // pivot high
+    _bar(108, 100),
+    _bar(101, 95),
+    _bar(95, 90),
+    _bar(98, 86), // pivot low
+    _bar(96, 90),
+    _bar(103, 95),
+    _bar(110, 103),
+    _bar(116, 108), // pivot high
+    _bar(109, 101),
+    _bar(100, 94),
+  ];
+  const r = md.swingLevels(rows, { price: 100, left: 2, right: 2, tol: 0.01 });
+  assert.ok(r.resistance.length >= 1, 'should find resistance above price');
+  assert.ok(r.support.length >= 1, 'should find support below price');
+  assert.ok(r.resistance[0].price > 100, 'resistance is above price');
+  assert.ok(r.support[0].price < 100, 'support is below price');
+});
+
+test('swingLevels — clusters nearby pivots and counts touches', () => {
+  /* two highs at ~112 and ~113 (within tol) collapse into one level, touches=2 */
+  const rows = [
+    _bar(100, 95),
+    _bar(106, 100),
+    _bar(112, 104), // pivot high #1
+    _bar(106, 100),
+    _bar(101, 96),
+    _bar(107, 100),
+    _bar(113, 105), // pivot high #2 (near #1)
+    _bar(107, 100),
+    _bar(100, 94),
+  ];
+  const r = md.swingLevels(rows, { price: 90, left: 2, right: 2, tol: 0.02 });
+  const top = r.resistance.find((c) => c.touches >= 2);
+  assert.ok(top, 'the two close highs cluster into one level with touches>=2');
+  assert.ok(top.price > 110 && top.price < 114, 'clustered price is the average');
+});
+
+test('swingLevels — empty / non-array / no price degrade safely', () => {
+  assert.deepEqual(md.swingLevels([], { price: 100 }), { support: [], resistance: [] });
+  assert.deepEqual(md.swingLevels(null, { price: 100 }), { support: [], resistance: [] });
+  /* no finite price → can't split → both empty */
+  const r = md.swingLevels([_bar(110, 90), _bar(120, 100), _bar(108, 95)], {});
+  assert.deepEqual(r, { support: [], resistance: [] });
+});
+
+test('swingLevels — nearest level comes first on each side', () => {
+  const rows = [
+    _bar(100, 95),
+    _bar(130, 100),
+    _bar(150, 120), // far high
+    _bar(130, 100),
+    _bar(101, 96),
+    _bar(118, 100),
+    _bar(125, 108), // near high
+    _bar(118, 100),
+    _bar(100, 94),
+  ];
+  const r = md.swingLevels(rows, { price: 110, left: 2, right: 2, tol: 0.005 });
+  if (r.resistance.length >= 2) {
+    assert.ok(
+      r.resistance[0].price < r.resistance[1].price,
+      'nearest resistance (lower) is listed first'
+    );
+  }
+});

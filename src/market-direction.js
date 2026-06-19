@@ -381,6 +381,67 @@
     };
   }
 
+  /* swingLevels — TESTED support/resistance from real pivots (fractals) instead
+     of the raw N-bar high/low. A pivot high tops the `left` bars before and
+     `right` bars after it; a pivot low mirrors that. Nearby pivots are clustered
+     (within `tol`) into a level whose `touches` count is how many times price
+     reversed there — the chart-trader's notion of a real level, and it captures
+     S/R polarity flips (a broken resistance becomes support). Returns support
+     (clusters below `price`, nearest first) and resistance (above, nearest
+     first). Pure: klines [t,o,h,l,c,…] + opts in, levels out. */
+  function swingLevels(klines, opts) {
+    const o = opts || {};
+    const left = Number.isFinite(o.left) ? o.left : 2;
+    const right = Number.isFinite(o.right) ? o.right : 2;
+    const tol = Number.isFinite(o.tol) ? o.tol : 0.006;
+    const price = Number(o.price);
+    const kl = Array.isArray(klines) ? klines : [];
+    const pivots = [];
+    for (let i = left; i < kl.length - right; i++) {
+      const row = kl[i];
+      if (!row) continue;
+      const h = Number(row[2]);
+      const l = Number(row[3]);
+      if (!Number.isFinite(h) || !Number.isFinite(l)) continue;
+      let isHigh = true;
+      let isLow = true;
+      for (let j = i - left; j <= i + right; j++) {
+        if (j === i || !kl[j]) continue;
+        const hj = Number(kl[j][2]);
+        const lj = Number(kl[j][3]);
+        if (Number.isFinite(hj) && hj >= h) isHigh = false;
+        if (Number.isFinite(lj) && lj <= l) isLow = false;
+      }
+      if (isHigh) pivots.push(h);
+      if (isLow) pivots.push(l);
+    }
+    /* cluster sorted pivot prices into { price (avg), touches } within tol */
+    const sorted = pivots.slice().sort((a, b) => a - b);
+    const clusters = [];
+    sorted.forEach((p) => {
+      const last = clusters[clusters.length - 1];
+      const lastAvg = last ? last.sum / last.touches : 0;
+      if (last && Math.abs(p - lastAvg) <= lastAvg * tol) {
+        last.sum += p;
+        last.touches += 1;
+      } else {
+        clusters.push({ sum: p, touches: 1 });
+      }
+    });
+    const support = [];
+    const resistance = [];
+    if (Number.isFinite(price)) {
+      clusters.forEach((c) => {
+        const lvl = { price: round1(c.sum / c.touches), touches: c.touches };
+        if (lvl.price < price) support.push(lvl);
+        else if (lvl.price > price) resistance.push(lvl);
+      });
+    }
+    support.sort((a, b) => b.price - a.price); // nearest below first
+    resistance.sort((a, b) => a.price - b.price); // nearest above first
+    return { support, resistance };
+  }
+
   const MARKET_DIRECTION_API = {
     TS_STRONG_BULL,
     TS_BULL,
@@ -398,6 +459,7 @@
     priceTargets,
     candleLevelEvent,
     regimeAwareThesis,
+    swingLevels,
   };
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = MARKET_DIRECTION_API;

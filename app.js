@@ -7790,6 +7790,56 @@ if (typeof window !== 'undefined') {
   window.nxForceUpdate = nxForceUpdate;
   window.nxRenderVersion = nxRenderVersion;
 }
+/* ─── Self-heal a missing module ──────────────────────────────────────
+   A stale, cached index.html can omit a newer module's <script> tag while
+   app.js itself is fresh — leaving the module's global undefined. That is the
+   exact "market-direction conclusion stuck on the legacy block because
+   MarketDirection never loaded" bug seen in the field: the SW served an old
+   index.html, the tag was absent, the chart fell back. If the global is
+   missing, load the module directly with a cache-bust and re-render the chart
+   so the new code takes effect WITHOUT a manual cache wipe. */
+function nxEnsureModule(globalName, src, onReady) {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  if (typeof window[globalName] !== 'undefined') return;
+  var s = document.createElement('script');
+  s.src = src + (src.indexOf('?') === -1 ? '?' : '&') + 'heal=' + Date.now();
+  s.onload = function () {
+    try {
+      if (onReady) onReady();
+    } catch (e) {
+      /* noop */
+    }
+  };
+  document.head.appendChild(s);
+}
+function nxSelfHealModules() {
+  nxEnsureModule('MarketDirection', 'src/market-direction.js', function () {
+    /* drop the cached chart render so the conclusion rebuilds with the
+       now-present MarketDirection, then refresh whichever tab is showing. */
+    try {
+      btcCache.t = 0;
+      ethCache.t = 0;
+    } catch (e) {
+      /* noop */
+    }
+    try {
+      var pg = document.getElementById('pg-market');
+      if (pg && pg.classList.contains('act')) {
+        if (typeof curMktTab !== 'undefined' && curMktTab === 1) {
+          if (typeof loadETHChart === 'function') loadETHChart();
+        } else if (typeof loadBTCChart === 'function') loadBTCChart();
+      }
+    } catch (e) {
+      /* noop */
+    }
+  });
+}
+if (typeof window !== 'undefined') window.nxSelfHealModules = nxSelfHealModules;
+try {
+  nxSelfHealModules();
+} catch (e) {
+  /* noop */
+}
 /* Delegated event dispatcher (foundation for P3.3 phase A) — when an
    element carries data-action="fnName", a single click listener on
    document looks the function up on `window`, splits data-args on '|'
@@ -7881,6 +7931,11 @@ if ('serviceWorker' in navigator) {
 setTimeout(function () {
   try {
     nxRenderVersion();
+  } catch (e) {
+    /* noop */
+  }
+  try {
+    nxSelfHealModules();
   } catch (e) {
     /* noop */
   }

@@ -6464,11 +6464,14 @@ function buildChartHTML(data, coinColor, coinIcon, coinName){
   else if(_ev.event==='break_up')_leadWhy=isAr?'أغلق '+cn+' شمعة '+_evTf+' فوق مقاومة '+rP(_ev.level)+' — اختراقٌ مؤكد ينقل السيطرة إلى المشترين فوق هذا المستوى.':cn+' closed a '+_evTf+' candle above resistance '+rP(_ev.level)+' — a confirmed breakout handing control to buyers above here.';
   else _leadWhy=isAr?cn+' يتداول داخل نطاق '+rP(data.supp)+' – '+rP(data.resist)+' دون كسر مؤكد بعد؛ والميل الحالي ('+data.dir+') مدفوع بالزخم والتموضع أدناه.':cn+' is trading inside the '+rP(data.supp)+'–'+rP(data.resist)+' range with no confirmed break yet; the current lean ('+data.dir+') is driven by momentum and positioning below.';
   /* downside / upside target ladders, proximity-ordered (priceTargets). f100D
-     mirrors f100U around price (analyzeCoinRpt ships f100U, not f100D). */
+     mirrors f100U around price (analyzeCoinRpt ships f100U, not f100D). The
+     downside ladder drops any level >= support and the upside ladder drops any
+     level <= resistance, so the broken trigger level never lists itself as its
+     own first target (e.g. "break $59,500 → $59,500 → …"). */
   var _f100D=2*data.price-data.f100U;
   var _tg=MarketDirection.priceTargets(data.price,[{price:data.supp},{price:data.resist},{price:data.f618U},{price:data.f100U},{price:data.f618D},{price:_f100D}]);
   var _lad=function(a,nM){return a.slice(0,nM||3).map(function(x){return rP(x.price);}).join(' → ');};
-  var _downLad=_lad(_tg.down,3),_upLad=_lad(_tg.up,3);
+  var _downLad=_lad(_tg.down.filter(function(x){return x.price<data.supp;}),3),_upLad=_lad(_tg.up.filter(function(x){return x.price>data.resist;}),3);
   /* ── primary drivers (price / momentum / structure) ── */
   var _primary=[];
   if(data.price>data.ema20&&data.price>data.ema50)_primary.push(isAr?'السعر فوق EMA20/50 ('+rP(data.ema20)+' / '+rP(data.ema50)+') — هيكل المتوسطات صاعد':'Price above EMA20/50 ('+rP(data.ema20)+' / '+rP(data.ema50)+') — MA structure up');
